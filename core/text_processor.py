@@ -7,18 +7,18 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# The prompt template for the LLM to extract a location from the article text.
 _LOCATION_PROMPT_TEMPLATE = """\
-אתה מנתח כתבות חדשות בעברית ומחלץ מהן שם מקום גיאוגרפי יחיד (עיר, יישוב, יער, הר או אזור בישראל) \
-שבו מתרחש אירוע השרפה המתואר.
+You are a news analyst parsing Hebrew news articles to extract a single geographical location (city, settlement, forest, mountain, or region in Israel) where the described wildfire event is taking place.
 
-כללים:
-- החזר אך ורק אובייקט JSON תקין, ללא טקסט נוסף, ללא markdown וללא הסברים.
-- הפורמט חייב להיות בדיוק: {{"locationName": "<שם המקום>"}}
-- נקה את שם המקום מתחיליות יחס בעברית כגון "ב", "ל", "מ" (למשל "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
-- אם לא מוזכר מקום ספציפי בטקסט, החזר: {{"locationName": null}}
+Rules:
+- Return ONLY a valid JSON object, with no extra text, no markdown, and no explanations.
+- The format must be exactly: {{"locationName": "<location_name>"}}
+- Clean Hebrew prepositions from the beginning of the location name (e.g., "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
+- If no specific location is mentioned in the text, return: {{"locationName": null}}
 
-כותרת: {title}
-תקציר: {summary}
+Title: {title}
+Summary: {summary}
 """
 
 
@@ -62,6 +62,7 @@ class TextProcessor:
             logger.exception("LLM location extraction failed for title: %r", title[:80])
             return None
 
+    # Call the Groq API (or Gemini) to extract location information from the article.
     def _call_groq(self, prompt: str) -> str:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -98,6 +99,7 @@ class TextProcessor:
         response.raise_for_status()
         return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
+    # Parse the raw LLM response into a location name. Returns None on any failure or if no location is found.
     @staticmethod
     def _parse_location(raw_content: str) -> str | None:
         content = raw_content.strip()

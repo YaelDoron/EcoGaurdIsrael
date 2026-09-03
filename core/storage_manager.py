@@ -7,6 +7,7 @@ from models.report import WildfireReport
 
 logger = logging.getLogger(__name__)
 
+# SQLite schema for the wildfire_reports table. The source_url is unique to prevent duplicates.
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS wildfire_reports (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS wildfire_reports (
 )
 """
 
-
+# Initialization of the SQLite database and creation of the wildfire_reports table is handled in the StorageManager constructor.
 class StorageManager:
     def __init__(self, db_path: str):
         self.db_path = db_path
@@ -34,6 +35,7 @@ class StorageManager:
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
+    # Check if a report with the given source_url already exists in the database.
     def exists(self, source_url: str) -> bool:
         conn = self._connect()
         try:
@@ -44,6 +46,7 @@ class StorageManager:
             conn.close()
         return row is not None
 
+    # Save a new wildfire report to the database. Returns True if the report was saved, False if it was a duplicate.
     def save_report(self, report: WildfireReport) -> bool:
         """Insert a new report. Returns False (without raising) if it's a duplicate."""
         conn = self._connect()

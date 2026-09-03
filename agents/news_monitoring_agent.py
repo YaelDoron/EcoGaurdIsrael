@@ -14,18 +14,22 @@ from models.report import WildfireReport
 
 logger = logging.getLogger(__name__)
 
-
+# Initialization of the NewsMonitoringAgent involves loading configuration, setting up logging, 
+# and initializing components for RSS fetching, text processing, geocoding, and storage management.
 class NewsMonitoringAgent:
     def __init__(self, config_path: str | None = None):
+        # Load the YAML configuration file
         self.config = load_config(config_path) if config_path else load_config()
         self._setup_logging()
 
+        # Instance of all the components needed for the agent's operation
         self.rss_fetcher = RSSFetcher(self.config["rss_feeds"])
         self.text_processor = TextProcessor(self.config["keywords"], self.config["llm"])
         self.geocoder = Geocoder(self.config["geocoding"])
         self.storage = StorageManager(self.config["storage"]["db_path"])
         self.interval_seconds = self.config["scraping"]["interval_seconds"]
 
+    # Sets up logging based on the configuration, allowing for console and optional file logging.
     def _setup_logging(self) -> None:
         log_config = self.config.get("logging", {})
         handlers = [logging.StreamHandler()]
@@ -39,10 +43,13 @@ class NewsMonitoringAgent:
             force=True,
         )
 
+    # The cycle of fetching, filtering, extracting, geocoding, and storing is encapsulated in this method.
     def run_once(self) -> int:
         """Runs a single fetch-filter-extract-geocode-store cycle. Returns the number
         of new reports saved."""
+        # Fetch all entries from the configured RSS feeds
         entries = self.rss_fetcher.fetch_all()
+        # Filter entries based on relevance to the configured keywords using the TextProcessor
         relevant_entries = [
             e for e in entries if self.text_processor.is_relevant(e["title"], e["summary"])
         ]
@@ -57,6 +64,8 @@ class NewsMonitoringAgent:
             location_name = self.text_processor.extract_location(entry["title"], entry["summary"])
             latitude, longitude = self.geocoder.geocode(location_name)
 
+            # Create a WildfireReport object with the extracted and geocoded information
+            # The object is saved to the database.
             report = WildfireReport(
                 source_url=source_url,
                 source_feed=entry["source_feed"],
@@ -82,6 +91,7 @@ class NewsMonitoringAgent:
         logger.info("Cycle complete: %d new reports saved", saved_count)
         return saved_count
 
+    # Continuously runs the monitoring cycle at the configured inteval.
     def run_forever(self) -> None:
         logger.info(
             "NewsMonitoringAgent starting, polling every %d seconds", self.interval_seconds

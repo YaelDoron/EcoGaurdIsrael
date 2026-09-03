@@ -6,23 +6,24 @@ import feedparser
 
 logger = logging.getLogger(__name__)
 
-
+# Initialization of the RSSFetcher is handled in the NewsMonitoringAgent constructor.
 class RSSFetcher:
     def __init__(self, feeds: list[dict[str, str]]):
         self.feeds = feeds
 
+    # Fetch every configured feed and return a flat list of all the reports.
     def fetch_all(self) -> list[dict[str, Any]]:
         """Fetch every configured feed and return a flat list of raw entries."""
         entries: list[dict[str, Any]] = []
         for feed in self.feeds:
             name, url = feed["name"], feed["url"]
             try:
-                parsed = feedparser.parse(url)
+                parsed = feedparser.parse(url) # Feedparser analyzes the feed and returns a structured object.
             except Exception:
                 logger.exception("Failed to fetch feed '%s' (%s)", name, url)
                 continue
 
-            if parsed.bozo and not parsed.entries:
+            if parsed.bozo and not parsed.entries: # If one of the sites is down or there is an internal error, log a warning and skip to the next feed.
                 logger.warning(
                     "Feed '%s' returned no usable entries: %s",
                     name,
@@ -30,6 +31,7 @@ class RSSFetcher:
                 )
                 continue
 
+            # For each entry in the feed, extract the relevant fields and append to the entries list.
             for entry in parsed.entries:
                 entries.append(
                     {

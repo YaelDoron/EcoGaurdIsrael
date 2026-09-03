@@ -7,7 +7,8 @@ from geopy.geocoders import Nominatim
 
 logger = logging.getLogger(__name__)
 
-
+# This module provides a Geocoder class that uses the Nominatim service from OpenStreetMap
+#  to convert location names into latitude and longitude coordinates.
 class Geocoder:
     def __init__(self, config: dict):
         geolocator = Nominatim(
@@ -39,5 +40,5 @@ class Geocoder:
         if result is None:
             logger.warning("Geocoding found no match for location: '%s'", location_name)
             return None, None
-
+        # If we reach this point, we have a valid geocoding result.
         return result.latitude, result.longitude
