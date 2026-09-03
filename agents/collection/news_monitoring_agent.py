@@ -6,10 +6,9 @@ import time
 from datetime import datetime, timezone
 
 from config.config import load_config
-from external.geocoding.geocoder import Geocoder
-from external.news.rss_fetcher import RSSFetcher
+from external.geocoding.geocoding_client import Geocoder
+from external.news.news_client import RSSFetcher, TextProcessor
 from repositories.fire_report_repository import StorageManager
-from external.news.text_processor import TextProcessor
 from models.fire_report import WildfireReport
 
 logger = logging.getLogger(__name__)
