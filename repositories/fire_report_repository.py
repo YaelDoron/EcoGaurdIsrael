@@ -3,7 +3,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from models.report import WildfireReport
+from models.fire_report import WildfireReport
 
 logger = logging.getLogger(__name__)
 

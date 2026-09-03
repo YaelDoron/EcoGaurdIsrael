@@ -1,5 +1,5 @@
 """Entry point: runs and orchestrates the wildfire management system agents."""
-from agents.news_monitoring_agent import NewsMonitoringAgent
+from agents.collection.news_monitoring_agent import NewsMonitoringAgent
 
 if __name__ == "__main__":
     # Run the news monitoring agent in a loop

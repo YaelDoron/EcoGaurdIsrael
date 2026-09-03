@@ -5,12 +5,12 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from core.config import load_config
-from core.geocoder import Geocoder
-from core.rss_fetcher import RSSFetcher
-from core.storage_manager import StorageManager
-from core.text_processor import TextProcessor
-from models.report import WildfireReport
+from config.config import load_config
+from external.geocoding.geocoder import Geocoder
+from external.news.rss_fetcher import RSSFetcher
+from repositories.fire_report_repository import StorageManager
+from external.news.text_processor import TextProcessor
+from models.fire_report import WildfireReport
 
 logger = logging.getLogger(__name__)
 
