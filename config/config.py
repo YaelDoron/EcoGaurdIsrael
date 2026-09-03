@@ -5,7 +5,7 @@ from typing import Any
 import yaml
 from dotenv import load_dotenv
 
-DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent.parent / "configs" / "news_config.yaml"
+DEFAULT_CONFIG_PATH = Path(__file__).resolve().parent / "news_config.yaml"
 
 # Load the configuration from the specified YAML file and environment variables
 def load_config(config_path: str | Path = DEFAULT_CONFIG_PATH) -> dict[str, Any]:
