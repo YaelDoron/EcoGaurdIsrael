@@ -1,0 +1,44 @@
+# EcoGuardIsrael - NewsMonitoringAgent configuration
+# Non-secret settings live here. Secrets (API keys) go in .env instead.
+
+rss_feeds:
+  - name: "Ynet"
+    url: "https://www.ynet.co.il/Integration/StoryRss2.xml"
+  - name: "Walla News"
+    url: "https://rss.walla.co.il/feed/22"
+  - name: "Mako"
+    url: "https://rcs.mako.co.il/rss/news-israel.xml"
+
+keywords:
+  - "שריפה"
+  - "שרפה"
+  - "דליקה"
+  - "יער"
+  - "כבאות"
+  - "כבאים"
+  - "אש"
+
+scraping:
+  interval_seconds: 300      # how often run_forever() polls the feeds
+  request_timeout_seconds: 10
+
+llm:
+  provider: "groq"           # "groq" or "gemini"
+  model: "llama-3.1-8b-instant"
+  api_key_env: "GROQ_API_KEY" # name of the env var holding the key (see .env)
+  temperature: 0.0
+  max_tokens: 100
+  request_timeout_seconds: 15
+
+geocoding:
+  user_agent: "EcoGuardIsrael-NewsMonitoringAgent/1.0 (contact@example.com)"
+  country_bias: "il"         # bias/restrict results to Israel
+  timeout_seconds: 10
+  min_delay_seconds: 1       # Nominatim usage policy: max 1 req/sec
+
+storage:
+  db_path: "data/wildfire_reports.db"
+
+logging:
+  level: "INFO"
+  file: "logs/news_monitoring_agent.log"
