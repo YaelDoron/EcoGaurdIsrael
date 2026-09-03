@@ -1,0 +1,47 @@
+# EcoGuardIsrael - NewsMonitoringAgent configuration
+
+# The news sites to monitor for wildfire-related news.
+rss_feeds:
+  - name: "Ynet"
+    url: "https://www.ynet.co.il/Integration/StoryRss2.xml"
+  - name: "Walla News"
+    url: "https://rss.walla.co.il/feed/22"
+  - name: "Mako"
+    url: "https://rcs.mako.co.il/rss/news-israel.xml"
+
+# The keywords to look for in the news articles. The agent will only process articles that contain at least one of these keywords.
+keywords:
+  - "שריפה"
+  - "שרפה"
+  - "דליקה"
+  - "יער"
+  - "כבאות"
+  - "כבאים"
+  - "אש"
+
+# The configuration for the news monitoring agent.
+scraping:
+  interval_seconds: 300      # how often run_forever() polls the feeds
+  request_timeout_seconds: 10
+
+# The configuration for the LLM used to analyze the news articles.
+llm:
+  provider: "groq"           # "groq" or "gemini"
+  model: "llama-3.1-8b-instant"
+  api_key_env: "GROQ_API_KEY" # name of the env var holding the key (see .env)
+  temperature: 0.0
+  max_tokens: 100
+  request_timeout_seconds: 15
+
+# Geocoding settings for converting location names to geographic coordinates via Nominatimgeocoding:
+  user_agent: "EcoGuardIsrael-NewsMonitoringAgent/1.0 (yaeldoron32123@gmail.com)" # Mail is required by Nominatim policy- if there's an issue with request rates
+  country_bias: "il"         
+  timeout_seconds: 10
+  min_delay_seconds: 1 # Nominatim usage policy: max 1 req/sec
+
+storage:
+  db_path: "data/wildfire_reports.db" # Path to the SQLite database for storing wildfire reports
+
+logging:
+  level: "INFO"
+  file: "logs/news_monitoring_agent.log" # Path to the log file for the news monitoring agent
