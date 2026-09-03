@@ -1,0 +1,86 @@
+{
+  "station": {
+    "stationId": 17,
+    "name": "TEST STATION",
+    "active": true,
+    "location": {
+      "latitude": 32.79,
+      "longitude": 34.99
+    },
+    "regionId": 3
+  },
+  "stations_list": [
+    {
+      "stationId": 17,
+      "name": "TEST STATION",
+      "active": true,
+      "location": {
+        "latitude": 32.79,
+        "longitude": 34.99
+      },
+      "regionId": 3
+    },
+    {
+      "stationId": 21,
+      "name": "SECOND STATION",
+      "active": true,
+      "location": {
+        "latitude": 31.5,
+        "longitude": 35.1
+      },
+      "regionId": 5
+    }
+  ],
+  "observation": {
+    "stationId": 17,
+    "datetime": "2026-09-02T12:30:00",
+    "channels": [
+      {
+        "name": "TD",
+        "value": 31.4,
+        "valid": true
+      },
+      {
+        "name": "RH",
+        "value": 42,
+        "valid": true
+      },
+      {
+        "name": "WS",
+        "value": 5.8,
+        "valid": true
+      },
+      {
+        "name": "WD",
+        "value": 240,
+        "valid": true
+      },
+      {
+        "name": "WSmax",
+        "value": 8.2,
+        "valid": true
+      },
+      {
+        "name": "Rain",
+        "value": 0,
+        "valid": true
+      }
+    ]
+  },
+  "observation_missing_measurement": {
+    "stationId": 17,
+    "datetime": "2026-09-02T12:30:00",
+    "channels": [
+      {
+        "name": "TD",
+        "value": 31.4,
+        "valid": true
+      },
+      {
+        "name": "RH",
+        "value": null,
+        "valid": false
+      }
+    ]
+  }
+}
