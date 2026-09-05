@@ -5,6 +5,8 @@ the mapper layer) and independent of any future persistence technology - no
 database id exists yet; that is added when SQLAlchemy persistence is
 introduced in a later task.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 

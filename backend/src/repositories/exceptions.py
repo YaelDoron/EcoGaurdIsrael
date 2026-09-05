@@ -7,3 +7,7 @@ class WeatherRepositoryError(Exception):
 
 class WeatherStationNotStoredError(WeatherRepositoryError):
     """Raised when an observation references a station that has not been saved yet."""
+
+
+class SatelliteHotspotRepositoryError(Exception):
+    """Base exception for satellite hotspot repository errors."""

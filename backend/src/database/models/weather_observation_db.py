@@ -8,7 +8,7 @@ between them.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -38,11 +38,11 @@ class WeatherObservationDB(Base):
     )
     timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
 
-    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
-    relative_humidity: Mapped[float | None] = mapped_column(Float, nullable=True)
-    wind_speed: Mapped[float | None] = mapped_column(Float, nullable=True)
-    wind_direction: Mapped[float | None] = mapped_column(Float, nullable=True)
-    wind_gust: Mapped[float | None] = mapped_column(Float, nullable=True)
-    rainfall: Mapped[float | None] = mapped_column(Float, nullable=True)
+    temperature: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    relative_humidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_direction: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_gust: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rainfall: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     station: Mapped["WeatherStationDB"] = relationship(back_populates="observations")
