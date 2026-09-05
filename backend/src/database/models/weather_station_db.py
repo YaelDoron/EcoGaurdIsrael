@@ -6,7 +6,7 @@ separate - `WeatherRepository` is the only place that converts between them.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import Boolean, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,8 +31,8 @@ class WeatherStationDB(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
-    region_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    active: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    region_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
 
     # No delete-orphan / delete cascade: weather history must survive station
     # metadata updates and must not be silently deleted.

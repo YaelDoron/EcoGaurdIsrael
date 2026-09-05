@@ -1,6 +1,7 @@
 """EcoGuard internal domain models (plain dataclasses, no persistence)."""
 
+from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.weather_observation import WeatherObservation
 from src.models.weather_station import WeatherStation
 
-__all__ = ["WeatherStation", "WeatherObservation"]
+__all__ = ["WeatherStation", "WeatherObservation", "SatelliteHotspot"]

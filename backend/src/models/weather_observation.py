@@ -3,6 +3,8 @@
 Independent of the raw IMS channel/response shape (that translation lives in
 the mapper layer) and independent of any future persistence technology.
 """
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
 

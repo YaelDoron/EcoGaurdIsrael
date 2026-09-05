@@ -1,4 +1,6 @@
 """Result summary for a single WeatherAgent.collect() run."""
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
