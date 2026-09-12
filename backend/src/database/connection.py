@@ -92,7 +92,12 @@ def init_db() -> None:
     beyond a simple create-all (e.g. altering or dropping existing columns).
     """
     # Import models so they are registered on Base.metadata before create_all.
-    from src.database.models import satellite_hotspot_db, weather_observation_db, weather_station_db  # noqa: F401
+    from src.database.models import (  # noqa: F401
+        satellite_hotspot_db,
+        weather_observation_db,
+        weather_station_db,
+        wildfire_report_db,
+    )
 
     Base.metadata.create_all(bind=get_engine())
     logger.info("Database tables ensured (init_db)")

@@ -11,3 +11,7 @@ class WeatherStationNotStoredError(WeatherRepositoryError):
 
 class SatelliteHotspotRepositoryError(Exception):
     """Base exception for satellite hotspot repository errors."""
+
+
+class NewsRepositoryError(Exception):
+    """Base exception for wildfire news repository errors."""

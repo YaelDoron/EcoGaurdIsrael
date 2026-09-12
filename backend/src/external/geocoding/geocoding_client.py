@@ -1,4 +1,6 @@
 """Converts a location name into latitude/longitude via Nominatim (OpenStreetMap)."""
+from __future__ import annotations
+
 import logging
 
 from geopy.exc import GeocoderServiceError, GeocoderTimedOut, GeocoderUnavailable
