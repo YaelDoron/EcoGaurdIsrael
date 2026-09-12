@@ -15,7 +15,12 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.base import Base
-from src.database.models import weather_observation_db, weather_station_db  # noqa: F401
+from src.database.models import (  # noqa: F401
+    satellite_hotspot_db,
+    weather_observation_db,
+    weather_station_db,
+    wildfire_report_db,
+)
 
 
 @pytest.fixture

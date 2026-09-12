@@ -7,6 +7,8 @@ Run explicitly with:
 The test creates and deletes only clearly identifiable temporary satellite
 hotspot rows and never prints DATABASE_URL or credentials.
 """
+from __future__ import annotations
+
 from datetime import datetime
 
 import pytest
@@ -95,6 +97,20 @@ def _count_test_rows() -> int:
         ).scalar_one()
 
 
+def _find_test_hotspot(repository: SatelliteHotspotRepository) -> SatelliteHotspot | None:
+    hotspots = repository.get_hotspots_between(TEST_DETECTED_AT, TEST_DETECTED_AT)
+    for hotspot in hotspots:
+        if (
+            hotspot.latitude == TEST_LATITUDE
+            and hotspot.longitude == TEST_LONGITUDE
+            and hotspot.detected_at == TEST_DETECTED_AT
+            and hotspot.satellite == TEST_SATELLITE
+            and hotspot.instrument == TEST_INSTRUMENT
+        ):
+            return hotspot
+    return None
+
+
 def test_satellite_hotspot_table_save_read_duplicate_and_cleanup_against_neon() -> None:
     init_db()
     repository = SatelliteHotspotRepository()
@@ -113,11 +129,13 @@ def test_satellite_hotspot_table_save_read_duplicate_and_cleanup_against_neon() 
     first = repository.save_hotspot(make_hotspot())
     assert first.is_duplicate is False
 
-    latest = repository.get_latest_hotspots(limit=1)
-    assert latest[0].latitude == TEST_LATITUDE
-    assert latest[0].longitude == TEST_LONGITUDE
-    assert latest[0].detected_at == TEST_DETECTED_AT
-    assert latest[0].satellite == TEST_SATELLITE
+    stored = _find_test_hotspot(repository)
+    assert stored is not None
+    assert stored.latitude == TEST_LATITUDE
+    assert stored.longitude == TEST_LONGITUDE
+    assert stored.detected_at == TEST_DETECTED_AT
+    assert stored.satellite == TEST_SATELLITE
+    assert stored.instrument == TEST_INSTRUMENT
 
     second = repository.save_hotspot(make_hotspot(frp=99.9))
     assert second.is_duplicate is True

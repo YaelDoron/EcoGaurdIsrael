@@ -1,31 +1,45 @@
-"""NewsMonitoringAgent: fetches wildfire news from RSS feeds, extracts and geocodes
-the location via LLM, and persists new reports. This agent has no other responsibility
-within the larger wildfire management system."""
+"""NewsMonitoringAgent: fetches wildfire news and persists new reports."""
+from __future__ import annotations
+
 import logging
 import time
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from pathlib import Path
+from typing import Any
 
-from config.config import load_config
-from external.geocoding.geocoding_client import Geocoder
-from external.news.news_client import RSSFetcher, TextProcessor
-from repositories.fire_report_repository import StorageManager
-from models.fire_report import WildfireReport
+from src.config.config import load_config
+from src.models.fire_report import WildfireReport
+from src.repositories.exceptions import NewsRepositoryError
+from src.repositories.news_repository import NewsRepository
 
 logger = logging.getLogger(__name__)
 
-# Initialization of the NewsMonitoringAgent involves loading configuration, setting up logging, 
-# and initializing components for RSS fetching, text processing, geocoding, and storage management.
+
 class NewsMonitoringAgent:
-    def __init__(self, config_path: str | None = None):
-        # Load the YAML configuration file
+    """Coordinates one RSS -> filter -> location -> geocode -> persist cycle."""
+
+    def __init__(
+        self,
+        config_path: str | None = None,
+        rss_fetcher: Any | None = None,
+        text_processor: Any | None = None,
+        geocoder: Any | None = None,
+        news_repository: NewsRepository | None = None,
+    ) -> None:
         self.config = load_config(config_path) if config_path else load_config()
         self._setup_logging()
 
-        # Instance of all the components needed for the agent's operation
-        self.rss_fetcher = RSSFetcher(self.config["rss_feeds"])
-        self.text_processor = TextProcessor(self.config["keywords"], self.config["llm"])
-        self.geocoder = Geocoder(self.config["geocoding"])
-        self.storage = StorageManager(self.config["storage"]["db_path"])
+        if rss_fetcher is None or text_processor is None:
+            from src.external.news.news_client import RSSFetcher, TextProcessor
+
+        if geocoder is None:
+            from src.external.geocoding.geocoding_client import Geocoder
+
+        self.rss_fetcher = rss_fetcher or RSSFetcher(self.config["rss_feeds"])
+        self.text_processor = text_processor or TextProcessor(self.config["keywords"], self.config["llm"])
+        self.geocoder = geocoder or Geocoder(self.config["geocoding"])
+        self.news_repository = news_repository or NewsRepository()
         self.interval_seconds = self.config["scraping"]["interval_seconds"]
 
     # Sets up logging based on the configuration, allowing for console and optional file logging.
@@ -34,6 +48,7 @@ class NewsMonitoringAgent:
         handlers = [logging.StreamHandler()]
         log_file = log_config.get("file")
         if log_file:
+            Path(log_file).parent.mkdir(parents=True, exist_ok=True)
             handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
         logging.basicConfig(
             level=getattr(logging, log_config.get("level", "INFO")),
@@ -57,7 +72,7 @@ class NewsMonitoringAgent:
         saved_count = 0
         for entry in relevant_entries:
             source_url = entry["link"]
-            if not source_url or self.storage.exists(source_url):
+            if not source_url or self.news_repository.exists_by_source_url(source_url):
                 continue
 
             location_name = self.text_processor.extract_location(entry["title"], entry["summary"])
@@ -73,11 +88,17 @@ class NewsMonitoringAgent:
                 location_name=location_name,
                 latitude=latitude,
                 longitude=longitude,
-                published_at=entry.get("published", ""),
-                fetched_at=datetime.now(timezone.utc).isoformat(),
+                published_at=self._parse_published_at(entry.get("published")),
+                fetched_at=datetime.now(timezone.utc),
             )
 
-            if self.storage.save_report(report):
+            try:
+                save_result = self.news_repository.save_report(report)
+            except NewsRepositoryError:
+                logger.exception("Failed to save wildfire news report: %s", report.source_url)
+                continue
+
+            if not save_result.is_duplicate:
                 saved_count += 1
                 logger.info(
                     "Saved report: '%s...' -> location=%s (%s, %s)",
@@ -101,3 +122,19 @@ class NewsMonitoringAgent:
             except Exception:
                 logger.exception("Unhandled error during monitoring cycle")
             time.sleep(self.interval_seconds)
+
+    @staticmethod
+    def _parse_published_at(value: Any) -> datetime | None:
+        """Parse an optional RSS publication timestamp into an aware datetime."""
+        if not isinstance(value, str) or not value.strip():
+            return None
+
+        try:
+            parsed = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            logger.warning("Ignoring malformed RSS publication timestamp: %r", value)
+            return None
+
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed

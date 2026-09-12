@@ -1,0 +1,283 @@
+"""Run an EcoGuard demo simulation from the command line.
+
+Example:
+    python -m scripts.run_demo_simulation --scenario active_fire --location carmel --mode manual --seed 42
+"""
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+import sys
+import time
+from typing import Callable, TextIO
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.config.settings import settings
+from src.database.connection import DatabaseConfigurationError, init_db
+from src.simulation import (
+    SIMULATION_LOCATIONS,
+    ScenarioType,
+    SimulationEvent,
+    SimulationEventExecutionResult,
+    SimulationEventExecutor,
+    SimulationMode,
+    SimulationScenario,
+    SimulationScenarioService,
+    build_carmel_golan_active_fire_scenario,
+    build_scenario,
+    get_simulation_location,
+    simulation_event_timestamp,
+)
+
+DEFAULT_SEED = 42
+DEFAULT_MODE = "manual"
+DEFAULT_POLL_INTERVAL_SECONDS = 0.5
+SUPPORTED_PRESETS = ("carmel_golan_active_fire",)
+
+
+@dataclass
+class RunSummary:
+    events_executed: int = 0
+    successful_events: int = 0
+    failed_events: int = 0
+    generated_records: int = 0
+    saved_records: int = 0
+    duplicates_skipped: int = 0
+    failed_records: int = 0
+
+    def add(self, result: SimulationEventExecutionResult) -> None:
+        self.events_executed += 1
+        if result.success:
+            self.successful_events += 1
+        else:
+            self.failed_events += 1
+        self.generated_records += result.generated_count
+        self.saved_records += result.saved_count
+        self.duplicates_skipped += result.duplicates_skipped
+        self.failed_records += result.failed_count
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run EcoGuard SIMULATION MODE events and persist generated domain data."
+    )
+    parser.add_argument(
+        "--scenario",
+        choices=[scenario_type.value for scenario_type in ScenarioType],
+        help="Single-incident scenario to run.",
+    )
+    parser.add_argument(
+        "--location",
+        choices=sorted(SIMULATION_LOCATIONS),
+        help="Predefined simulation location for single-incident scenarios.",
+    )
+    parser.add_argument(
+        "--preset",
+        choices=SUPPORTED_PRESETS,
+        help="Predefined multi-incident scenario preset.",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=[mode.value for mode in SimulationMode],
+        default=DEFAULT_MODE,
+        help=f"Timeline execution mode. Default: {DEFAULT_MODE}.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=DEFAULT_SEED,
+        help=f"Deterministic simulation seed. Default: {DEFAULT_SEED}.",
+    )
+    parser.add_argument(
+        "--poll-interval",
+        type=float,
+        default=DEFAULT_POLL_INTERVAL_SECONDS,
+        help=(
+            "Automatic-mode polling interval in seconds. "
+            f"Default: {DEFAULT_POLL_INTERVAL_SECONDS}."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    if args.poll_interval <= 0:
+        parser.error("--poll-interval must be greater than 0.")
+
+    if args.preset:
+        if args.scenario or args.location:
+            parser.error("--preset cannot be combined with --scenario or --location.")
+    else:
+        if not args.scenario:
+            parser.error("--scenario is required unless --preset is supplied.")
+        if not args.location:
+            parser.error("--location is required unless --preset is supplied.")
+
+    return args
+
+
+def build_scenario_from_args(args: argparse.Namespace) -> SimulationScenario:
+    if args.preset == "carmel_golan_active_fire":
+        return build_carmel_golan_active_fire_scenario(seed=args.seed)
+    if args.preset:
+        raise ValueError(f"Unsupported preset: {args.preset!r}")
+
+    scenario_type = ScenarioType(args.scenario)
+    location = get_simulation_location(args.location)
+    return build_scenario(scenario_type=scenario_type, location=location, seed=args.seed)
+
+
+def initialize_database() -> None:
+    if not settings.DATABASE_URL:
+        raise DatabaseConfigurationError("DATABASE_URL is not configured; cannot run persistence demo.")
+    init_db()
+
+
+def run_manual(
+    scenario: SimulationScenario,
+    executor: SimulationEventExecutor | None = None,
+    service: SimulationScenarioService | None = None,
+    scenario_started_at: datetime | None = None,
+    input_func: Callable[[str], str] = input,
+    output: TextIO = sys.stdout,
+) -> RunSummary:
+    executor = executor or SimulationEventExecutor()
+    service = service or SimulationScenarioService()
+    scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
+    summary = RunSummary()
+
+    service.start(scenario, mode=SimulationMode.MANUAL)
+    print_startup_summary(scenario, SimulationMode.MANUAL, scenario_started_at, output)
+
+    while not service.is_finished:
+        try:
+            input_func("Press ENTER to execute next event...")
+        except EOFError:
+            print("No input available; continuing with next event.", file=output)
+
+        event = service.advance()
+        if event is None:
+            break
+        result = execute_and_report_event(scenario, event, scenario_started_at, executor, output)
+        summary.add(result)
+
+    print_run_summary(summary, output)
+    return summary
+
+
+def run_automatic(
+    scenario: SimulationScenario,
+    executor: SimulationEventExecutor | None = None,
+    service: SimulationScenarioService | None = None,
+    scenario_started_at: datetime | None = None,
+    sleep_func: Callable[[float], None] = time.sleep,
+    poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+    output: TextIO = sys.stdout,
+) -> RunSummary:
+    executor = executor or SimulationEventExecutor()
+    service = service or SimulationScenarioService()
+    scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
+    summary = RunSummary()
+
+    service.start(scenario, mode=SimulationMode.AUTOMATIC)
+    print_startup_summary(scenario, SimulationMode.AUTOMATIC, scenario_started_at, output)
+
+    while not service.is_finished:
+        due_events = service.get_due_events()
+        for event in due_events:
+            result = execute_and_report_event(scenario, event, scenario_started_at, executor, output)
+            summary.add(result)
+
+        if not service.is_finished:
+            sleep_func(poll_interval_seconds)
+
+    print_run_summary(summary, output)
+    return summary
+
+
+def execute_and_report_event(
+    scenario: SimulationScenario,
+    event: SimulationEvent,
+    scenario_started_at: datetime,
+    executor: SimulationEventExecutor,
+    output: TextIO = sys.stdout,
+) -> SimulationEventExecutionResult:
+    incident = scenario.get_incident(event.incident_id)
+    event_timestamp = simulation_event_timestamp(scenario_started_at, event)
+
+    print(
+        f"[T+{event.offset_seconds}s] {event.event_type.value.upper()} | "
+        f"{event.incident_id} | {incident.location.name}",
+        file=output,
+    )
+    result = executor.execute(scenario=scenario, event=event, event_timestamp=event_timestamp)
+    print(format_execution_result(result), file=output)
+    if result.error_message:
+        print(f"Error: {result.error_message}", file=output)
+    print("", file=output)
+    return result
+
+
+def format_execution_result(result: SimulationEventExecutionResult) -> str:
+    return (
+        f"generated={result.generated_count} "
+        f"saved={result.saved_count} "
+        f"duplicates={result.duplicates_skipped} "
+        f"failed={result.failed_count} "
+        f"success={result.success}"
+    )
+
+
+def print_startup_summary(
+    scenario: SimulationScenario,
+    mode: SimulationMode,
+    scenario_started_at: datetime,
+    output: TextIO = sys.stdout,
+) -> None:
+    print("EcoGuard Demo Simulation", file=output)
+    print("SIMULATION MODE", file=output)
+    print(f"Mode: {mode.value.upper()}", file=output)
+    print(f"Seed: {scenario.seed}", file=output)
+    print(f"Started at: {scenario_started_at.isoformat()}", file=output)
+    print(f"Duration: {scenario.duration_seconds}s", file=output)
+    print("Incidents:", file=output)
+    for incident in scenario.incidents:
+        print(
+            f"- {incident.incident_id} | {incident.scenario_type.value} | {incident.location.name}",
+            file=output,
+        )
+    print("", file=output)
+
+
+def print_run_summary(summary: RunSummary, output: TextIO = sys.stdout) -> None:
+    print("Simulation completed", file=output)
+    print(f"Events executed: {summary.events_executed}", file=output)
+    print(f"Successful events: {summary.successful_events}", file=output)
+    print(f"Failed events: {summary.failed_events}", file=output)
+    print(f"Generated records: {summary.generated_records}", file=output)
+    print(f"Saved records: {summary.saved_records}", file=output)
+    print(f"Duplicates skipped: {summary.duplicates_skipped}", file=output)
+    print(f"Failed records: {summary.failed_records}", file=output)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    scenario = build_scenario_from_args(args)
+
+    try:
+        initialize_database()
+    except DatabaseConfigurationError as exc:
+        print(f"Database configuration error: {exc}", file=sys.stderr)
+        return 2
+
+    mode = SimulationMode(args.mode)
+    if mode is SimulationMode.MANUAL:
+        run_manual(scenario)
+    else:
+        run_automatic(scenario, poll_interval_seconds=args.poll_interval)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
