@@ -12,11 +12,16 @@ from scripts.run_demo_simulation import (
     DEFAULT_POLL_INTERVAL_SECONDS,
     DEFAULT_SEED,
     build_scenario_from_args,
+    execute_and_report_event,
     format_execution_result,
     parse_args,
     run_automatic,
     run_manual,
 )
+from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
+from src.calculators.fire_danger.ffwi_config import FFWI_METHODOLOGY_NAME, FFWI_METHODOLOGY_VERSION
+from src.models import FireDangerAssessment, FireDangerAssessmentStatus, FireDangerLevel
+from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -50,6 +55,47 @@ class FakeExecutor:
         )
 
 
+class FakeFireDangerCoordinator:
+    def __init__(self, mode="valid") -> None:
+        self.mode = mode
+        self.calls = []
+
+    def handle_event(self, scenario, event, execution_result, event_timestamp):
+        self.calls.append((scenario, event, execution_result, event_timestamp))
+        if event.event_type is not SimulationEventType.WEATHER:
+            return SimulationFireDangerResult(
+                triggered=False,
+                assessment_result=None,
+                reason="non_weather_event",
+            )
+        if self.mode == "insufficient":
+            assessment = make_assessment(status=FireDangerAssessmentStatus.INSUFFICIENT_DATA)
+            assessment_result = FireDangerAssessmentResult(
+                assessment=assessment,
+                stored_assessment_id=124,
+                success=True,
+            )
+        elif self.mode == "failure":
+            assessment_result = FireDangerAssessmentResult(
+                assessment=None,
+                stored_assessment_id=None,
+                success=False,
+                error_message="Fire-danger assessment persistence failed.",
+            )
+        else:
+            assessment = make_assessment(status=FireDangerAssessmentStatus.VALID)
+            assessment_result = FireDangerAssessmentResult(
+                assessment=assessment,
+                stored_assessment_id=123,
+                success=True,
+            )
+        return SimulationFireDangerResult(
+            triggered=True,
+            assessment_result=assessment_result,
+            reason=None,
+        )
+
+
 class FakeAutomaticService:
     def __init__(self, due_batches) -> None:
         self._due_batches = list(due_batches)
@@ -66,6 +112,22 @@ class FakeAutomaticService:
         if not self._due_batches:
             return []
         return self._due_batches.pop(0)
+
+
+def make_assessment(status=FireDangerAssessmentStatus.VALID, area_name="Carmel Demo Area"):
+    return FireDangerAssessment(
+        area_id="simulation-carmel",
+        area_name=area_name,
+        area_latitude=32.731,
+        area_longitude=35.046,
+        area_radius_km=5.0,
+        assessed_at=STARTED_AT,
+        status=status,
+        score=47.83 if status is FireDangerAssessmentStatus.VALID else None,
+        level=FireDangerLevel.VERY_HIGH if status is FireDangerAssessmentStatus.VALID else None,
+        methodology=FFWI_METHODOLOGY_NAME,
+        methodology_version=FFWI_METHODOLOGY_VERSION,
+    )
 
 
 def test_parse_valid_single_incident_args():
@@ -161,6 +223,7 @@ def test_manual_mode_executes_events_in_order_with_expected_timestamps():
     summary = run_manual(
         scenario=scenario,
         executor=executor,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
         output=output,
@@ -184,6 +247,7 @@ def test_manual_mode_aggregates_failures_and_continues():
     summary = run_manual(
         scenario=scenario,
         executor=executor,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -206,6 +270,7 @@ def test_automatic_mode_executes_due_batches_and_sleeps_between_polls():
     summary = run_automatic(
         scenario=scenario,
         executor=executor,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
         service=service,
         scenario_started_at=STARTED_AT,
         sleep_func=sleeps.append,
@@ -227,6 +292,7 @@ def test_multi_incident_preset_manual_order_makes_incidents_visible():
     summary = run_manual(
         scenario=scenario,
         executor=executor,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -255,3 +321,147 @@ def test_format_execution_result_is_human_readable():
     )
 
     assert format_execution_result(result) == "generated=3 saved=2 duplicates=1 failed=0 success=True"
+
+
+def test_weather_event_output_includes_fire_danger_assessment_block_when_triggered():
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+    )
+
+    text = output.getvalue()
+    assert "generated=1 saved=1 duplicates=0 failed=0 success=True" in text
+    assert "FIRE DANGER ASSESSMENT" in text
+    assert "area=Carmel Demo Area" in text
+    assert "status=VALID" in text
+    assert "score=47.83" in text
+    assert "level=VERY_HIGH" in text
+    assert "assessment_id=123" in text
+
+
+@pytest.mark.parametrize("event_type", [SimulationEventType.SATELLITE, SimulationEventType.NEWS])
+def test_non_weather_event_output_does_not_include_fire_danger_assessment(event_type):
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is event_type)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+    )
+
+    assert "FIRE DANGER ASSESSMENT" not in output.getvalue()
+
+
+def test_insufficient_data_fire_danger_output_is_printed_clearly():
+    scenario = build_active_fire_scenario(seed=42)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=scenario.events[0],
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(mode="insufficient"),
+    )
+
+    text = output.getvalue()
+    assert "status=INSUFFICIENT_DATA" in text
+    assert "score=-" in text
+    assert "level=-" in text
+    assert "LOW" not in text
+
+
+def test_operational_assessment_failure_is_printed_separately_from_simulation_failure():
+    scenario = build_active_fire_scenario(seed=42)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=scenario.events[0],
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(success=True),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(mode="failure"),
+    )
+
+    text = output.getvalue()
+    assert "generated=1 saved=1 duplicates=0 failed=0 success=True" in text
+    assert "FIRE DANGER ASSESSMENT" in text
+    assert "status=ERROR" in text
+    assert "message=Fire-danger assessment persistence failed." in text
+    assert "Error: simulated failure" not in text
+
+
+def test_manual_mode_invokes_fire_danger_after_each_event_without_changing_prompt_behavior():
+    scenario = build_active_fire_scenario(seed=42)
+    coordinator = FakeFireDangerCoordinator()
+    prompts = []
+
+    run_manual(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=coordinator,
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: prompts.append(prompt) or "",
+        output=StringIO(),
+    )
+
+    assert len(prompts) == len(scenario.events)
+    assert [call[1] for call in coordinator.calls] == list(scenario.events)
+
+
+def test_automatic_mode_invokes_fire_danger_after_due_events_without_changing_sleep_behavior():
+    scenario = build_active_fire_scenario(seed=42)
+    first_event, second_event = scenario.events[:2]
+    service = FakeAutomaticService(due_batches=[[first_event], [second_event]])
+    coordinator = FakeFireDangerCoordinator()
+    sleeps = []
+
+    run_automatic(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=coordinator,
+        service=service,
+        scenario_started_at=STARTED_AT,
+        sleep_func=sleeps.append,
+        poll_interval_seconds=0.25,
+        output=StringIO(),
+    )
+
+    assert [call[1] for call in coordinator.calls] == [first_event, second_event]
+    assert sleeps == [0.25]
+
+
+def test_multi_incident_output_associates_assessments_with_correct_event_areas():
+    scenario = build_carmel_golan_active_fire_scenario(seed=42)
+    executor = FakeExecutor()
+    coordinator = FakeFireDangerCoordinator()
+    output = StringIO()
+
+    run_manual(
+        scenario=scenario,
+        executor=executor,
+        fire_danger_coordinator=coordinator,
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: "",
+        output=output,
+    )
+
+    text = output.getvalue()
+    assert "incident-carmel-01 | Carmel Demo Area" in text
+    assert "incident-golan-01 | Golan Heights Demo Area" in text
+    assert [call[1] for call in coordinator.calls] == list(scenario.events)

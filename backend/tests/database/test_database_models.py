@@ -10,6 +10,11 @@ from datetime import datetime
 import pytest
 from sqlalchemy.exc import IntegrityError
 
+from src.calculators.fire_danger.ffwi_config import FFWI_METHODOLOGY_NAME, FFWI_METHODOLOGY_VERSION
+from src.database.models.fire_danger_assessment_db import FireDangerAssessmentDB
+from src.database.models.fire_danger_assessment_weather_input_db import (
+    FireDangerAssessmentWeatherInputDB,
+)
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
 
@@ -33,6 +38,10 @@ def _insert_station(session_factory, **overrides) -> int:
 def test_table_names():
     assert WeatherStationDB.__tablename__ == "weather_stations"
     assert WeatherObservationDB.__tablename__ == "weather_observations"
+    assert FireDangerAssessmentDB.__tablename__ == "fire_danger_assessments"
+    assert FireDangerAssessmentWeatherInputDB.__tablename__ == (
+        "fire_danger_assessment_weather_inputs"
+    )
 
 
 def test_station_primary_key_autoincrements(sqlite_session_factory):
@@ -154,4 +163,76 @@ def test_station_relationship_exposes_its_observations(sqlite_session_factory):
     station = session.get(WeatherStationDB, station_id)
     assert len(station.observations) == 1
     assert station.observations[0].timestamp == TIMESTAMP
+    session.close()
+
+
+def test_fire_danger_assessment_trace_observation_unique_per_assessment(sqlite_session_factory):
+    station_id = _insert_station(sqlite_session_factory)
+    session = sqlite_session_factory()
+    observation = WeatherObservationDB(station_id=station_id, timestamp=TIMESTAMP)
+    assessment = FireDangerAssessmentDB(
+        area_id="area-carmel",
+        area_name="Carmel",
+        area_latitude=32.731,
+        area_longitude=35.046,
+        area_radius_km=5.0,
+        assessed_at=TIMESTAMP,
+        status="valid",
+        score=42.5,
+        danger_level="very_high",
+        methodology=FFWI_METHODOLOGY_NAME,
+        methodology_version=FFWI_METHODOLOGY_VERSION,
+    )
+    session.add_all([observation, assessment])
+    session.commit()
+    session.add(
+        FireDangerAssessmentWeatherInputDB(
+            assessment_id=assessment.id,
+            weather_observation_id=observation.id,
+            station_id=station_id,
+        )
+    )
+    session.commit()
+
+    session.add(
+        FireDangerAssessmentWeatherInputDB(
+            assessment_id=assessment.id,
+            weather_observation_id=observation.id,
+            station_id=station_id,
+        )
+    )
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
+    session.close()
+
+
+def test_fire_danger_assessment_trace_requires_existing_observation(sqlite_session_factory):
+    session = sqlite_session_factory()
+    assessment = FireDangerAssessmentDB(
+        area_id="area-carmel",
+        area_name="Carmel",
+        area_latitude=32.731,
+        area_longitude=35.046,
+        area_radius_km=5.0,
+        assessed_at=TIMESTAMP,
+        status="valid",
+        score=42.5,
+        danger_level="very_high",
+        methodology=FFWI_METHODOLOGY_NAME,
+        methodology_version=FFWI_METHODOLOGY_VERSION,
+    )
+    session.add(assessment)
+    session.commit()
+    session.add(
+        FireDangerAssessmentWeatherInputDB(
+            assessment_id=assessment.id,
+            weather_observation_id=999999,
+            station_id=1,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+    session.rollback()
     session.close()

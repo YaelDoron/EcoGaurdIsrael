@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.base import Base
 from src.database.models import (  # noqa: F401
+    fire_danger_assessment_db,
+    fire_danger_assessment_weather_input_db,
     satellite_hotspot_db,
     weather_observation_db,
     weather_station_db,

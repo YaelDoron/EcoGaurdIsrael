@@ -17,6 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
+from src.agents.analysis import FireDangerAssessmentAgent
+from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
+from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
+from src.repositories.weather_repository import WeatherRepository
+from src.services.fire_danger import FireDangerInputService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
@@ -26,6 +31,8 @@ from src.simulation import (
     SimulationMode,
     SimulationScenario,
     SimulationScenarioService,
+    SimulationFireDangerCoordinator,
+    SimulationFireDangerResult,
     build_carmel_golan_active_fire_scenario,
     build_scenario,
     get_simulation_location,
@@ -137,12 +144,14 @@ def initialize_database() -> None:
 def run_manual(
     scenario: SimulationScenario,
     executor: SimulationEventExecutor | None = None,
+    fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     input_func: Callable[[str], str] = input,
     output: TextIO = sys.stdout,
 ) -> RunSummary:
     executor = executor or SimulationEventExecutor()
+    fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -159,7 +168,14 @@ def run_manual(
         event = service.advance()
         if event is None:
             break
-        result = execute_and_report_event(scenario, event, scenario_started_at, executor, output)
+        result = execute_and_report_event(
+            scenario,
+            event,
+            scenario_started_at,
+            executor,
+            output,
+            fire_danger_coordinator,
+        )
         summary.add(result)
 
     print_run_summary(summary, output)
@@ -169,6 +185,7 @@ def run_manual(
 def run_automatic(
     scenario: SimulationScenario,
     executor: SimulationEventExecutor | None = None,
+    fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     sleep_func: Callable[[float], None] = time.sleep,
@@ -176,6 +193,7 @@ def run_automatic(
     output: TextIO = sys.stdout,
 ) -> RunSummary:
     executor = executor or SimulationEventExecutor()
+    fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -186,7 +204,14 @@ def run_automatic(
     while not service.is_finished:
         due_events = service.get_due_events()
         for event in due_events:
-            result = execute_and_report_event(scenario, event, scenario_started_at, executor, output)
+            result = execute_and_report_event(
+                scenario,
+                event,
+                scenario_started_at,
+                executor,
+                output,
+                fire_danger_coordinator,
+            )
             summary.add(result)
 
         if not service.is_finished:
@@ -202,6 +227,7 @@ def execute_and_report_event(
     scenario_started_at: datetime,
     executor: SimulationEventExecutor,
     output: TextIO = sys.stdout,
+    fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
     event_timestamp = simulation_event_timestamp(scenario_started_at, event)
@@ -215,6 +241,15 @@ def execute_and_report_event(
     print(format_execution_result(result), file=output)
     if result.error_message:
         print(f"Error: {result.error_message}", file=output)
+    if fire_danger_coordinator is not None:
+        fire_danger_result = fire_danger_coordinator.handle_event(
+            scenario=scenario,
+            event=event,
+            execution_result=result,
+            event_timestamp=event_timestamp,
+        )
+        if fire_danger_result.triggered:
+            print_fire_danger_result(fire_danger_result, output)
     print("", file=output)
     return result
 
@@ -227,6 +262,50 @@ def format_execution_result(result: SimulationEventExecutionResult) -> str:
         f"failed={result.failed_count} "
         f"success={result.success}"
     )
+
+
+def build_fire_danger_coordinator() -> SimulationFireDangerCoordinator:
+    """Build the simulation fire-danger analysis stack using shared repositories."""
+    weather_repository = WeatherRepository()
+    input_service = FireDangerInputService(weather_repository=weather_repository)
+    calculator = FFWICalculator()
+    assessment_repository = FireDangerAssessmentRepository()
+    agent = FireDangerAssessmentAgent(
+        input_service=input_service,
+        calculator=calculator,
+        repository=assessment_repository,
+    )
+    return SimulationFireDangerCoordinator(assessment_agent=agent)
+
+
+def print_fire_danger_result(
+    fire_danger_result: SimulationFireDangerResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    assessment_result = fire_danger_result.assessment_result
+    print("FIRE DANGER ASSESSMENT", file=output)
+    if assessment_result is None or not assessment_result.success:
+        message = (
+            assessment_result.error_message
+            if assessment_result is not None and assessment_result.error_message
+            else "Fire-danger assessment failed."
+        )
+        print("status=ERROR", file=output)
+        print(f"message={message}", file=output)
+        return
+
+    assessment = assessment_result.assessment
+    print(f"area={assessment.area_name}", file=output)
+    print(f"status={assessment.status.name}", file=output)
+    print(f"score={_format_optional_score(assessment.score)}", file=output)
+    print(f"level={assessment.level.name if assessment.level is not None else '-'}", file=output)
+    print(f"assessment_id={assessment_result.stored_assessment_id}", file=output)
+
+
+def _format_optional_score(score: float | None) -> str:
+    if score is None:
+        return "-"
+    return f"{score:.2f}"
 
 
 def print_startup_summary(

@@ -1,6 +1,8 @@
 """EcoGuard internal domain models (plain dataclasses, no persistence)."""
 
 from src.models.assessment_area import AssessmentArea
+from src.models.fire_danger_assessment import FireDangerAssessment
+from src.models.fire_danger_assessment_status import FireDangerAssessmentStatus
 from src.models.fire_danger_calculation import FireDangerCalculation
 from src.models.fire_danger_input import FireDangerInput
 from src.models.fire_danger_input_result import FireDangerInputResult
@@ -17,6 +19,8 @@ __all__ = [
     "SatelliteHotspot",
     "WildfireReport",
     "FireDangerInput",
+    "FireDangerAssessment",
+    "FireDangerAssessmentStatus",
     "FireDangerCalculation",
     "FireDangerLevel",
     "AssessmentArea",
