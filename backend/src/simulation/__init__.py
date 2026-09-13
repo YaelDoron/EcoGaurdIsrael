@@ -33,6 +33,11 @@ from src.simulation.simulation_scenario_service import (
     SimulationMode,
     SimulationScenarioService,
 )
+from src.simulation.analysis import (
+    ASSESSMENT_RADIUS_KM,
+    SimulationFireDangerCoordinator,
+    SimulationFireDangerResult,
+)
 
 __all__ = [
     "ScenarioType",
@@ -61,4 +66,7 @@ __all__ = [
     "build_scenario",
     "SimulationMode",
     "SimulationScenarioService",
+    "ASSESSMENT_RADIUS_KM",
+    "SimulationFireDangerCoordinator",
+    "SimulationFireDangerResult",
 ]

@@ -223,6 +223,62 @@ def test_get_observations_for_station_respects_limit(repository):
     ]
 
 
+def test_get_recent_observations_for_area_candidates_returns_persisted_ids_and_bbox_candidates(
+    repository,
+):
+    repository.save_station(make_station(external_station_id=17, latitude=32.0, longitude=35.0))
+    repository.save_station(make_station(external_station_id=21, name="NEAR", latitude=32.01, longitude=35.0))
+    repository.save_station(make_station(external_station_id=99, name="FAR", latitude=34.0, longitude=35.0))
+    repository.save_observation(
+        make_observation(station_external_id=17, timestamp=datetime(2026, 9, 2, 12, 0, 0))
+    )
+    repository.save_observation(
+        make_observation(station_external_id=21, timestamp=datetime(2026, 9, 2, 12, 5, 0))
+    )
+    repository.save_observation(
+        make_observation(station_external_id=99, timestamp=datetime(2026, 9, 2, 12, 10, 0))
+    )
+
+    records = repository.get_recent_observations_for_area_candidates(
+        latitude=32.0,
+        longitude=35.0,
+        radius_km=5,
+        start_time=datetime(2026, 9, 2, 11, 59, 0),
+        end_time=datetime(2026, 9, 2, 12, 6, 0),
+    )
+
+    assert [record.station.external_station_id for record in records] == [17, 21]
+    assert all(record.station_id > 0 for record in records)
+    assert all(record.observation_id > 0 for record in records)
+    assert [record.observation.timestamp for record in records] == [
+        datetime(2026, 9, 2, 12, 0, 0),
+        datetime(2026, 9, 2, 12, 5, 0),
+    ]
+
+
+def test_get_recent_observations_for_area_candidates_orders_newest_per_station_first(repository):
+    repository.save_station(make_station(external_station_id=17, latitude=32.0, longitude=35.0))
+    repository.save_observation(
+        make_observation(station_external_id=17, timestamp=datetime(2026, 9, 2, 12, 0, 0))
+    )
+    repository.save_observation(
+        make_observation(station_external_id=17, timestamp=datetime(2026, 9, 2, 12, 5, 0))
+    )
+
+    records = repository.get_recent_observations_for_area_candidates(
+        latitude=32.0,
+        longitude=35.0,
+        radius_km=5,
+        start_time=datetime(2026, 9, 2, 11, 59, 0),
+        end_time=datetime(2026, 9, 2, 12, 6, 0),
+    )
+
+    assert [record.observation.timestamp for record in records] == [
+        datetime(2026, 9, 2, 12, 5, 0),
+        datetime(2026, 9, 2, 12, 0, 0),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Errors / transactions
 # ---------------------------------------------------------------------------

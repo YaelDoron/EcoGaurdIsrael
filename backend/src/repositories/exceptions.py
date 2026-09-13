@@ -15,3 +15,7 @@ class SatelliteHotspotRepositoryError(Exception):
 
 class NewsRepositoryError(Exception):
     """Base exception for wildfire news repository errors."""
+
+
+class FireDangerAssessmentRepositoryError(Exception):
+    """Base exception for fire-danger assessment repository errors."""
