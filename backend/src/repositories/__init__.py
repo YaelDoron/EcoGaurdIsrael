@@ -8,11 +8,16 @@ from src.repositories.exceptions import (
 )
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult
 from src.repositories.satellite_hotspot_repository import SaveHotspotResult, SatelliteHotspotRepository
-from src.repositories.weather_repository import SaveObservationResult, WeatherRepository
+from src.repositories.weather_repository import (
+    SaveObservationResult,
+    StoredWeatherObservation,
+    WeatherRepository,
+)
 
 __all__ = [
     "WeatherRepository",
     "SaveObservationResult",
+    "StoredWeatherObservation",
     "SatelliteHotspotRepository",
     "SaveHotspotResult",
     "NewsRepository",

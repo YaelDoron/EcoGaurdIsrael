@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
+import math
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -45,6 +46,16 @@ class SaveObservationResult:
 
     observation: WeatherObservation
     is_duplicate: bool
+
+
+@dataclass(frozen=True)
+class StoredWeatherObservation:
+    """Weather observation with persistence IDs and station metadata for application services."""
+
+    observation_id: int
+    station_id: int
+    station: WeatherStation
+    observation: WeatherObservation
 
 
 class WeatherRepository:
@@ -241,6 +252,63 @@ class WeatherRepository:
                 for db_observation in db_observations
             ]
 
+    def get_recent_observations_for_area_candidates(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> list[StoredWeatherObservation]:
+        """Return recent observation candidates for stations near an area.
+
+        This method uses a simple latitude/longitude bounding box so the
+        database narrows the candidate set. Callers that need exact area
+        membership should still apply a precise distance policy, such as
+        Haversine distance, to the returned station coordinates.
+        """
+        self._validate_area_query(latitude, longitude, radius_km, start_time, end_time)
+        min_latitude, max_latitude, min_longitude, max_longitude = self._bounding_box(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=radius_km,
+        )
+
+        with self._session_scope() as session:
+            rows = (
+                session.execute(
+                    select(WeatherStationDB, WeatherObservationDB)
+                    .join(WeatherObservationDB, WeatherObservationDB.station_id == WeatherStationDB.id)
+                    .where(
+                        WeatherStationDB.latitude >= min_latitude,
+                        WeatherStationDB.latitude <= max_latitude,
+                        WeatherStationDB.longitude >= min_longitude,
+                        WeatherStationDB.longitude <= max_longitude,
+                        WeatherObservationDB.timestamp >= start_time,
+                        WeatherObservationDB.timestamp <= end_time,
+                    )
+                    .order_by(
+                        WeatherStationDB.id.asc(),
+                        WeatherObservationDB.timestamp.desc(),
+                        WeatherObservationDB.id.asc(),
+                    )
+                )
+                .all()
+            )
+
+            return [
+                StoredWeatherObservation(
+                    observation_id=db_observation.id,
+                    station_id=db_station.id,
+                    station=self._to_domain_station(db_station),
+                    observation=self._to_domain_observation(
+                        db_observation,
+                        db_station.external_station_id,
+                    ),
+                )
+                for db_station, db_observation in rows
+            ]
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -298,3 +366,49 @@ class WeatherRepository:
             raise WeatherRepositoryError(
                 f"Invalid external_station_id: {external_station_id!r}. Must be a positive integer."
             )
+
+    @staticmethod
+    def _validate_area_query(
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> None:
+        for field_name, value in (
+            ("latitude", latitude),
+            ("longitude", longitude),
+            ("radius_km", radius_km),
+        ):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise WeatherRepositoryError(f"{field_name} must be a finite number, got {value!r}.")
+        if not -90 <= latitude <= 90:
+            raise WeatherRepositoryError(f"latitude must be within [-90, 90], got {latitude!r}.")
+        if not -180 <= longitude <= 180:
+            raise WeatherRepositoryError(f"longitude must be within [-180, 180], got {longitude!r}.")
+        if radius_km <= 0:
+            raise WeatherRepositoryError(f"radius_km must be greater than 0, got {radius_km!r}.")
+        if not isinstance(start_time, datetime) or not isinstance(end_time, datetime):
+            raise WeatherRepositoryError("start_time and end_time must be datetime instances.")
+        if start_time > end_time:
+            raise WeatherRepositoryError("start_time must be less than or equal to end_time.")
+
+    @staticmethod
+    def _bounding_box(
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+    ) -> tuple[float, float, float, float]:
+        latitude_delta = radius_km / 111.32
+        min_latitude = max(-90.0, latitude - latitude_delta)
+        max_latitude = min(90.0, latitude + latitude_delta)
+
+        latitude_radians = math.radians(latitude)
+        longitude_scale = 111.32 * math.cos(latitude_radians)
+        if abs(longitude_scale) < 1e-9:
+            longitude_delta = 180.0
+        else:
+            longitude_delta = radius_km / abs(longitude_scale)
+        min_longitude = max(-180.0, longitude - longitude_delta)
+        max_longitude = min(180.0, longitude + longitude_delta)
+        return min_latitude, max_latitude, min_longitude, max_longitude
