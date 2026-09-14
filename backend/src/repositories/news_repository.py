@@ -6,10 +6,10 @@ import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -29,6 +29,15 @@ class SaveNewsReportResult:
 
     report: WildfireReport
     is_duplicate: bool
+
+
+@dataclass(frozen=True)
+class StoredWildfireReport:
+    """Persisted wildfire report with database identity and evidence timestamp."""
+
+    id: int
+    report: WildfireReport
+    observed_at: datetime
 
 
 class NewsRepository:
@@ -99,6 +108,53 @@ class NewsRepository:
             db_report = self._find_by_source_url(session, source_url)
             return self._to_domain_report(db_report) if db_report is not None else None
 
+    def get_recent_reports(
+        self,
+        as_of: datetime,
+        lookback_minutes: int,
+    ) -> list[StoredWildfireReport]:
+        """Return persisted reports by published_at, falling back to fetched_at, newest first."""
+        self._validate_recent_query(as_of, lookback_minutes)
+        start_time = as_of - timedelta(minutes=lookback_minutes)
+        observed_at = case(
+            (WildfireReportDB.published_at.is_not(None), WildfireReportDB.published_at),
+            else_=WildfireReportDB.fetched_at,
+        )
+
+        with self._session_scope() as session:
+            rows = (
+                session.execute(
+                    select(WildfireReportDB, observed_at.label("observed_at"))
+                    .where(
+                        observed_at >= start_time,
+                        observed_at <= as_of,
+                    )
+                    .order_by(observed_at.desc(), WildfireReportDB.id.desc())
+                )
+                .all()
+            )
+            return [
+                StoredWildfireReport(
+                    id=db_report.id,
+                    report=self._to_domain_report(db_report),
+                    observed_at=self._ensure_aware_datetime(row_observed_at),
+                )
+                for db_report, row_observed_at in rows
+            ]
+
+    def get_by_id(self, report_id: int) -> StoredWildfireReport | None:
+        """Return a persisted wildfire report by database id, or None if absent."""
+        self._validate_report_id(report_id)
+        with self._session_scope() as session:
+            db_report = session.get(WildfireReportDB, report_id)
+            if db_report is None:
+                return None
+            return StoredWildfireReport(
+                id=db_report.id,
+                report=self._to_domain_report(db_report),
+                observed_at=self._report_observed_at(db_report),
+            )
+
     @staticmethod
     def _find_by_source_url(session: Session, source_url: str) -> WildfireReportDB | None:
         return session.execute(
@@ -130,6 +186,11 @@ class NewsRepository:
         return value
 
     @staticmethod
+    def _report_observed_at(db_report: WildfireReportDB) -> datetime:
+        observed_at = db_report.published_at if db_report.published_at is not None else db_report.fetched_at
+        return NewsRepository._ensure_aware_datetime(observed_at)
+
+    @staticmethod
     def _parse_legacy_datetime_string(value: str) -> datetime:
         normalized = value.strip()
         if not normalized:
@@ -145,3 +206,21 @@ class NewsRepository:
             return parsedate_to_datetime(normalized)
         except (TypeError, ValueError) as exc:
             raise NewsRepositoryError(f"Stored wildfire news timestamp is invalid: {value!r}") from exc
+
+    @staticmethod
+    def _validate_recent_query(as_of: datetime, lookback_minutes: int) -> None:
+        if not isinstance(as_of, datetime):
+            raise NewsRepositoryError(f"as_of must be a datetime, got {as_of!r}.")
+        if (
+            isinstance(lookback_minutes, bool)
+            or not isinstance(lookback_minutes, int)
+            or lookback_minutes <= 0
+        ):
+            raise NewsRepositoryError(
+                f"lookback_minutes must be a positive integer, got {lookback_minutes!r}."
+            )
+
+    @staticmethod
+    def _validate_report_id(report_id: int) -> None:
+        if isinstance(report_id, bool) or not isinstance(report_id, int) or report_id <= 0:
+            raise NewsRepositoryError(f"report_id must be a positive integer, got {report_id!r}.")

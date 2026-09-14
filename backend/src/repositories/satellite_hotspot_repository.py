@@ -11,7 +11,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -33,6 +33,14 @@ class SaveHotspotResult:
 
     hotspot: SatelliteHotspot
     is_duplicate: bool
+
+
+@dataclass(frozen=True)
+class StoredSatelliteHotspot:
+    """Persisted satellite hotspot with database identity."""
+
+    id: int
+    hotspot: SatelliteHotspot
 
 
 class SatelliteHotspotRepository:
@@ -132,6 +140,42 @@ class SatelliteHotspotRepository:
             )
             return [self._to_domain_hotspot(db_hotspot) for db_hotspot in db_hotspots]
 
+    def get_recent_hotspots(
+        self,
+        as_of: datetime,
+        lookback_minutes: int,
+    ) -> list[StoredSatelliteHotspot]:
+        """Return persisted hotspots in the lookback window, newest first."""
+        self._validate_recent_query(as_of, lookback_minutes)
+        start_time = as_of - timedelta(minutes=lookback_minutes)
+
+        with self._session_scope() as session:
+            db_hotspots = (
+                session.execute(
+                    select(SatelliteHotspotDB)
+                    .where(
+                        SatelliteHotspotDB.detected_at >= start_time,
+                        SatelliteHotspotDB.detected_at <= as_of,
+                    )
+                    .order_by(SatelliteHotspotDB.detected_at.desc(), SatelliteHotspotDB.id.desc())
+                )
+                .scalars()
+                .all()
+            )
+            return [
+                StoredSatelliteHotspot(id=db_hotspot.id, hotspot=self._to_domain_hotspot(db_hotspot))
+                for db_hotspot in db_hotspots
+            ]
+
+    def get_by_id(self, hotspot_id: int) -> StoredSatelliteHotspot | None:
+        """Return a persisted hotspot by database id, or None if absent."""
+        self._validate_hotspot_id(hotspot_id)
+        with self._session_scope() as session:
+            db_hotspot = session.get(SatelliteHotspotDB, hotspot_id)
+            if db_hotspot is None:
+                return None
+            return StoredSatelliteHotspot(id=db_hotspot.id, hotspot=self._to_domain_hotspot(db_hotspot))
+
     @staticmethod
     def _find_by_detection_key(session: Session, detection_key: str) -> SatelliteHotspotDB | None:
         return session.execute(
@@ -169,3 +213,21 @@ class SatelliteHotspotRepository:
     def _validate_limit(limit: int) -> None:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             raise SatelliteHotspotRepositoryError(f"Invalid limit: {limit!r}. Must be a positive integer.")
+
+    @staticmethod
+    def _validate_recent_query(as_of: datetime, lookback_minutes: int) -> None:
+        if not isinstance(as_of, datetime):
+            raise SatelliteHotspotRepositoryError(f"as_of must be a datetime, got {as_of!r}.")
+        if (
+            isinstance(lookback_minutes, bool)
+            or not isinstance(lookback_minutes, int)
+            or lookback_minutes <= 0
+        ):
+            raise SatelliteHotspotRepositoryError(
+                f"lookback_minutes must be a positive integer, got {lookback_minutes!r}."
+            )
+
+    @staticmethod
+    def _validate_hotspot_id(hotspot_id: int) -> None:
+        if isinstance(hotspot_id, bool) or not isinstance(hotspot_id, int) or hotspot_id <= 0:
+            raise SatelliteHotspotRepositoryError(f"hotspot_id must be a positive integer, got {hotspot_id!r}.")

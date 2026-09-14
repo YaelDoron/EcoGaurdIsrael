@@ -17,11 +17,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
-from src.agents.analysis import FireDangerAssessmentAgent
+from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent
 from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
+from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
+from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
+from src.repositories.news_repository import NewsRepository
+from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
+from src.services.fire_detection import FireDetectionEvidenceService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
@@ -33,6 +38,8 @@ from src.simulation import (
     SimulationScenarioService,
     SimulationFireDangerCoordinator,
     SimulationFireDangerResult,
+    SimulationFireDetectionCoordinator,
+    SimulationFireDetectionResult,
     build_carmel_golan_active_fire_scenario,
     build_scenario,
     get_simulation_location,
@@ -145,6 +152,7 @@ def run_manual(
     scenario: SimulationScenario,
     executor: SimulationEventExecutor | None = None,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
+    fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     input_func: Callable[[str], str] = input,
@@ -152,6 +160,7 @@ def run_manual(
 ) -> RunSummary:
     executor = executor or SimulationEventExecutor()
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
+    fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -175,6 +184,7 @@ def run_manual(
             executor,
             output,
             fire_danger_coordinator,
+            fire_detection_coordinator,
         )
         summary.add(result)
 
@@ -186,6 +196,7 @@ def run_automatic(
     scenario: SimulationScenario,
     executor: SimulationEventExecutor | None = None,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
+    fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     sleep_func: Callable[[float], None] = time.sleep,
@@ -194,6 +205,7 @@ def run_automatic(
 ) -> RunSummary:
     executor = executor or SimulationEventExecutor()
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
+    fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -211,6 +223,7 @@ def run_automatic(
                 executor,
                 output,
                 fire_danger_coordinator,
+                fire_detection_coordinator,
             )
             summary.add(result)
 
@@ -228,6 +241,7 @@ def execute_and_report_event(
     executor: SimulationEventExecutor,
     output: TextIO = sys.stdout,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
+    fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
     event_timestamp = simulation_event_timestamp(scenario_started_at, event)
@@ -250,6 +264,15 @@ def execute_and_report_event(
         )
         if fire_danger_result.triggered:
             print_fire_danger_result(fire_danger_result, output)
+    if fire_detection_coordinator is not None:
+        fire_detection_result = fire_detection_coordinator.handle_event(
+            scenario=scenario,
+            event=event,
+            execution_result=result,
+            event_timestamp=event_timestamp,
+        )
+        if fire_detection_result.triggered:
+            print_fire_detection_result(fire_detection_result, output)
     print("", file=output)
     return result
 
@@ -278,6 +301,26 @@ def build_fire_danger_coordinator() -> SimulationFireDangerCoordinator:
     return SimulationFireDangerCoordinator(assessment_agent=agent)
 
 
+def build_fire_detection_coordinator() -> SimulationFireDetectionCoordinator:
+    """Build the simulation fire-detection analysis stack using shared repositories."""
+    satellite_repository = SatelliteHotspotRepository()
+    news_repository = NewsRepository()
+    evidence_service = FireDetectionEvidenceService(
+        satellite_repository=satellite_repository,
+        news_repository=news_repository,
+    )
+    calculator = FireDetectionCalculator()
+    fire_event_repository = FireEventRepository()
+    agent = FireDetectionAgent(
+        evidence_service=evidence_service,
+        calculator=calculator,
+        fire_event_repository=fire_event_repository,
+        satellite_repository=satellite_repository,
+        news_repository=news_repository,
+    )
+    return SimulationFireDetectionCoordinator(detection_agent=agent)
+
+
 def print_fire_danger_result(
     fire_danger_result: SimulationFireDangerResult,
     output: TextIO = sys.stdout,
@@ -302,10 +345,40 @@ def print_fire_danger_result(
     print(f"assessment_id={assessment_result.stored_assessment_id}", file=output)
 
 
+def print_fire_detection_result(
+    fire_detection_result: SimulationFireDetectionResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    detection_result = fire_detection_result.detection_result
+    print("FIRE DETECTION", file=output)
+    if detection_result is None or not detection_result.success:
+        message = (
+            detection_result.error_message
+            if detection_result is not None and detection_result.error_message
+            else "Fire detection failed."
+        )
+        print("status=ERROR", file=output)
+        print(f"message={message}", file=output)
+        return
+
+    print(f"success={detection_result.success}", file=output)
+    print(f"candidates_processed={detection_result.candidates_processed}", file=output)
+    print(f"no_event_count={detection_result.no_event_count}", file=output)
+    print(f"events_created={detection_result.events_created}", file=output)
+    print(f"events_updated={detection_result.events_updated}", file=output)
+    print(f"event_ids={_format_event_ids(detection_result.event_ids)}", file=output)
+
+
 def _format_optional_score(score: float | None) -> str:
     if score is None:
         return "-"
     return f"{score:.2f}"
+
+
+def _format_event_ids(event_ids: tuple[int, ...]) -> str:
+    if not event_ids:
+        return "-"
+    return ",".join(str(event_id) for event_id in event_ids)
 
 
 def print_startup_summary(

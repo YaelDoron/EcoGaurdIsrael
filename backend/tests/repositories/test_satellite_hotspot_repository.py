@@ -1,5 +1,5 @@
 """Unit tests for SatelliteHotspotRepository using SQLite in-memory."""
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -223,6 +223,48 @@ def test_get_hotspots_between_validates_start_before_end(repository):
 def test_get_hotspots_between_validates_datetime_arguments(repository):
     with pytest.raises(SatelliteHotspotRepositoryError):
         repository.get_hotspots_between("2026-09-05", datetime(2026, 9, 5, 12, 0))
+
+
+def test_get_recent_hotspots_returns_recent_persisted_ids(repository):
+    as_of = datetime(2026, 9, 5, 14, 0, tzinfo=timezone.utc)
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=10), frp=10.0))
+
+    results = repository.get_recent_hotspots(as_of=as_of, lookback_minutes=120)
+
+    assert len(results) == 1
+    assert results[0].id > 0
+    assert results[0].hotspot.frp == 10.0
+
+
+def test_get_recent_hotspots_includes_exact_lookback_boundary(repository):
+    as_of = datetime(2026, 9, 5, 14, 0, tzinfo=timezone.utc)
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=120), frp=10.0))
+
+    results = repository.get_recent_hotspots(as_of=as_of, lookback_minutes=120)
+
+    assert [result.hotspot.frp for result in results] == [10.0]
+
+
+def test_get_recent_hotspots_excludes_older_and_future_rows(repository):
+    as_of = datetime(2026, 9, 5, 14, 0, tzinfo=timezone.utc)
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=121), frp=1.0))
+    repository.save_hotspot(make_hotspot(detected_at=as_of + timedelta(minutes=1), frp=2.0))
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=1), frp=3.0))
+
+    results = repository.get_recent_hotspots(as_of=as_of, lookback_minutes=120)
+
+    assert [result.hotspot.frp for result in results] == [3.0]
+
+
+def test_get_recent_hotspots_ordering_is_deterministic(repository):
+    as_of = datetime(2026, 9, 5, 14, 0, tzinfo=timezone.utc)
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=30), frp=1.0))
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=10), frp=2.0))
+    repository.save_hotspot(make_hotspot(detected_at=as_of - timedelta(minutes=20), frp=3.0))
+
+    results = repository.get_recent_hotspots(as_of=as_of, lookback_minutes=120)
+
+    assert [result.hotspot.frp for result in results] == [2.0, 3.0, 1.0]
 
 
 def test_integrity_error_race_fallback_returns_duplicate_result(repository, monkeypatch, sqlite_session_factory):

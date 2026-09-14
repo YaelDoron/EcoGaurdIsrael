@@ -19,3 +19,7 @@ class NewsRepositoryError(Exception):
 
 class FireDangerAssessmentRepositoryError(Exception):
     """Base exception for fire-danger assessment repository errors."""
+
+
+class FireEventRepositoryError(Exception):
+    """Base exception for wildfire event repository errors."""

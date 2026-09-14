@@ -18,6 +18,9 @@ from src.database.base import Base
 from src.database.models import (  # noqa: F401
     fire_danger_assessment_db,
     fire_danger_assessment_weather_input_db,
+    fire_event_db,
+    fire_event_news_evidence_db,
+    fire_event_satellite_evidence_db,
     satellite_hotspot_db,
     weather_observation_db,
     weather_station_db,
