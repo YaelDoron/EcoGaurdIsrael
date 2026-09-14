@@ -5,5 +5,21 @@ from src.simulation.analysis.simulation_fire_danger_coordinator import (
     SimulationFireDangerCoordinator,
 )
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
+from src.simulation.analysis.simulation_fire_detection_coordinator import (
+    NO_SOURCE_DATA_AVAILABLE_REASON,
+    NON_DETECTION_EVENT_REASON,
+    SOURCE_EVENT_FAILED_REASON,
+    SimulationFireDetectionCoordinator,
+)
+from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
 
-__all__ = ["ASSESSMENT_RADIUS_KM", "SimulationFireDangerCoordinator", "SimulationFireDangerResult"]
+__all__ = [
+    "ASSESSMENT_RADIUS_KM",
+    "SimulationFireDangerCoordinator",
+    "SimulationFireDangerResult",
+    "SimulationFireDetectionCoordinator",
+    "SimulationFireDetectionResult",
+    "NON_DETECTION_EVENT_REASON",
+    "SOURCE_EVENT_FAILED_REASON",
+    "NO_SOURCE_DATA_AVAILABLE_REASON",
+]

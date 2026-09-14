@@ -19,9 +19,11 @@ from scripts.run_demo_simulation import (
     run_manual,
 )
 from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
+from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.calculators.fire_danger.ffwi_config import FFWI_METHODOLOGY_NAME, FFWI_METHODOLOGY_VERSION
 from src.models import FireDangerAssessment, FireDangerAssessmentStatus, FireDangerLevel
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
+from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -94,6 +96,50 @@ class FakeFireDangerCoordinator:
             assessment_result=assessment_result,
             reason=None,
         )
+
+
+class FakeFireDetectionCoordinator:
+    def __init__(self, mode="created") -> None:
+        self.mode = mode
+        self.calls = []
+
+    def handle_event(self, scenario, event, execution_result, event_timestamp):
+        self.calls.append((scenario, event, execution_result, event_timestamp))
+        if event.event_type not in (SimulationEventType.SATELLITE, SimulationEventType.NEWS):
+            return SimulationFireDetectionResult(
+                triggered=False,
+                detection_result=None,
+                reason="non_detection_event",
+            )
+        if self.mode == "no_event":
+            detection_result = FireDetectionResult(
+                success=True,
+                candidates_processed=1,
+                no_event_count=1,
+                events_created=0,
+                events_updated=0,
+                event_ids=(),
+            )
+        elif self.mode == "failure":
+            detection_result = FireDetectionResult(
+                success=False,
+                candidates_processed=1,
+                no_event_count=0,
+                events_created=0,
+                events_updated=0,
+                event_ids=(),
+                error_message="Fire detection orchestration failed.",
+            )
+        else:
+            detection_result = FireDetectionResult(
+                success=True,
+                candidates_processed=1,
+                no_event_count=0,
+                events_created=1,
+                events_updated=0,
+                event_ids=(77,),
+            )
+        return SimulationFireDetectionResult(triggered=True, detection_result=detection_result)
 
 
 class FakeAutomaticService:
@@ -224,6 +270,7 @@ def test_manual_mode_executes_events_in_order_with_expected_timestamps():
         scenario=scenario,
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
         output=output,
@@ -248,6 +295,7 @@ def test_manual_mode_aggregates_failures_and_continues():
         scenario=scenario,
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -271,6 +319,7 @@ def test_automatic_mode_executes_due_batches_and_sleeps_between_polls():
         scenario=scenario,
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         service=service,
         scenario_started_at=STARTED_AT,
         sleep_func=sleeps.append,
@@ -293,6 +342,7 @@ def test_multi_incident_preset_manual_order_makes_incidents_visible():
         scenario=scenario,
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -345,6 +395,7 @@ def test_weather_event_output_includes_fire_danger_assessment_block_when_trigger
     assert "score=47.83" in text
     assert "level=VERY_HIGH" in text
     assert "assessment_id=123" in text
+    assert "FIRE DETECTION" not in text
 
 
 @pytest.mark.parametrize("event_type", [SimulationEventType.SATELLITE, SimulationEventType.NEWS])
@@ -362,7 +413,81 @@ def test_non_weather_event_output_does_not_include_fire_danger_assessment(event_
         fire_danger_coordinator=FakeFireDangerCoordinator(),
     )
 
-    assert "FIRE DANGER ASSESSMENT" not in output.getvalue()
+    text = output.getvalue()
+    assert "FIRE DANGER ASSESSMENT" not in text
+    assert "FIRE DETECTION" not in text
+
+
+@pytest.mark.parametrize("event_type", [SimulationEventType.SATELLITE, SimulationEventType.NEWS])
+def test_direct_evidence_event_output_includes_fire_detection(event_type):
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is event_type)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+    )
+
+    text = output.getvalue()
+    assert "FIRE DETECTION" in text
+    assert "success=True" in text
+    assert "candidates_processed=1" in text
+    assert "no_event_count=0" in text
+    assert "events_created=1" in text
+    assert "events_updated=0" in text
+    assert "event_ids=77" in text
+    assert "FIRE DANGER ASSESSMENT" not in text
+
+
+def test_detection_no_event_output_is_successful_zero_event_result():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(mode="no_event"),
+    )
+
+    text = output.getvalue()
+    assert "FIRE DETECTION" in text
+    assert "success=True" in text
+    assert "no_event_count=1" in text
+    assert "events_created=0" in text
+    assert "events_updated=0" in text
+    assert "event_ids=-" in text
+
+
+def test_detection_operational_failure_is_printed_separately_from_simulation_failure():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.NEWS)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(success=True),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(mode="failure"),
+    )
+
+    text = output.getvalue()
+    assert "generated=1 saved=1 duplicates=0 failed=0 success=True" in text
+    assert "FIRE DETECTION" in text
+    assert "status=ERROR" in text
+    assert "message=Fire detection orchestration failed." in text
+    assert "Error: simulated failure" not in text
 
 
 def test_insufficient_data_fire_danger_output_is_printed_clearly():
@@ -396,6 +521,7 @@ def test_operational_assessment_failure_is_printed_separately_from_simulation_fa
         executor=FakeExecutor(success=True),
         output=output,
         fire_danger_coordinator=FakeFireDangerCoordinator(mode="failure"),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
     )
 
     text = output.getvalue()
@@ -404,6 +530,60 @@ def test_operational_assessment_failure_is_printed_separately_from_simulation_fa
     assert "status=ERROR" in text
     assert "message=Fire-danger assessment persistence failed." in text
     assert "Error: simulated failure" not in text
+
+
+def test_high_risk_no_fire_manual_output_does_not_display_fire_detection():
+    args = Namespace(scenario="high_risk_no_fire", location="carmel", preset=None, seed=42)
+    scenario = build_scenario_from_args(args)
+    output = StringIO()
+    detector = FakeFireDetectionCoordinator()
+
+    run_manual(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=detector,
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: "",
+        output=output,
+    )
+
+    assert "FIRE DETECTION" not in output.getvalue()
+
+
+def test_low_risk_no_fire_manual_output_does_not_display_fire_detection():
+    args = Namespace(scenario="low_risk_no_fire", location="carmel", preset=None, seed=42)
+    scenario = build_scenario_from_args(args)
+    output = StringIO()
+
+    run_manual(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: "",
+        output=output,
+    )
+
+    assert "FIRE DETECTION" not in output.getvalue()
+
+
+def test_active_fire_manual_output_displays_detection_after_satellite_and_news():
+    scenario = build_active_fire_scenario(seed=42)
+    output = StringIO()
+
+    run_manual(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: "",
+        output=output,
+    )
+
+    assert output.getvalue().count("FIRE DETECTION") == 4
 
 
 def test_manual_mode_invokes_fire_danger_after_each_event_without_changing_prompt_behavior():
@@ -415,6 +595,7 @@ def test_manual_mode_invokes_fire_danger_after_each_event_without_changing_promp
         scenario=scenario,
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
         output=StringIO(),
@@ -435,6 +616,7 @@ def test_automatic_mode_invokes_fire_danger_after_due_events_without_changing_sl
         scenario=scenario,
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         service=service,
         scenario_started_at=STARTED_AT,
         sleep_func=sleeps.append,
@@ -456,6 +638,7 @@ def test_multi_incident_output_associates_assessments_with_correct_event_areas()
         scenario=scenario,
         executor=executor,
         fire_danger_coordinator=coordinator,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,

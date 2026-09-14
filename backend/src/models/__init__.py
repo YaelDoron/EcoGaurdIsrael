@@ -8,6 +8,14 @@ from src.models.fire_danger_input import FireDangerInput
 from src.models.fire_danger_input_result import FireDangerInputResult
 from src.models.fire_danger_input_status import FireDangerInputStatus
 from src.models.fire_danger_level import FireDangerLevel
+from src.models.fire_detection_candidate import FireDetectionCandidate
+from src.models.fire_detection_decision import FireDetectionDecision
+from src.models.fire_detection_evidence import FireDetectionEvidence
+from src.models.fire_detection_status import FireDetectionStatus
+from src.models.fire_event import FireEvent
+from src.models.fire_event_status import FireEventStatus
+from src.models.fire_evidence_ref import FireEvidenceRef
+from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.weather_observation import WeatherObservation
@@ -26,4 +34,12 @@ __all__ = [
     "AssessmentArea",
     "FireDangerInputResult",
     "FireDangerInputStatus",
+    "FireEvidenceType",
+    "FireDetectionEvidence",
+    "FireEvidenceRef",
+    "FireDetectionCandidate",
+    "FireDetectionStatus",
+    "FireDetectionDecision",
+    "FireEvent",
+    "FireEventStatus",
 ]

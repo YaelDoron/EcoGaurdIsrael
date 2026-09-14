@@ -2,5 +2,12 @@
 
 from src.agents.analysis.fire_danger_assessment_agent import FireDangerAssessmentAgent
 from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
+from src.agents.analysis.fire_detection_agent import FireDetectionAgent
+from src.agents.analysis.fire_detection_result import FireDetectionResult
 
-__all__ = ["FireDangerAssessmentAgent", "FireDangerAssessmentResult"]
+__all__ = [
+    "FireDangerAssessmentAgent",
+    "FireDangerAssessmentResult",
+    "FireDetectionAgent",
+    "FireDetectionResult",
+]

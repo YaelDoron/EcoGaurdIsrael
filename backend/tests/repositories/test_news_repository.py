@@ -1,6 +1,6 @@
 """Unit tests for NewsRepository using SQLite in-memory."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -106,6 +106,66 @@ def test_legacy_postgres_string_timestamp_is_mapped_to_aware_datetime():
 
 def test_missing_report_returns_none(repository):
     assert repository.get_by_source_url("https://example.com/missing") is None
+
+
+def test_get_recent_reports_returns_recent_persisted_ids(repository):
+    as_of = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+    repository.save_report(make_report(published_at=as_of - timedelta(minutes=10)))
+
+    results = repository.get_recent_reports(as_of=as_of, lookback_minutes=120)
+
+    assert len(results) == 1
+    assert results[0].id > 0
+    assert results[0].observed_at == as_of - timedelta(minutes=10)
+
+
+def test_get_recent_reports_uses_published_at_when_available(repository):
+    as_of = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+    repository.save_report(
+        make_report(
+            published_at=as_of - timedelta(minutes=10),
+            fetched_at=as_of - timedelta(minutes=1),
+        )
+    )
+
+    results = repository.get_recent_reports(as_of=as_of, lookback_minutes=120)
+
+    assert results[0].observed_at == as_of - timedelta(minutes=10)
+
+
+def test_get_recent_reports_falls_back_to_fetched_at_when_published_at_is_none(repository):
+    as_of = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+    repository.save_report(make_report(published_at=None, fetched_at=as_of - timedelta(minutes=5)))
+
+    results = repository.get_recent_reports(as_of=as_of, lookback_minutes=120)
+
+    assert results[0].observed_at == as_of - timedelta(minutes=5)
+
+
+def test_get_recent_reports_excludes_old_and_future_rows(repository):
+    as_of = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+    repository.save_report(make_report(source_url="https://example.com/old", published_at=as_of - timedelta(minutes=121)))
+    repository.save_report(make_report(source_url="https://example.com/future", published_at=as_of + timedelta(minutes=1)))
+    repository.save_report(make_report(source_url="https://example.com/recent", published_at=as_of - timedelta(minutes=1)))
+
+    results = repository.get_recent_reports(as_of=as_of, lookback_minutes=120)
+
+    assert [result.report.source_url for result in results] == ["https://example.com/recent"]
+
+
+def test_get_recent_reports_ordering_is_deterministic(repository):
+    as_of = datetime(2026, 9, 12, 12, 0, tzinfo=timezone.utc)
+    repository.save_report(make_report(source_url="https://example.com/oldest", published_at=as_of - timedelta(minutes=30)))
+    repository.save_report(make_report(source_url="https://example.com/newest", published_at=as_of - timedelta(minutes=10)))
+    repository.save_report(make_report(source_url="https://example.com/middle", published_at=as_of - timedelta(minutes=20)))
+
+    results = repository.get_recent_reports(as_of=as_of, lookback_minutes=120)
+
+    assert [result.report.source_url for result in results] == [
+        "https://example.com/newest",
+        "https://example.com/middle",
+        "https://example.com/oldest",
+    ]
 
 
 def test_integrity_error_race_fallback_returns_duplicate_result(repository, monkeypatch, sqlite_session_factory):
