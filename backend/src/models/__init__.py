@@ -27,6 +27,13 @@ from src.models.fire_severity_input import FireSeverityInput
 from src.models.fire_severity_input_result import FireSeverityInputResult
 from src.models.fire_severity_input_status import FireSeverityInputStatus
 from src.models.fire_severity_level import FireSeverityLevel
+from src.models.fire_spread_calculation import FireSpreadCalculation
+from src.models.fire_spread_fuel_class import FireSpreadFuelClass
+from src.models.fire_spread_input import FireSpreadInput
+from src.models.fire_spread_input_result import FireSpreadInputResult
+from src.models.fire_spread_input_status import FireSpreadInputStatus
+from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPredictionCell
+from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.vegetation_data import VegetationData
 from src.models.weather_observation import WeatherObservation
@@ -63,5 +70,13 @@ __all__ = [
     "FireSeverityInputStatus",
     "FireSeverityLevel",
     "FireSeverityCalculation",
+    "FireSpreadCalculation",
+    "FireSpreadFuelClass",
+    "FireSpreadInput",
+    "FireSpreadInputResult",
+    "FireSpreadInputStatus",
+    "FireSpreadPrediction",
+    "FireSpreadPredictionCell",
+    "FireSpreadPredictionStatus",
     "VegetationData",
 ]

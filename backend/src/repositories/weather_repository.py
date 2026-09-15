@@ -309,6 +309,49 @@ class WeatherRepository:
                 for db_station, db_observation in rows
             ]
 
+    def get_observations_by_ids(
+        self,
+        observation_ids: tuple[int, ...],
+    ) -> tuple[StoredWeatherObservation, ...]:
+        """Return stored observations (with station info) for exact DB ids.
+
+        Added for User Story 4.2 (wildfire-spread prediction), which needs
+        to re-materialize the exact WeatherObservation rows a
+        FireSeverityAssessment already traced by id, rather than re-querying
+        by area/time. Duplicate requested ids are treated as one request.
+        Ids with no matching row are silently omitted from the result --
+        callers can compare the returned `observation_id`s against the
+        requested ids to detect a missing observation. Deterministic order:
+        ascending observation id.
+        """
+        ids = self._normalize_observation_ids(observation_ids)
+        if not ids:
+            return ()
+
+        with self._session_scope() as session:
+            rows = (
+                session.execute(
+                    select(WeatherStationDB, WeatherObservationDB)
+                    .join(WeatherObservationDB, WeatherObservationDB.station_id == WeatherStationDB.id)
+                    .where(WeatherObservationDB.id.in_(ids))
+                    .order_by(WeatherObservationDB.id.asc())
+                )
+                .all()
+            )
+
+            return tuple(
+                StoredWeatherObservation(
+                    observation_id=db_observation.id,
+                    station_id=db_station.id,
+                    station=self._to_domain_station(db_station),
+                    observation=self._to_domain_observation(
+                        db_observation,
+                        db_station.external_station_id,
+                    ),
+                )
+                for db_station, db_observation in rows
+            )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -355,6 +398,19 @@ class WeatherRepository:
             wind_gust=db_observation.wind_gust,
             rainfall=db_observation.rainfall,
         )
+
+    @staticmethod
+    def _normalize_observation_ids(observation_ids: tuple[int, ...]) -> tuple[int, ...]:
+        try:
+            ids = tuple(observation_ids)
+        except TypeError as exc:
+            raise WeatherRepositoryError("observation_ids must be iterable.") from exc
+        for value in ids:
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise WeatherRepositoryError(
+                    f"observation_ids must contain positive integers, got {value!r}."
+                )
+        return tuple(sorted(set(ids)))
 
     @staticmethod
     def _validate_external_station_id(external_station_id: int) -> None:
