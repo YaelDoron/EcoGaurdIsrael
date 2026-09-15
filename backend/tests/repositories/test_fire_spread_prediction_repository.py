@@ -40,6 +40,7 @@ from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
 from src.repositories.fire_spread_prediction_repository import (
     FireSpreadPredictionRepository,
+    StoredFireSpreadPredictionWithCells,
     StoredFireSpreadPrediction,
 )
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
@@ -481,6 +482,155 @@ def test_get_latest_separates_30_and_60_minute_horizons(repository, event_id, se
 
 def test_get_latest_returns_none_when_no_prediction_exists(repository, event_id):
     assert repository.get_latest_for_event_and_horizon(event_id, 30) is None
+
+
+def test_get_latest_for_event_and_horizon_as_of_filters_future_prediction(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    current = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT - timedelta(minutes=5)),
+        weather_observation_id=observation_id,
+    )
+    repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT + timedelta(minutes=5)),
+        weather_observation_id=observation_id,
+    )
+
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert latest.id == current.id
+
+
+def test_get_latest_for_event_and_horizon_as_of_exact_timestamp_boundary_included(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    expected = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT),
+        weather_observation_id=observation_id,
+    )
+
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert latest.id == expected.id
+
+
+def test_get_latest_for_event_and_horizon_as_of_tie_break_uses_newest_id(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    first = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT),
+        weather_observation_id=observation_id,
+    )
+    second = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT),
+        weather_observation_id=observation_id,
+    )
+
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert latest.id == second.id
+    assert second.id > first.id
+
+
+def test_get_latest_for_event_and_horizon_as_of_filters_horizon(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    thirty = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, horizon_minutes=30),
+        weather_observation_id=observation_id,
+    )
+    sixty = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, horizon_minutes=60),
+        weather_observation_id=observation_id,
+    )
+
+    latest_30 = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+    latest_60 = repository.get_latest_for_event_and_horizon_as_of(event_id, 60, PREDICTED_AT)
+
+    assert latest_30.id == thirty.id
+    assert latest_60.id == sixty.id
+
+
+def test_get_latest_for_event_and_horizon_as_of_filters_fire_event(
+    repository,
+    event_id,
+    fire_event_repository,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    other_event_id = _persist_event(fire_event_repository, satellite_repository)
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    other_assessment_id = persist_assessment(
+        severity_repository,
+        weather_repository,
+        satellite_repository,
+        other_event_id,
+    )
+    observation_id = persist_weather(weather_repository)
+    expected = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, predicted_at=PREDICTED_AT),
+        weather_observation_id=observation_id,
+    )
+    repository.save_prediction(
+        prediction=make_prediction(other_event_id, other_assessment_id, predicted_at=PREDICTED_AT + timedelta(minutes=1)),
+        weather_observation_id=observation_id,
+    )
+
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT + timedelta(minutes=10))
+
+    assert latest.id == expected.id
+
+
+def test_get_latest_for_event_and_horizon_as_of_returns_cell_ids(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    stored = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, cells=(make_cell(), make_cell(latitude=32.74, longitude=35.055))),
+        weather_observation_id=observation_id,
+    )
+
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert isinstance(latest, StoredFireSpreadPredictionWithCells)
+    assert latest.id == stored.id
+    assert len(latest.cells) == 2
+    assert all(cell.cell_id > 0 for cell in latest.cells)
+    assert [cell.cell.spread_risk_score for cell in latest.cells] == [60.0, 60.0]
+
+
+def test_get_latest_for_event_and_horizon_as_of_returns_none_when_no_past_prediction(repository, event_id):
+    assert repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT) is None
 
 
 def test_deterministic_cell_reconstruction_order(repository, event_id, severity_repository, weather_repository, satellite_repository):

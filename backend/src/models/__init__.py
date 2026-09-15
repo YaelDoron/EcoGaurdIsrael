@@ -36,6 +36,13 @@ from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPr
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
+from src.models.predicted_risk_target_candidate import PredictedRiskTargetCandidate
+from src.models.response_target import ResponseTarget
+from src.models.response_target_input import ResponseTargetInput
+from src.models.response_target_input_result import ResponseTargetInputResult
+from src.models.response_target_input_status import ResponseTargetInputStatus
+from src.models.response_target_set import ResponseTargetSet
+from src.models.response_target_type import ResponseTargetType
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.vegetation_data import VegetationData
 from src.models.weather_observation import WeatherObservation
@@ -80,6 +87,13 @@ __all__ = [
     "FireSpreadPrediction",
     "FireSpreadPredictionCell",
     "FireSpreadPredictionStatus",
+    "PredictedRiskTargetCandidate",
+    "ResponseTarget",
+    "ResponseTargetInput",
+    "ResponseTargetInputResult",
+    "ResponseTargetInputStatus",
+    "ResponseTargetSet",
+    "ResponseTargetType",
     "VegetationData",
     "GraphNode",
     "GraphEdge",

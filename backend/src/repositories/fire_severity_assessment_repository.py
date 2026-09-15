@@ -129,6 +129,34 @@ class FireSeverityAssessmentRepository:
             )
             return self._to_stored_assessment(db_assessment) if db_assessment is not None else None
 
+    def get_latest_for_event_as_of(
+        self,
+        fire_event_id: int,
+        as_of: datetime,
+    ) -> StoredFireSeverityAssessment | None:
+        """Return the latest persisted severity state for a FireEvent at or before `as_of`."""
+        self._validate_fire_event_id(fire_event_id)
+        self._validate_aware_datetime("as_of", as_of)
+        with self._session_scope() as session:
+            db_assessment = (
+                session.execute(
+                    select(FireSeverityAssessmentDB)
+                    .options(
+                        selectinload(FireSeverityAssessmentDB.weather_inputs),
+                        selectinload(FireSeverityAssessmentDB.satellite_inputs),
+                    )
+                    .where(
+                        FireSeverityAssessmentDB.fire_event_id == fire_event_id,
+                        FireSeverityAssessmentDB.assessed_at <= as_of,
+                    )
+                    .order_by(FireSeverityAssessmentDB.assessed_at.desc(), FireSeverityAssessmentDB.id.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .one_or_none()
+            )
+            return self._to_stored_assessment(db_assessment) if db_assessment is not None else None
+
     def get_weather_input_ids(self, assessment_id: int) -> tuple[int, ...]:
         """Return weather observation IDs linked to an assessment, sorted ascending."""
         self._validate_assessment_id(assessment_id)
@@ -300,6 +328,13 @@ class FireSeverityAssessmentRepository:
         if isinstance(fire_event_id, bool) or not isinstance(fire_event_id, int) or fire_event_id <= 0:
             raise FireSeverityAssessmentRepositoryError(
                 f"fire_event_id must be a positive integer, got {fire_event_id!r}."
+            )
+
+    @staticmethod
+    def _validate_aware_datetime(field_name: str, value: object) -> None:
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise FireSeverityAssessmentRepositoryError(
+                f"{field_name} must be a timezone-aware datetime, got {value!r}."
             )
 
     @staticmethod

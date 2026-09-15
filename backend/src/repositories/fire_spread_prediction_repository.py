@@ -33,6 +33,24 @@ class StoredFireSpreadPrediction:
     weather_observation_id: int | None = None
 
 
+@dataclass(frozen=True)
+class StoredFireSpreadPredictionCell:
+    """Persisted prediction cell plus database identity."""
+
+    cell_id: int
+    cell: FireSpreadPredictionCell
+
+
+@dataclass(frozen=True)
+class StoredFireSpreadPredictionWithCells:
+    """Persisted FireSpreadPrediction with cell database identities."""
+
+    id: int
+    prediction: FireSpreadPrediction
+    cells: tuple[StoredFireSpreadPredictionCell, ...] = ()
+    weather_observation_id: int | None = None
+
+
 class FireSpreadPredictionRepository:
     """Persists FireSpreadPrediction domain objects via SQLAlchemy."""
 
@@ -128,6 +146,42 @@ class FireSpreadPredictionRepository:
             )
             return self._to_stored_prediction(db_prediction) if db_prediction is not None else None
 
+    def get_latest_for_event_and_horizon_as_of(
+        self,
+        fire_event_id: int,
+        horizon_minutes: int,
+        as_of: datetime,
+    ) -> StoredFireSpreadPredictionWithCells | None:
+        """Return the latest persisted prediction state for a horizon at or before `as_of`.
+
+        This read DTO preserves prediction and cell primary keys for downstream
+        response-target traceability without adding persistence fields to the
+        pure FireSpreadPrediction domain model.
+        """
+        self._validate_fire_event_id(fire_event_id)
+        self._validate_horizon_minutes(horizon_minutes)
+        self._validate_aware_datetime("as_of", as_of)
+        with self._session_scope() as session:
+            db_prediction = (
+                session.execute(
+                    select(FireSpreadPredictionDB)
+                    .options(
+                        selectinload(FireSpreadPredictionDB.cells),
+                        selectinload(FireSpreadPredictionDB.weather_inputs),
+                    )
+                    .where(
+                        FireSpreadPredictionDB.fire_event_id == fire_event_id,
+                        FireSpreadPredictionDB.horizon_minutes == horizon_minutes,
+                        FireSpreadPredictionDB.predicted_at <= as_of,
+                    )
+                    .order_by(FireSpreadPredictionDB.predicted_at.desc(), FireSpreadPredictionDB.id.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .one_or_none()
+            )
+            return self._to_stored_prediction_with_cells(db_prediction) if db_prediction is not None else None
+
     @staticmethod
     def _to_db_prediction(prediction: FireSpreadPrediction) -> FireSpreadPredictionDB:
         return FireSpreadPredictionDB(
@@ -201,6 +255,52 @@ class FireSpreadPredictionRepository:
             weather_observation_id=weather_ids[0] if weather_ids else None,
         )
 
+    @classmethod
+    def _to_stored_prediction_with_cells(
+        cls,
+        db_prediction: FireSpreadPredictionDB,
+    ) -> StoredFireSpreadPredictionWithCells:
+        stored_cells = tuple(
+            sorted(
+                (
+                    StoredFireSpreadPredictionCell(
+                        cell_id=db_cell.id,
+                        cell=FireSpreadPredictionCell(
+                            latitude=db_cell.latitude,
+                            longitude=db_cell.longitude,
+                            spread_probability=db_cell.spread_probability,
+                            spread_risk_score=db_cell.spread_risk_score,
+                            reached_step=db_cell.reached_step,
+                            reached_minutes=db_cell.reached_minutes,
+                        ),
+                    )
+                    for db_cell in db_prediction.cells
+                ),
+                key=lambda stored_cell: (
+                    stored_cell.cell.reached_step,
+                    stored_cell.cell.latitude,
+                    stored_cell.cell.longitude,
+                    stored_cell.cell_id,
+                ),
+            )
+        )
+        weather_ids = tuple(trace.weather_observation_id for trace in db_prediction.weather_inputs)
+        return StoredFireSpreadPredictionWithCells(
+            id=db_prediction.id,
+            prediction=FireSpreadPrediction(
+                fire_event_id=db_prediction.fire_event_id,
+                severity_assessment_id=db_prediction.severity_assessment_id,
+                predicted_at=cls._ensure_aware_datetime(db_prediction.predicted_at),
+                horizon_minutes=db_prediction.horizon_minutes,
+                status=FireSpreadPredictionStatus(db_prediction.status),
+                methodology=db_prediction.methodology,
+                methodology_version=db_prediction.methodology_version,
+                cells=tuple(stored_cell.cell for stored_cell in stored_cells),
+            ),
+            cells=stored_cells,
+            weather_observation_id=weather_ids[0] if weather_ids else None,
+        )
+
     @staticmethod
     def _validate_save_request(prediction: FireSpreadPrediction, weather_observation_id: int | None) -> None:
         if not isinstance(prediction, FireSpreadPrediction):
@@ -240,6 +340,13 @@ class FireSpreadPredictionRepository:
         if isinstance(horizon_minutes, bool) or not isinstance(horizon_minutes, int) or horizon_minutes <= 0:
             raise FireSpreadPredictionRepositoryError(
                 f"horizon_minutes must be a positive integer, got {horizon_minutes!r}."
+            )
+
+    @staticmethod
+    def _validate_aware_datetime(field_name: str, value: object) -> None:
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise FireSpreadPredictionRepositoryError(
+                f"{field_name} must be a timezone-aware datetime, got {value!r}."
             )
 
     @staticmethod

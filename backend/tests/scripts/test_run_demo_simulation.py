@@ -20,6 +20,10 @@ from scripts.run_demo_simulation import (
 )
 from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
 from src.agents.analysis.fire_detection_result import FireDetectionResult
+from src.agents.analysis.response_target_generation_result import (
+    ResponseTargetGenerationResult,
+    ResponseTargetGenerationStatus,
+)
 from src.calculators.fire_danger.ffwi_config import FFWI_METHODOLOGY_NAME, FFWI_METHODOLOGY_VERSION
 from src.calculators.fire_severity.fire_severity_config import (
     FIRE_SEVERITY_METHODOLOGY_NAME,
@@ -32,12 +36,15 @@ from src.models import (
     FireSeverityAssessment,
     FireSeverityAssessmentStatus,
     FireSeverityLevel,
+    ResponseTarget,
+    ResponseTargetType,
 )
 from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
 from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
 from src.simulation.analysis.simulation_fire_spread_result import SimulationFireSpreadResult
+from src.simulation.analysis.simulation_response_target_result import SimulationResponseTargetResult
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -69,6 +76,18 @@ def _stub_fire_spread_coordinator(monkeypatch):
     monkeypatch.setattr(
         "scripts.run_demo_simulation.get_fire_spread_coordinator",
         lambda: _NoOpSpreadCoordinator(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_response_target_coordinator(monkeypatch):
+    class _NoOpResponseTargetCoordinator:
+        def generate_for_fire_events(self, fire_event_ids, as_of):
+            return SimulationResponseTargetResult(triggered=False, reason="stubbed_in_tests")
+
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_response_target_coordinator",
+        lambda: _NoOpResponseTargetCoordinator(),
     )
 
 
@@ -182,6 +201,23 @@ class FakeOperationalCoordinator:
     def scramble_resource_availability(self, incident_latitude, incident_longitude, availability_ratio=0.9):
         self.calls.append((incident_latitude, incident_longitude, availability_ratio))
         return []
+
+
+class FakeResponseTargetCoordinator:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate_for_fire_events(self, fire_event_ids, as_of):
+        fire_event_ids = tuple(fire_event_ids)
+        self.calls.append({"fire_event_ids": fire_event_ids, "as_of": as_of})
+        generations = tuple(make_response_target_generation(fire_event_id) for fire_event_id in sorted(set(fire_event_ids)))
+        return SimulationResponseTargetResult(
+            triggered=True,
+            generation_results=generations,
+            fire_event_ids=tuple(sorted(set(fire_event_ids))),
+        )
+
+
 class FakeFireSeverityCoordinator:
     def __init__(self, mode="valid") -> None:
         self.mode = mode
@@ -252,6 +288,26 @@ def make_assessment(status=FireDangerAssessmentStatus.VALID, area_name="Carmel D
         level=FireDangerLevel.VERY_HIGH if status is FireDangerAssessmentStatus.VALID else None,
         methodology=FFWI_METHODOLOGY_NAME,
         methodology_version=FFWI_METHODOLOGY_VERSION,
+    )
+
+
+def make_response_target_generation(fire_event_id: int) -> ResponseTargetGenerationResult:
+    targets = (
+        ResponseTarget(
+            fire_event_id=fire_event_id,
+            target_type=ResponseTargetType.ACTIVE_FIRE,
+            latitude=32.731,
+            longitude=35.046,
+            priority_score=71.25,
+        ),
+    )
+    return ResponseTargetGenerationResult(
+        success=True,
+        fire_event_id=fire_event_id,
+        status=ResponseTargetGenerationStatus.GENERATED,
+        target_set_id=fire_event_id + 900,
+        targets=targets,
+        target_count=len(targets),
     )
 
 
@@ -667,6 +723,109 @@ def test_fire_spread_result_is_printed_when_spread_coordinator_triggers(monkeypa
     assert "horizon_minutes=30" in text
     assert "status=INSUFFICIENT_DATA" in text
     assert "prediction_id=1" in text
+
+
+def test_response_targets_are_generated_after_spread_with_exact_event_timestamp(monkeypatch):
+    from src.models import FireSpreadPrediction, FireSpreadPredictionStatus
+    from src.repositories.fire_spread_prediction_repository import StoredFireSpreadPrediction
+
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+    response_coordinator = FakeResponseTargetCoordinator()
+    order = []
+
+    class _TriggeredSpreadCoordinator:
+        def handle_severity_result(self, severity_result, event_timestamp):
+            order.append("spread")
+            prediction = FireSpreadPrediction(
+                fire_event_id=77,
+                severity_assessment_id=456,
+                predicted_at=event_timestamp,
+                horizon_minutes=30,
+                status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+                methodology="ECOGUARD_PROPAGATOR_CA",
+                methodology_version="1.0",
+            )
+            return SimulationFireSpreadResult(
+                triggered=True,
+                prediction_results=(StoredFireSpreadPrediction(id=1, prediction=prediction),),
+            )
+
+    class _RecordingResponseTargetCoordinator(FakeResponseTargetCoordinator):
+        def generate_for_fire_events(self, fire_event_ids, as_of):
+            order.append("response")
+            return super().generate_for_fire_events(fire_event_ids, as_of)
+
+    response_coordinator = _RecordingResponseTargetCoordinator()
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_fire_spread_coordinator",
+        lambda: _TriggeredSpreadCoordinator(),
+    )
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_response_target_coordinator",
+        lambda: response_coordinator,
+    )
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(),
+    )
+
+    expected_timestamp = simulation_event_timestamp(STARTED_AT, event)
+    assert order == ["spread", "response"]
+    assert response_coordinator.calls == [
+        {"fire_event_ids": (77, 77, 77), "as_of": expected_timestamp}
+    ]
+    text = output.getvalue()
+    assert text.index("FIRE SPREAD PREDICTION") < text.index("RESPONSE TARGETS")
+    assert "target_sets_generated=1" in text
+    assert "target_set_id=977" in text
+    assert "target_1_type=ACTIVE_FIRE" in text
+
+
+def test_news_detection_generates_response_targets_without_severity_or_spread(monkeypatch):
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.NEWS)
+    output = StringIO()
+    response_coordinator = FakeResponseTargetCoordinator()
+
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_response_target_coordinator",
+        lambda: response_coordinator,
+    )
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(),
+    )
+
+    assert response_coordinator.calls == [
+        {"fire_event_ids": (77,), "as_of": simulation_event_timestamp(STARTED_AT, event)}
+    ]
+    text = output.getvalue()
+    assert "FIRE DETECTION" in text
+    assert "FIRE SEVERITY ASSESSMENT" not in text
+    assert "RESPONSE TARGETS" in text
+
+
+def test_build_response_target_coordinator_returns_simulation_coordinator():
+    from scripts.run_demo_simulation import build_response_target_coordinator
+    from src.simulation import SimulationResponseTargetCoordinator
+
+    coordinator = build_response_target_coordinator()
+
+    assert isinstance(coordinator, SimulationResponseTargetCoordinator)
 
 
 def test_build_fire_spread_coordinator_returns_simulation_coordinator():
