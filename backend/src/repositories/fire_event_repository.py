@@ -208,6 +208,53 @@ class FireEventRepository:
             db_event = sorted(matches, key=lambda match: match[:4])[0][4]
             return self._to_stored_event(db_event, self._get_evidence_refs(session, db_event.id))
 
+    def get_active_events_near(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        as_of: datetime,
+    ) -> tuple[StoredFireEvent, ...]:
+        """Return active events near a coordinate at a deterministic simulation instant."""
+        self._validate_coordinate("latitude", latitude, -90, 90)
+        self._validate_coordinate("longitude", longitude, -180, 180)
+        self._validate_radius_km(radius_km)
+        self._validate_aware_datetime("as_of", as_of)
+
+        with self._session_scope() as session:
+            db_events = (
+                session.execute(
+                    select(FireEventDB)
+                    .options(
+                        selectinload(FireEventDB.satellite_evidence),
+                        selectinload(FireEventDB.news_evidence),
+                    )
+                    .where(
+                        FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES),
+                        FireEventDB.detected_at <= as_of,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            matches = []
+            for db_event in db_events:
+                distance_km = self._haversine_distance_km(
+                    latitude,
+                    longitude,
+                    db_event.latitude,
+                    db_event.longitude,
+                )
+                if distance_km > radius_km + _DISTANCE_TOLERANCE_KM:
+                    continue
+                matches.append((distance_km, db_event.id, db_event))
+
+            return tuple(
+                self._to_stored_event(match[2], self._get_evidence_refs(session, match[2].id))
+                for match in sorted(matches, key=lambda match: (match[0], match[1]))
+            )
+
     def _insert_missing_evidence_refs(
         self,
         session: Session,
@@ -336,6 +383,13 @@ class FireEventRepository:
     def _validate_aware_datetime(field_name: str, value: object) -> None:
         if not isinstance(value, datetime) or value.tzinfo is None:
             raise FireEventRepositoryError(f"{field_name} must be a timezone-aware datetime, got {value!r}.")
+
+    @staticmethod
+    def _validate_radius_km(radius_km: object) -> None:
+        if isinstance(radius_km, bool) or not isinstance(radius_km, (int, float)) or not math.isfinite(radius_km):
+            raise FireEventRepositoryError(f"radius_km must be a finite number, got {radius_km!r}.")
+        if radius_km <= 0:
+            raise FireEventRepositoryError(f"radius_km must be greater than 0, got {radius_km!r}.")
 
     @staticmethod
     def _validate_coordinate(field_name: str, value: object, minimum: float, maximum: float) -> None:

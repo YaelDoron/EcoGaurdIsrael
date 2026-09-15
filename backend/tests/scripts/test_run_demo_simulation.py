@@ -21,9 +21,22 @@ from scripts.run_demo_simulation import (
 from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
 from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.calculators.fire_danger.ffwi_config import FFWI_METHODOLOGY_NAME, FFWI_METHODOLOGY_VERSION
-from src.models import FireDangerAssessment, FireDangerAssessmentStatus, FireDangerLevel
+from src.calculators.fire_severity.fire_severity_config import (
+    FIRE_SEVERITY_METHODOLOGY_NAME,
+    FIRE_SEVERITY_METHODOLOGY_VERSION,
+)
+from src.models import (
+    FireDangerAssessment,
+    FireDangerAssessmentStatus,
+    FireDangerLevel,
+    FireSeverityAssessment,
+    FireSeverityAssessmentStatus,
+    FireSeverityLevel,
+)
+from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
+from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -140,6 +153,45 @@ class FakeFireDetectionCoordinator:
                 event_ids=(77,),
             )
         return SimulationFireDetectionResult(triggered=True, detection_result=detection_result)
+
+
+class FakeFireSeverityCoordinator:
+    def __init__(self, mode="valid") -> None:
+        self.mode = mode
+        self.calls = []
+
+    def handle_event(self, scenario, event, execution_result, event_timestamp, detection_result=None):
+        self.calls.append((scenario, event, execution_result, event_timestamp, detection_result))
+        if event.event_type is SimulationEventType.NEWS:
+            return SimulationFireSeverityResult(triggered=False, reason="non_severity_event")
+        if self.mode == "none":
+            return SimulationFireSeverityResult(triggered=False, reason="no_active_fire_events_near_weather")
+        if self.mode == "failure":
+            return SimulationFireSeverityResult(
+                triggered=True,
+                failed_fire_event_ids=(77,),
+                error_messages=("Fire-severity assessment failed.",),
+            )
+        return SimulationFireSeverityResult(
+            triggered=True,
+            assessment_results=(
+                StoredFireSeverityAssessment(
+                    assessment_id=456,
+                    assessment=FireSeverityAssessment(
+                        fire_event_id=77,
+                        assessed_at=event_timestamp,
+                        status=FireSeverityAssessmentStatus.VALID,
+                        score=71.25,
+                        level=FireSeverityLevel.HIGH,
+                        methodology=FIRE_SEVERITY_METHODOLOGY_NAME,
+                        methodology_version=FIRE_SEVERITY_METHODOLOGY_VERSION,
+                    ),
+                    weather_observation_ids=(1,),
+                    satellite_hotspot_ids=(2,),
+                    selected_frp_hotspot_id=2,
+                ),
+            ),
+        )
 
 
 class FakeAutomaticService:
@@ -271,6 +323,7 @@ def test_manual_mode_executes_events_in_order_with_expected_timestamps():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
         output=output,
@@ -296,6 +349,7 @@ def test_manual_mode_aggregates_failures_and_continues():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -320,6 +374,7 @@ def test_automatic_mode_executes_due_batches_and_sleeps_between_polls():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         service=service,
         scenario_started_at=STARTED_AT,
         sleep_func=sleeps.append,
@@ -343,6 +398,7 @@ def test_multi_incident_preset_manual_order_makes_incidents_visible():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -445,6 +501,96 @@ def test_direct_evidence_event_output_includes_fire_detection(event_type):
     assert "FIRE DANGER ASSESSMENT" not in text
 
 
+def test_satellite_event_output_includes_fire_severity_after_detection():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+    severity = FakeFireSeverityCoordinator()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=severity,
+    )
+
+    text = output.getvalue()
+    assert text.index("FIRE DETECTION") < text.index("FIRE SEVERITY ASSESSMENT")
+    assert "event_id=77" in text
+    assert "status=VALID" in text
+    assert "score=71.25" in text
+    assert "level=HIGH" in text
+    assert "assessment_id=456" in text
+    assert isinstance(severity.calls[0][4], FireDetectionResult)
+    assert severity.calls[0][4].event_ids == (77,)
+
+
+def test_news_event_output_does_not_include_fire_severity():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.NEWS)
+    output = StringIO()
+    severity = FakeFireSeverityCoordinator()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=severity,
+    )
+
+    assert "FIRE DETECTION" in output.getvalue()
+    assert "FIRE SEVERITY ASSESSMENT" not in output.getvalue()
+
+
+def test_weather_event_can_print_fire_severity_after_fire_danger():
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(),
+    )
+
+    text = output.getvalue()
+    assert text.index("FIRE DANGER ASSESSMENT") < text.index("FIRE SEVERITY ASSESSMENT")
+
+
+def test_fire_severity_failure_output_is_printed_without_simulation_failure():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(success=True),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="failure"),
+    )
+
+    text = output.getvalue()
+    assert "generated=1 saved=1 duplicates=0 failed=0 success=True" in text
+    assert "FIRE SEVERITY ASSESSMENT" in text
+    assert "event_id=77" in text
+    assert "status=ERROR" in text
+    assert "message=Fire-severity assessment failed." in text
+    assert "Error: simulated failure" not in text
+
+
 def test_detection_no_event_output_is_successful_zero_event_result():
     scenario = build_active_fire_scenario(seed=42)
     event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
@@ -543,6 +689,7 @@ def test_high_risk_no_fire_manual_output_does_not_display_fire_detection():
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=detector,
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -561,6 +708,7 @@ def test_low_risk_no_fire_manual_output_does_not_display_fire_detection():
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -578,6 +726,7 @@ def test_active_fire_manual_output_displays_detection_after_satellite_and_news()
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,
@@ -596,6 +745,7 @@ def test_manual_mode_invokes_fire_danger_after_each_event_without_changing_promp
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
         output=StringIO(),
@@ -617,6 +767,7 @@ def test_automatic_mode_invokes_fire_danger_after_due_events_without_changing_sl
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         service=service,
         scenario_started_at=STARTED_AT,
         sleep_func=sleeps.append,
@@ -639,6 +790,7 @@ def test_multi_incident_output_associates_assessments_with_correct_event_areas()
         executor=executor,
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
         output=output,

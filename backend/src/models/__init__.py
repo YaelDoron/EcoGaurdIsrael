@@ -17,7 +17,15 @@ from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
+from src.models.fire_severity_calculation import FireSeverityCalculation
+from src.models.fire_severity_assessment import FireSeverityAssessment
+from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
+from src.models.fire_severity_input import FireSeverityInput
+from src.models.fire_severity_input_result import FireSeverityInputResult
+from src.models.fire_severity_input_status import FireSeverityInputStatus
+from src.models.fire_severity_level import FireSeverityLevel
 from src.models.satellite_hotspot import SatelliteHotspot
+from src.models.vegetation_data import VegetationData
 from src.models.weather_observation import WeatherObservation
 from src.models.weather_station import WeatherStation
 
@@ -42,4 +50,12 @@ __all__ = [
     "FireDetectionDecision",
     "FireEvent",
     "FireEventStatus",
+    "FireSeverityInput",
+    "FireSeverityAssessment",
+    "FireSeverityAssessmentStatus",
+    "FireSeverityInputResult",
+    "FireSeverityInputStatus",
+    "FireSeverityLevel",
+    "FireSeverityCalculation",
+    "VegetationData",
 ]
