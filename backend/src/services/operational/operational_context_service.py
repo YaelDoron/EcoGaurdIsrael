@@ -7,6 +7,7 @@ not persist anything.
 """
 from __future__ import annotations
 
+import logging
 import math
 
 from pydantic import BaseModel, ConfigDict
@@ -20,6 +21,9 @@ from src.repositories.fire_station_repository import FireStationRepository
 from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
 from src.repositories.road_network_repository import RoadNetworkRepository
 from src.services.fire_danger import haversine_distance_km
+from src.services.operational.road_network_fetcher import RoadNetworkFetcher
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_OPERATIONAL_RADIUS_KM = 5.0
 
@@ -65,12 +69,14 @@ class OperationalContextService:
         fire_station_repository: FireStationRepository | None = None,
         firefighting_resource_repository: FirefightingResourceRepository | None = None,
         road_network_repository: RoadNetworkRepository | None = None,
+        road_network_fetcher: RoadNetworkFetcher | None = None,
     ) -> None:
         self._fire_station_repository = fire_station_repository or FireStationRepository()
         self._firefighting_resource_repository = (
             firefighting_resource_repository or FirefightingResourceRepository()
         )
         self._road_network_repository = road_network_repository or RoadNetworkRepository()
+        self._road_network_fetcher = road_network_fetcher or RoadNetworkFetcher()
 
     def get_stations_in_operational_area(
         self,
@@ -167,6 +173,13 @@ class OperationalContextService:
         the fire and those stations (RoadNetworkRepository.get_network_in_bbox),
         so Epic 5's routing has everything it needs from one call.
 
+        Road network data is lazily loaded: the database is checked first
+        (RoadNetworkRepository.get_network_in_bbox), and only on a cache
+        miss - no nodes stored for this bbox yet - is OSM queried live
+        (RoadNetworkFetcher.fetch_network_in_bbox), with the result saved
+        back to the database so the next call for an overlapping area is a
+        cache hit.
+
         `db` is a caller-owned SQLAlchemy session (e.g. a FastAPI
         `Depends(get_db)` session) - RoadNetworkRepository takes it per call
         rather than owning its own session factory, unlike the other two
@@ -183,12 +196,57 @@ class OperationalContextService:
             db, min_lat, max_lat, min_lon, max_lon
         )
 
+        if not road_nodes:
+            road_nodes, road_edges = self._load_road_network_from_osm(
+                db, min_lat, max_lat, min_lon, max_lon
+            )
+
         return OperationalContext(
             stations=stations,
             available_resources=available_resources,
             road_nodes=road_nodes,
             road_edges=road_edges,
         )
+
+    def _load_road_network_from_osm(
+        self,
+        db: Session,
+        min_lat: float,
+        max_lat: float,
+        min_lon: float,
+        max_lon: float,
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Fetch a bbox's road network from OSM and cache it, on a database cache miss.
+
+        Called only when RoadNetworkRepository.get_network_in_bbox found no
+        stored nodes for the bbox. If OSM itself returns no network either
+        (e.g. a genuinely road-less area, or an OSM/Overpass failure -
+        RoadNetworkFetcher already degrades those to empty lists rather than
+        raising), nothing is saved and empty lists are returned as-is.
+        """
+        logger.info(
+            "Road network cache miss for bbox (min_lat=%.5f, max_lat=%.5f, min_lon=%.5f, max_lon=%.5f); "
+            "fetching from OSM.",
+            min_lat,
+            max_lat,
+            min_lon,
+            max_lon,
+        )
+        fetched_nodes, fetched_edges = self._road_network_fetcher.fetch_network_in_bbox(
+            min_lat, max_lat, min_lon, max_lon
+        )
+
+        if not fetched_nodes:
+            logger.warning("OSM fetch returned no road network for this bounding box either.")
+            return fetched_nodes, fetched_edges
+
+        self._road_network_repository.save_network(db, fetched_nodes, fetched_edges)
+        logger.info(
+            "Fetched and cached %d node(s) and %d edge(s) from OSM.",
+            len(fetched_nodes),
+            len(fetched_edges),
+        )
+        return fetched_nodes, fetched_edges
 
     def _calculate_bounding_box(
         self,
