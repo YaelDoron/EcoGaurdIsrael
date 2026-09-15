@@ -2,6 +2,7 @@
 
 import pytest
 
+from src.models.resource_status import ResourceStatus
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -12,6 +13,7 @@ from src.simulation import (
     SimulationEventType,
     SimulationScenario,
     build_active_fire_scenario,
+    build_active_fire_resource_refresh_scenario,
     build_carmel_golan_active_fire_scenario,
     build_high_risk_no_fire_scenario,
     build_low_risk_no_fire_scenario,
@@ -296,3 +298,14 @@ def test_carmel_golan_active_fire_scenario_builds_interleaved_incidents():
         (100, SimulationEventType.NEWS, "incident-carmel-01", 1),
         (115, SimulationEventType.NEWS, "incident-golan-01", 1),
     ]
+
+
+def test_active_fire_resource_refresh_scenario_adds_resource_status_cycle():
+    scenario = build_active_fire_resource_refresh_scenario(seed=42)
+
+    resource_events = [event for event in scenario.events if event.event_type is SimulationEventType.RESOURCE_STATUS]
+
+    assert [event.offset_seconds for event in resource_events] == [60, 90]
+    assert resource_events[0].resource_status_change.new_status is ResourceStatus.UNAVAILABLE
+    assert resource_events[1].resource_status_change.new_status is ResourceStatus.AVAILABLE
+    assert resource_events[0].resource_status_change.selection_key == resource_events[1].resource_status_change.selection_key

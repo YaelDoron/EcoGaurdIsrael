@@ -90,6 +90,8 @@ class SimulationEventExecutor:
                 result = self._execute_satellite_event(scenario, event, event_timestamp, incident)
             elif event.event_type is SimulationEventType.NEWS:
                 result = self._execute_news_event(scenario, event, event_timestamp, incident)
+            elif event.event_type is SimulationEventType.RESOURCE_STATUS:
+                result = self._execute_resource_status_event(event)
             else:
                 result = self._failed_result(event, f"Unsupported simulation event type: {event.event_type!r}")
         except Exception as exc:  # noqa: BLE001 - one event failure should become a structured result.
@@ -162,6 +164,19 @@ class SimulationEventExecutor:
                 "stations_processed": stations_processed,
                 "observations_generated": len(measurements),
             },
+        )
+
+    @staticmethod
+    def _execute_resource_status_event(event: SimulationEvent) -> SimulationEventExecutionResult:
+        """Acknowledge a resource-status timeline event without direct persistence."""
+        return SimulationEventExecutionResult(
+            event=event,
+            success=True,
+            generated_count=1,
+            saved_count=1,
+            duplicates_skipped=0,
+            failed_count=0,
+            details={"resource_status_events": 1},
         )
 
     def _execute_satellite_event(

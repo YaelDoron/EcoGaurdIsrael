@@ -26,6 +26,8 @@ from src.simulation.analysis.simulation_response_target_coordinator import (
     SimulationResponseTargetCoordinator,
 )
 from src.simulation.analysis.simulation_response_target_result import SimulationResponseTargetResult
+from src.simulation.analysis.simulation_refresh_coordinator import SimulationRefreshCoordinator
+from src.simulation.analysis.simulation_refresh_result import SimulationRefreshResult
 
 __all__ = [
     "ASSESSMENT_RADIUS_KM",
@@ -39,6 +41,8 @@ __all__ = [
     "SimulationFireSpreadResult",
     "SimulationResponseTargetCoordinator",
     "SimulationResponseTargetResult",
+    "SimulationRefreshCoordinator",
+    "SimulationRefreshResult",
     "NON_DETECTION_EVENT_REASON",
     "SOURCE_EVENT_FAILED_REASON",
     "NO_SOURCE_DATA_AVAILABLE_REASON",

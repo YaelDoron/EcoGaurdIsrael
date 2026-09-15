@@ -12,6 +12,7 @@ from datetime import datetime
 import math
 from numbers import Real
 
+from src.models.fire_spread_effective_state_fingerprint import validate_effective_state_fingerprint
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 
 CA_TIME_STEP_MINUTES = 5
@@ -77,6 +78,7 @@ class FireSpreadPrediction:
     methodology: str
     methodology_version: str
     cells: tuple[FireSpreadPredictionCell, ...] = ()
+    effective_state_fingerprint: str | None = None
 
     def __post_init__(self) -> None:
         self._validate_positive_int("fire_event_id", self.fire_event_id)
@@ -96,6 +98,7 @@ class FireSpreadPrediction:
 
         self._validate_non_empty_string("methodology", self.methodology)
         self._validate_non_empty_string("methodology_version", self.methodology_version)
+        validate_effective_state_fingerprint(self.effective_state_fingerprint)
 
         if not isinstance(self.cells, tuple) or not all(
             isinstance(cell, FireSpreadPredictionCell) for cell in self.cells

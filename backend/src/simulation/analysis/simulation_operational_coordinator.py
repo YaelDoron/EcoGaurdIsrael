@@ -95,6 +95,25 @@ class SimulationOperationalCoordinator:
             resource.status = new_status_by_id[resource.id]
         return depleted_resources
 
+    def select_available_resource(
+        self,
+        incident_latitude: float,
+        incident_longitude: float,
+    ) -> FirefightingResourceDB | None:
+        """Return the first AVAILABLE nearby resource in stable resource-id order."""
+        stations = self._operational_context_service.get_stations_in_operational_area(
+            incident_latitude,
+            incident_longitude,
+        )
+        if not stations:
+            return None
+
+        station_ids = [station.id for station in stations]
+        resources = self._firefighting_resource_repository.get_available_resources(station_ids)
+        if not resources:
+            return None
+        return sorted(resources, key=lambda resource: str(resource.id))[0]
+
     @staticmethod
     def _validate_availability_ratio(availability_ratio: float) -> None:
         if (

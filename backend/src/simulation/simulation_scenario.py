@@ -5,9 +5,11 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
+from src.models.resource_status import ResourceStatus
 from src.simulation.scenario_type import ScenarioType
 from src.simulation.simulated_incident import SimulatedIncident
 from src.simulation.simulation_event import SimulationEvent, SimulationEventType
+from src.simulation.simulation_resource_status_change import SimulationResourceStatusChange
 from src.simulation.simulation_location import SimulationLocation
 from src.simulation.simulation_locations import (
     CARMEL_LOCATION,
@@ -29,6 +31,11 @@ _ACTIVE_FIRE_EVENT_PLAN = (
     (65, SimulationEventType.WEATHER),
     (80, SimulationEventType.SATELLITE),
     (100, SimulationEventType.NEWS),
+)
+_ACTIVE_FIRE_RESOURCE_REFRESH_EVENT_PLAN = (
+    *_ACTIVE_FIRE_EVENT_PLAN,
+    (60, SimulationEventType.RESOURCE_STATUS),
+    (90, SimulationEventType.RESOURCE_STATUS),
 )
 
 
@@ -170,6 +177,28 @@ def build_scenario(
     raise ValueError(f"Unsupported scenario_type: {scenario_type!r}")
 
 
+def build_active_fire_resource_refresh_scenario(
+    location: SimulationLocation = DEFAULT_CARMEL_LOCATION,
+    seed: int = 42,
+    incident_id: str | None = None,
+) -> SimulationScenario:
+    """Build an ACTIVE_FIRE timeline with deterministic resource-status changes."""
+    incident = SimulatedIncident(
+        incident_id=incident_id or "incident-active-fire-resource-refresh-carmel-01",
+        scenario_type=ScenarioType.ACTIVE_FIRE,
+        location=location,
+    )
+    return build_multi_incident_scenario(
+        incidents=(incident,),
+        events=_build_events_for_incident(
+            incident.incident_id,
+            _ACTIVE_FIRE_RESOURCE_REFRESH_EVENT_PLAN,
+        ),
+        duration_seconds=MAX_SCENARIO_DURATION_SECONDS,
+        seed=seed,
+    )
+
+
 def build_multi_incident_scenario(
     incidents: Iterable[SimulatedIncident],
     events: Iterable[SimulationEvent],
@@ -220,12 +249,23 @@ def _build_events_for_incident(
     events: list[SimulationEvent] = []
     for offset_seconds, event_type in event_plan:
         source_event_index = indexes_by_type[event_type]
+        resource_status_change = None
+        if event_type is SimulationEventType.RESOURCE_STATUS:
+            resource_status_change = SimulationResourceStatusChange(
+                new_status=(
+                    ResourceStatus.UNAVAILABLE
+                    if source_event_index == 0
+                    else ResourceStatus.AVAILABLE
+                ),
+                selection_key=f"{incident_id}:primary-resource",
+            )
         events.append(
             SimulationEvent(
                 offset_seconds=offset_seconds,
                 event_type=event_type,
                 incident_id=incident_id,
                 source_event_index=source_event_index,
+                resource_status_change=resource_status_change,
             )
         )
         indexes_by_type[event_type] += 1

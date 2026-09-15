@@ -254,6 +254,38 @@ def test_save_valid_prediction_with_cells(repository, event_id, severity_reposit
     assert stored.prediction.status is FireSpreadPredictionStatus.VALID
     assert len(stored.prediction.cells) == 1
     assert stored.weather_observation_id == observation_id
+    assert stored.prediction.effective_state_fingerprint is None
+
+
+def test_save_valid_prediction_round_trips_effective_state_fingerprint(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    fingerprint = "a" * 64
+
+    stored = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, effective_state_fingerprint=fingerprint),
+        weather_observation_id=observation_id,
+    )
+    found = repository.get_by_id(stored.id)
+    latest = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert stored.prediction.effective_state_fingerprint == fingerprint
+    assert found.prediction.effective_state_fingerprint == fingerprint
+    assert latest.prediction.effective_state_fingerprint == fingerprint
+
+
+@pytest.mark.parametrize("fingerprint", ["A" * 64, "g" * 64, "a" * 63, "", 123])
+def test_invalid_effective_state_fingerprint_rejected(fingerprint, event_id, severity_repository, weather_repository, satellite_repository):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+
+    with pytest.raises(ValueError):
+        make_prediction(event_id, assessment_id, effective_state_fingerprint=fingerprint)
 
 
 def test_save_valid_no_spread_prediction_with_zero_cells(repository, event_id, severity_repository, weather_repository, satellite_repository):

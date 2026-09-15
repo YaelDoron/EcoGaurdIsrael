@@ -13,6 +13,7 @@ from src.simulation.simulation_locations import (
     get_simulation_location,
 )
 from src.simulation.simulation_event import SimulationEvent, SimulationEventType
+from src.simulation.simulation_resource_status_change import SimulationResourceStatusChange
 from src.simulation.simulation_event_executor import (
     SimulationEventExecutionResult,
     SimulationEventExecutor,
@@ -22,6 +23,7 @@ from src.simulation.simulated_incident import SimulatedIncident
 from src.simulation.simulation_scenario import (
     MAX_SCENARIO_DURATION_SECONDS,
     SimulationScenario,
+    build_active_fire_resource_refresh_scenario,
     build_active_fire_scenario,
     build_carmel_golan_active_fire_scenario,
     build_high_risk_no_fire_scenario,
@@ -46,6 +48,8 @@ from src.simulation.analysis import (
     SimulationFireSpreadResult,
     SimulationResponseTargetCoordinator,
     SimulationResponseTargetResult,
+    SimulationRefreshCoordinator,
+    SimulationRefreshResult,
 )
 
 __all__ = [
@@ -61,6 +65,7 @@ __all__ = [
     "get_simulation_location",
     "SimulationEvent",
     "SimulationEventType",
+    "SimulationResourceStatusChange",
     "SimulationEventExecutionResult",
     "SimulationEventExecutor",
     "simulation_event_timestamp",
@@ -70,6 +75,7 @@ __all__ = [
     "build_low_risk_no_fire_scenario",
     "build_high_risk_no_fire_scenario",
     "build_active_fire_scenario",
+    "build_active_fire_resource_refresh_scenario",
     "build_multi_incident_scenario",
     "build_carmel_golan_active_fire_scenario",
     "build_scenario",
@@ -87,4 +93,6 @@ __all__ = [
     "SimulationFireSpreadResult",
     "SimulationResponseTargetCoordinator",
     "SimulationResponseTargetResult",
+    "SimulationRefreshCoordinator",
+    "SimulationRefreshResult",
 ]

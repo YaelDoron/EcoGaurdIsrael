@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from src.simulation.simulation_resource_status_change import SimulationResourceStatusChange
+
 
 class SimulationEventType(Enum):
     """The simulated source category an event belongs to."""
@@ -11,6 +13,7 @@ class SimulationEventType(Enum):
     WEATHER = "weather"
     SATELLITE = "satellite"
     NEWS = "news"
+    RESOURCE_STATUS = "resource_status"
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class SimulationEvent:
     event_type: SimulationEventType
     incident_id: str
     source_event_index: int
+    resource_status_change: SimulationResourceStatusChange | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -47,3 +51,9 @@ class SimulationEvent:
                 "source_event_index must be a non-negative integer, "
                 f"got {self.source_event_index!r}"
             )
+
+        if self.event_type is SimulationEventType.RESOURCE_STATUS:
+            if not isinstance(self.resource_status_change, SimulationResourceStatusChange):
+                raise ValueError("RESOURCE_STATUS events require a SimulationResourceStatusChange payload.")
+        elif self.resource_status_change is not None:
+            raise ValueError(f"{self.event_type.value} events must not include resource_status_change.")
