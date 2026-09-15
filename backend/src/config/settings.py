@@ -16,6 +16,12 @@ DEFAULT_FIRMS_WEST = 34.0
 DEFAULT_FIRMS_SOUTH = 29.4
 DEFAULT_FIRMS_EAST = 35.9
 DEFAULT_FIRMS_NORTH = 33.4
+DEFAULT_COPERNICUS_TOKEN_URL = (
+    "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token"
+)
+DEFAULT_COPERNICUS_STATISTICS_URL = "https://sh.dataspace.copernicus.eu/statistics/v1"
+DEFAULT_COPERNICUS_LAND_COVER_COLLECTION_ID = "35fecfec-8a73-4723-bb08-b775f283a535"
+DEFAULT_COPERNICUS_REQUEST_TIMEOUT = 20
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,21 @@ class Settings:
     FIRMS_SOUTH: float = float(os.getenv("FIRMS_SOUTH", str(DEFAULT_FIRMS_SOUTH)))
     FIRMS_EAST: float = float(os.getenv("FIRMS_EAST", str(DEFAULT_FIRMS_EAST)))
     FIRMS_NORTH: float = float(os.getenv("FIRMS_NORTH", str(DEFAULT_FIRMS_NORTH)))
+
+    COPERNICUS_CLIENT_ID: str = os.getenv("COPERNICUS_CLIENT_ID", "")
+    COPERNICUS_CLIENT_SECRET: str = os.getenv("COPERNICUS_CLIENT_SECRET", "")
+    COPERNICUS_TOKEN_URL: str = os.getenv("COPERNICUS_TOKEN_URL", DEFAULT_COPERNICUS_TOKEN_URL)
+    COPERNICUS_STATISTICS_URL: str = os.getenv(
+        "COPERNICUS_STATISTICS_URL",
+        DEFAULT_COPERNICUS_STATISTICS_URL,
+    )
+    COPERNICUS_LAND_COVER_COLLECTION_ID: str = os.getenv(
+        "COPERNICUS_LAND_COVER_COLLECTION_ID",
+        DEFAULT_COPERNICUS_LAND_COVER_COLLECTION_ID,
+    )
+    COPERNICUS_REQUEST_TIMEOUT: int = int(
+        os.getenv("COPERNICUS_REQUEST_TIMEOUT", str(DEFAULT_COPERNICUS_REQUEST_TIMEOUT))
+    )
 
     # Raw PostgreSQL/Neon connection string, unmodified. May be empty in
     # environments that don't use the database (e.g. Task 1/2 unit tests).
