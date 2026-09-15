@@ -14,6 +14,8 @@ from src.repositories.fire_danger_assessment_repository import (
     StoredFireDangerAssessment,
 )
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
+from src.repositories.fire_station_repository import FireStationRepository
+from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
 from src.repositories.fire_severity_assessment_repository import (
     FireSeverityAssessmentRepository,
     StoredFireSeverityAssessment,
@@ -44,6 +46,8 @@ __all__ = [
     "StoredFireDangerAssessment",
     "FireEventRepository",
     "StoredFireEvent",
+    "FireStationRepository",
+    "FirefightingResourceRepository",
     "FireSeverityAssessmentRepository",
     "StoredFireSeverityAssessment",
     "WeatherRepositoryError",

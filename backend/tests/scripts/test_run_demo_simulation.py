@@ -155,6 +155,13 @@ class FakeFireDetectionCoordinator:
         return SimulationFireDetectionResult(triggered=True, detection_result=detection_result)
 
 
+class FakeOperationalCoordinator:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def scramble_resource_availability(self, incident_latitude, incident_longitude, availability_ratio=0.9):
+        self.calls.append((incident_latitude, incident_longitude, availability_ratio))
+        return []
 class FakeFireSeverityCoordinator:
     def __init__(self, mode="valid") -> None:
         self.mode = mode
@@ -323,6 +330,7 @@ def test_manual_mode_executes_events_in_order_with_expected_timestamps():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
@@ -349,6 +357,7 @@ def test_manual_mode_aggregates_failures_and_continues():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
@@ -374,6 +383,7 @@ def test_automatic_mode_executes_due_batches_and_sleeps_between_polls():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         service=service,
         scenario_started_at=STARTED_AT,
@@ -398,6 +408,7 @@ def test_multi_incident_preset_manual_order_makes_incidents_visible():
         executor=executor,
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
@@ -689,6 +700,7 @@ def test_high_risk_no_fire_manual_output_does_not_display_fire_detection():
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=detector,
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
@@ -708,6 +720,7 @@ def test_low_risk_no_fire_manual_output_does_not_display_fire_detection():
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
@@ -726,6 +739,7 @@ def test_active_fire_manual_output_displays_detection_after_satellite_and_news()
         executor=FakeExecutor(),
         fire_danger_coordinator=FakeFireDangerCoordinator(),
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",
@@ -745,6 +759,7 @@ def test_manual_mode_invokes_fire_danger_after_each_event_without_changing_promp
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: prompts.append(prompt) or "",
@@ -767,6 +782,7 @@ def test_automatic_mode_invokes_fire_danger_after_due_events_without_changing_sl
         executor=FakeExecutor(),
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         service=service,
         scenario_started_at=STARTED_AT,
@@ -790,6 +806,7 @@ def test_multi_incident_output_associates_assessments_with_correct_event_areas()
         executor=executor,
         fire_danger_coordinator=coordinator,
         fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
         fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
         scenario_started_at=STARTED_AT,
         input_func=lambda prompt: "",

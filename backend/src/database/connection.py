@@ -98,6 +98,8 @@ def init_db() -> None:
         fire_event_db,
         fire_event_news_evidence_db,
         fire_event_satellite_evidence_db,
+        fire_station_db,
+        firefighting_resource_db,
         satellite_hotspot_db,
         weather_observation_db,
         weather_station_db,
