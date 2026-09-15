@@ -37,6 +37,7 @@ from src.repositories.fire_severity_assessment_repository import StoredFireSever
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
 from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
+from src.simulation.analysis.simulation_fire_spread_result import SimulationFireSpreadResult
 from src.simulation import (
     CARMEL_LOCATION,
     GOLAN_LOCATION,
@@ -50,6 +51,25 @@ from src.simulation import (
 )
 
 STARTED_AT = datetime(2026, 9, 12, 14, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _stub_fire_spread_coordinator(monkeypatch):
+    """Prevent the real (Neon-backed) fire-spread coordinator from running
+    during these fake-based unit tests. Task 10's own coordinator tests
+    (test_simulation_fire_spread_coordinator.py) cover the real wiring
+    with a fake spread agent; the additive integration point in
+    run_demo_simulation.py is exercised separately in this file.
+    """
+
+    class _NoOpSpreadCoordinator:
+        def handle_severity_result(self, severity_result, event_timestamp):
+            return SimulationFireSpreadResult(triggered=False, reason="stubbed_in_tests")
+
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_fire_spread_coordinator",
+        lambda: _NoOpSpreadCoordinator(),
+    )
 
 
 class FakeExecutor:
@@ -589,6 +609,62 @@ def test_fire_severity_failure_output_is_printed_without_simulation_failure():
     assert "status=ERROR" in text
     assert "message=Fire-severity assessment failed." in text
     assert "Error: simulated failure" not in text
+
+
+def test_fire_spread_result_is_printed_when_spread_coordinator_triggers(monkeypatch):
+    from src.models import FireSpreadPrediction, FireSpreadPredictionStatus
+    from src.repositories.fire_spread_prediction_repository import StoredFireSpreadPrediction
+
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+
+    class _TriggeredSpreadCoordinator:
+        def handle_severity_result(self, severity_result, event_timestamp):
+            prediction = FireSpreadPrediction(
+                fire_event_id=77,
+                severity_assessment_id=456,
+                predicted_at=event_timestamp,
+                horizon_minutes=30,
+                status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+                methodology="ECOGUARD_PROPAGATOR_CA",
+                methodology_version="1.0",
+            )
+            return SimulationFireSpreadResult(
+                triggered=True,
+                prediction_results=(StoredFireSpreadPrediction(id=1, prediction=prediction),),
+            )
+
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_fire_spread_coordinator",
+        lambda: _TriggeredSpreadCoordinator(),
+    )
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(),
+    )
+
+    text = output.getvalue()
+    assert text.index("FIRE SEVERITY ASSESSMENT") < text.index("FIRE SPREAD PREDICTION")
+    assert "event_id=77" in text
+    assert "horizon_minutes=30" in text
+    assert "status=INSUFFICIENT_DATA" in text
+    assert "prediction_id=1" in text
+
+
+def test_build_fire_spread_coordinator_returns_simulation_coordinator():
+    from scripts.run_demo_simulation import build_fire_spread_coordinator
+    from src.simulation import SimulationFireSpreadCoordinator
+
+    coordinator = build_fire_spread_coordinator()
+
+    assert isinstance(coordinator, SimulationFireSpreadCoordinator)
 
 
 def test_detection_no_event_output_is_successful_zero_event_result():

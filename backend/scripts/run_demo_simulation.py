@@ -18,18 +18,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
 from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent, FireSeverityAssessmentAgent
+from src.agents.analysis import FireSpreadPredictionAgent
 from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
 from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
+from src.calculators.fire_spread import FireSpreadCalculator
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
+from src.repositories.fire_spread_prediction_repository import FireSpreadPredictionRepository
 from src.repositories.news_repository import NewsRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.fire_severity import FireSeverityInputService
+from src.services.fire_spread import FireSpreadInputService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
@@ -50,6 +54,7 @@ from src.simulation import (
     get_simulation_location,
     simulation_event_timestamp,
 )
+from src.simulation import SimulationFireSpreadCoordinator, SimulationFireSpreadResult
 
 DEFAULT_SEED = 42
 DEFAULT_MODE = "manual"
@@ -301,6 +306,12 @@ def execute_and_report_event(
         )
         if severity_result.triggered:
             print_fire_severity_result(severity_result, output)
+            spread_result = get_fire_spread_coordinator().handle_severity_result(
+                severity_result=severity_result,
+                event_timestamp=event_timestamp,
+            )
+            if spread_result.triggered:
+                print_fire_spread_result(spread_result, output)
     print("", file=output)
     return result
 
@@ -366,6 +377,43 @@ def build_fire_severity_coordinator() -> SimulationFireSeverityCoordinator:
     )
 
 
+def build_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
+    """Build the simulation fire-spread prediction stack using shared repositories.
+
+    Reuses the exact same production FireSpreadInputService/FireSpreadCalculator/
+    FireSpreadPredictionRepository as the live pipeline -- no separate
+    simulation-only spread mathematics.
+    """
+    input_service = FireSpreadInputService()
+    calculator = FireSpreadCalculator()
+    prediction_repository = FireSpreadPredictionRepository()
+    agent = FireSpreadPredictionAgent(
+        input_service=input_service,
+        calculator=calculator,
+        repository=prediction_repository,
+    )
+    return SimulationFireSpreadCoordinator(spread_agent=agent)
+
+
+_fire_spread_coordinator: SimulationFireSpreadCoordinator | None = None
+
+
+def get_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
+    """Return the fire-spread simulation coordinator, built lazily on first use.
+
+    Kept as a lazily-built module-level accessor (mirroring
+    src/database/connection.py's get_engine()/get_session_factory() pattern)
+    rather than a new parameter on run_manual/run_automatic/
+    execute_and_report_event, so this teammate-owned script's existing
+    function signatures never need to change for User Story 4.2. Tests that
+    need a fake coordinator monkeypatch this function directly.
+    """
+    global _fire_spread_coordinator
+    if _fire_spread_coordinator is None:
+        _fire_spread_coordinator = build_fire_spread_coordinator()
+    return _fire_spread_coordinator
+
+
 def print_fire_danger_result(
     fire_danger_result: SimulationFireDangerResult,
     output: TextIO = sys.stdout,
@@ -429,6 +477,27 @@ def print_fire_severity_result(
     for fire_event_id, message in zip(
         fire_severity_result.failed_fire_event_ids,
         fire_severity_result.error_messages,
+    ):
+        print(f"event_id={fire_event_id}", file=output)
+        print("status=ERROR", file=output)
+        print(f"message={message}", file=output)
+
+
+def print_fire_spread_result(
+    fire_spread_result: SimulationFireSpreadResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    print("FIRE SPREAD PREDICTION", file=output)
+    for stored_prediction in fire_spread_result.prediction_results:
+        prediction = stored_prediction.prediction
+        print(f"event_id={prediction.fire_event_id}", file=output)
+        print(f"horizon_minutes={prediction.horizon_minutes}", file=output)
+        print(f"status={prediction.status.name}", file=output)
+        print(f"cells={len(prediction.cells)}", file=output)
+        print(f"prediction_id={stored_prediction.id}", file=output)
+    for fire_event_id, message in zip(
+        fire_spread_result.failed_fire_event_ids,
+        fire_spread_result.error_messages,
     ):
         print(f"event_id={fire_event_id}", file=output)
         print("status=ERROR", file=output)
