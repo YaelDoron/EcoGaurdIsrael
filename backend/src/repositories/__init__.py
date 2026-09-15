@@ -21,6 +21,7 @@ from src.repositories.fire_severity_assessment_repository import (
     StoredFireSeverityAssessment,
 )
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult, StoredWildfireReport
+from src.repositories.road_network_repository import RoadNetworkRepository
 from src.repositories.satellite_hotspot_repository import (
     SaveHotspotResult,
     SatelliteHotspotRepository,
@@ -50,6 +51,7 @@ __all__ = [
     "FirefightingResourceRepository",
     "FireSeverityAssessmentRepository",
     "StoredFireSeverityAssessment",
+    "RoadNetworkRepository",
     "WeatherRepositoryError",
     "WeatherStationNotStoredError",
     "SatelliteHotspotRepositoryError",

@@ -9,10 +9,16 @@ from __future__ import annotations
 
 import math
 
+from pydantic import BaseModel, ConfigDict
+from sqlalchemy.orm import Session
+
 from src.database.models.fire_station_db import FireStationDB
 from src.database.models.firefighting_resource_db import FirefightingResourceDB
+from src.models.graph_edge import GraphEdge
+from src.models.graph_node import GraphNode
 from src.repositories.fire_station_repository import FireStationRepository
 from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
+from src.repositories.road_network_repository import RoadNetworkRepository
 from src.services.fire_danger import haversine_distance_km
 
 DEFAULT_OPERATIONAL_RADIUS_KM = 5.0
@@ -23,6 +29,33 @@ DEFAULT_OPERATIONAL_RADIUS_KM = 5.0
 # _radius_search_sequence).
 _EXPANDED_RADII_KM = (20.0, 50.0)
 
+# ~11 km at Israel's latitude; extends the road-network bbox beyond the
+# fire and its stations so large highway detours outside the immediate
+# station vicinity are still included, rather than clipping routes exactly
+# at their coordinates.
+BUFFER_DEGREES = 0.1
+
+
+class OperationalContext(BaseModel):
+    """Aggregate operational context for an active wildfire.
+
+    Combines the fire stations relevant to the incident, their available
+    firefighting resources, and the road network subgraph covering both -
+    everything Epic 5's routing logic needs in one object.
+    """
+
+    # Required because `stations`/`available_resources` are SQLAlchemy ORM
+    # types, not Pydantic models. Note: if this ever becomes a FastAPI
+    # response_model, these two fields will not JSON-serialize as-is - they
+    # would need converting to the FireStation/FirefightingResource domain
+    # dataclasses first.
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    stations: list[FireStationDB]
+    available_resources: list[FirefightingResourceDB]
+    road_nodes: list[GraphNode]
+    road_edges: list[GraphEdge]
+
 
 class OperationalContextService:
     """Builds the geographic operational context around an active wildfire."""
@@ -31,11 +64,13 @@ class OperationalContextService:
         self,
         fire_station_repository: FireStationRepository | None = None,
         firefighting_resource_repository: FirefightingResourceRepository | None = None,
+        road_network_repository: RoadNetworkRepository | None = None,
     ) -> None:
         self._fire_station_repository = fire_station_repository or FireStationRepository()
         self._firefighting_resource_repository = (
             firefighting_resource_repository or FirefightingResourceRepository()
         )
+        self._road_network_repository = road_network_repository or RoadNetworkRepository()
 
     def get_stations_in_operational_area(
         self,
@@ -117,6 +152,67 @@ class OperationalContextService:
                 return stations, available_resources
 
         return self._closest_stations_until_enough_resources(stations_with_distance, min_resources)
+
+    def build_context(
+        self,
+        db: Session,
+        fire_latitude: float,
+        fire_longitude: float,
+        min_resources: int = 1,
+    ) -> OperationalContext:
+        """Build the full operational context for an active wildfire.
+
+        Combines the nearby fire stations and their available resources
+        (get_available_operational_context) with the road network covering
+        the fire and those stations (RoadNetworkRepository.get_network_in_bbox),
+        so Epic 5's routing has everything it needs from one call.
+
+        `db` is a caller-owned SQLAlchemy session (e.g. a FastAPI
+        `Depends(get_db)` session) - RoadNetworkRepository takes it per call
+        rather than owning its own session factory, unlike the other two
+        repositories injected into this service.
+        """
+        stations, available_resources = self.get_available_operational_context(
+            fire_latitude, fire_longitude, min_resources
+        )
+
+        min_lat, max_lat, min_lon, max_lon = self._calculate_bounding_box(
+            fire_latitude, fire_longitude, stations
+        )
+        road_nodes, road_edges = self._road_network_repository.get_network_in_bbox(
+            db, min_lat, max_lat, min_lon, max_lon
+        )
+
+        return OperationalContext(
+            stations=stations,
+            available_resources=available_resources,
+            road_nodes=road_nodes,
+            road_edges=road_edges,
+        )
+
+    def _calculate_bounding_box(
+        self,
+        fire_latitude: float,
+        fire_longitude: float,
+        stations: list[FireStationDB],
+    ) -> tuple[float, float, float, float]:
+        """Return (min_lat, max_lat, min_lon, max_lon) covering the fire and all given stations.
+
+        Adds a BUFFER_DEGREES margin on every side so the returned road
+        network extends beyond the outermost station/fire point. Bounds are
+        clamped to valid lat/lon ranges so an incident near a coordinate
+        extreme can't push the bbox out of range and trip
+        RoadNetworkRepository's own validation.
+        """
+        latitudes = [fire_latitude] + [station.latitude for station in stations]
+        longitudes = [fire_longitude] + [station.longitude for station in stations]
+
+        min_lat = max(-90.0, min(latitudes) - BUFFER_DEGREES)
+        max_lat = min(90.0, max(latitudes) + BUFFER_DEGREES)
+        min_lon = max(-180.0, min(longitudes) - BUFFER_DEGREES)
+        max_lon = min(180.0, max(longitudes) + BUFFER_DEGREES)
+
+        return min_lat, max_lat, min_lon, max_lon
 
     def _closest_stations_until_enough_resources(
         self,
