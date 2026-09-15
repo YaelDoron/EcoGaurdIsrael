@@ -36,10 +36,23 @@ from src.models import (
     FireSeverityAssessment,
     FireSeverityAssessmentStatus,
     FireSeverityLevel,
+    FirefightingResource,
+    OperationalRefreshTriggerType,
     ResponseTarget,
     ResponseTargetType,
+    ResourceStatus,
+)
+from src.services.operational_refresh import (
+    FireSpreadRefreshHorizonResult,
+    FireSpreadRefreshHorizonStatus,
+    FireSpreadRefreshResult,
+    OperationalRefreshResult,
+    OperationalRefreshStatus,
+    ResourceStatusUpdateResult,
+    ResourceStatusUpdateStatus,
 )
 from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
+from src.simulation.analysis.simulation_refresh_result import SimulationRefreshResult
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
 from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
@@ -52,7 +65,9 @@ from src.simulation import (
     SimulationEventExecutionResult,
     SimulationEventType,
     SimulationMode,
+    SimulationResourceStatusChange,
     build_active_fire_scenario,
+    build_active_fire_resource_refresh_scenario,
     build_carmel_golan_active_fire_scenario,
     simulation_event_timestamp,
 )
@@ -215,6 +230,86 @@ class FakeResponseTargetCoordinator:
             triggered=True,
             generation_results=generations,
             fire_event_ids=tuple(sorted(set(fire_event_ids))),
+        )
+
+
+class FakeSimulationRefreshCoordinator:
+    def __init__(self, mode="environmental") -> None:
+        self.mode = mode
+        self.calls = []
+
+    def handle_event(self, *, scenario, event, execution_result, event_timestamp, detection_result=None):
+        self.calls.append(
+            {
+                "scenario": scenario,
+                "event": event,
+                "execution_result": execution_result,
+                "event_timestamp": event_timestamp,
+                "detection_result": detection_result,
+            }
+        )
+        if self.mode == "none":
+            return SimulationRefreshResult(triggered=False, reason="no_affected_fire_events")
+        if self.mode == "resource":
+            return SimulationRefreshResult(
+                triggered=True,
+                refresh_results=(
+                    OperationalRefreshResult(
+                        trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE,
+                        status=OperationalRefreshStatus.RESOURCE_UPDATED,
+                        success=True,
+                        resource_status_result=ResourceStatusUpdateResult(
+                            resource_id="TRUCK-A",
+                            previous_status=ResourceStatus.AVAILABLE,
+                            current_status=ResourceStatus.UNAVAILABLE,
+                            status=ResourceStatusUpdateStatus.UPDATED,
+                            resource=FirefightingResource(
+                                id="TRUCK-A",
+                                station_id="STATION-1",
+                                status=ResourceStatus.UNAVAILABLE,
+                            ),
+                        ),
+                        available_resources=(
+                            FirefightingResource(
+                                id="TRUCK-B",
+                                station_id="STATION-1",
+                                status=ResourceStatus.AVAILABLE,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+        return SimulationRefreshResult(
+            triggered=True,
+            refresh_results=(
+                OperationalRefreshResult(
+                    trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+                    status=OperationalRefreshStatus.NO_OP,
+                    success=True,
+                    fire_event_id=77,
+                    as_of=event_timestamp,
+                    spread_refresh_result=FireSpreadRefreshResult(
+                        fire_event_id=77,
+                        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+                        as_of=event_timestamp,
+                        reevaluation_required=True,
+                        horizon_results=(
+                            FireSpreadRefreshHorizonResult(
+                                fire_event_id=77,
+                                horizon_minutes=30,
+                                status=FireSpreadRefreshHorizonStatus.NO_OP,
+                            ),
+                            FireSpreadRefreshHorizonResult(
+                                fire_event_id=77,
+                                horizon_minutes=60,
+                                status=FireSpreadRefreshHorizonStatus.NO_OP,
+                            ),
+                        ),
+                    ),
+                    response_target_result=make_response_target_generation(77),
+                ),
+            ),
+            fire_event_ids=(77,),
         )
 
 
@@ -817,6 +912,91 @@ def test_news_detection_generates_response_targets_without_severity_or_spread(mo
     assert "FIRE DETECTION" in text
     assert "FIRE SEVERITY ASSESSMENT" not in text
     assert "RESPONSE TARGETS" in text
+
+
+def test_central_operational_refresh_block_prints_spread_no_op_and_targets():
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        simulation_refresh_coordinator=refresh,
+    )
+
+    expected_timestamp = simulation_event_timestamp(STARTED_AT, event)
+    assert refresh.calls[0]["event_timestamp"] == expected_timestamp
+    text = output.getvalue()
+    assert "OPERATIONAL REFRESH" in text
+    assert "trigger=WEATHER_UPDATE" in text
+    assert "fire_event_id=77" in text
+    assert "status=NO_OP" in text
+    assert "30m=NO_OP" in text
+    assert "60m=NO_OP" in text
+    assert "Response Targets:" in text
+    assert "target_set_id=977" in text
+
+
+def test_central_refresh_prevents_old_severity_spread_target_chain_from_running():
+    scenario = build_active_fire_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.SATELLITE)
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator()
+    severity = FakeFireSeverityCoordinator()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        fire_severity_coordinator=severity,
+        simulation_refresh_coordinator=refresh,
+    )
+
+    assert len(refresh.calls) == 1
+    assert isinstance(refresh.calls[0]["detection_result"], FireDetectionResult)
+    assert severity.calls == []
+    text = output.getvalue()
+    assert "FIRE DETECTION" in text
+    assert "OPERATIONAL REFRESH" in text
+    assert "FIRE SEVERITY ASSESSMENT" not in text
+    assert "FIRE SPREAD PREDICTION" not in text
+    assert "RESPONSE TARGETS\n" not in text
+
+
+def test_resource_status_event_output_is_printed_from_central_refresh():
+    scenario = build_active_fire_resource_refresh_scenario(seed=42)
+    event = next(event for event in scenario.events if event.event_type is SimulationEventType.RESOURCE_STATUS)
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator(mode="resource")
+    detection = FakeFireDetectionCoordinator()
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_detection_coordinator=detection,
+        simulation_refresh_coordinator=refresh,
+    )
+
+    assert detection.calls == []
+    text = output.getvalue()
+    assert "RESOURCE STATUS UPDATE" in text
+    assert "resource_id=TRUCK-A" in text
+    assert "AVAILABLE -> UNAVAILABLE" in text
+    assert "status=RESOURCE_UPDATED" in text
+    assert "available_resources=1" in text
+    assert "OPERATIONAL REFRESH" not in text
 
 
 def test_build_response_target_coordinator_returns_simulation_coordinator():

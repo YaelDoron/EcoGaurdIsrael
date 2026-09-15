@@ -42,6 +42,12 @@ from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.operational import OperationalContextService
+from src.services.operational_refresh import (
+    FireSpreadRefreshOrchestrator,
+    OperationalRefreshOrchestrator,
+    OperationalRefreshResult,
+    ResourceStatusUpdateService,
+)
 from src.services.response_target import ResponseTargetInputService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
@@ -64,7 +70,10 @@ from src.simulation import (
     SimulationFireSeverityResult,
     SimulationResponseTargetCoordinator,
     SimulationResponseTargetResult,
+    SimulationRefreshCoordinator,
+    SimulationRefreshResult,
     build_carmel_golan_active_fire_scenario,
+    build_active_fire_resource_refresh_scenario,
     build_scenario,
     get_simulation_location,
     simulation_event_timestamp,
@@ -74,7 +83,7 @@ from src.simulation import SimulationFireSpreadCoordinator, SimulationFireSpread
 DEFAULT_SEED = 42
 DEFAULT_MODE = "manual"
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
-SUPPORTED_PRESETS = ("carmel_golan_active_fire",)
+SUPPORTED_PRESETS = ("carmel_golan_active_fire", "active_fire_resource_refresh")
 
 
 @dataclass
@@ -159,6 +168,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def build_scenario_from_args(args: argparse.Namespace) -> SimulationScenario:
     if args.preset == "carmel_golan_active_fire":
         return build_carmel_golan_active_fire_scenario(seed=args.seed)
+    if args.preset == "active_fire_resource_refresh":
+        return build_active_fire_resource_refresh_scenario(seed=args.seed)
     if args.preset:
         raise ValueError(f"Unsupported preset: {args.preset!r}")
 
@@ -180,6 +191,7 @@ def run_manual(
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
+    simulation_refresh_coordinator: SimulationRefreshCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     input_func: Callable[[str], str] = input,
@@ -189,7 +201,10 @@ def run_manual(
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     operational_coordinator = operational_coordinator or build_operational_coordinator()
-    fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
+    if simulation_refresh_coordinator is None and fire_severity_coordinator is None:
+        simulation_refresh_coordinator = build_simulation_refresh_coordinator(operational_coordinator)
+    elif simulation_refresh_coordinator is None:
+        fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -216,6 +231,7 @@ def run_manual(
             fire_detection_coordinator,
             operational_coordinator,
             fire_severity_coordinator,
+            simulation_refresh_coordinator,
         )
         summary.add(result)
 
@@ -230,6 +246,7 @@ def run_automatic(
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
+    simulation_refresh_coordinator: SimulationRefreshCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     sleep_func: Callable[[float], None] = time.sleep,
@@ -240,7 +257,10 @@ def run_automatic(
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     operational_coordinator = operational_coordinator or build_operational_coordinator()
-    fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
+    if simulation_refresh_coordinator is None and fire_severity_coordinator is None:
+        simulation_refresh_coordinator = build_simulation_refresh_coordinator(operational_coordinator)
+    elif simulation_refresh_coordinator is None:
+        fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -261,6 +281,7 @@ def run_automatic(
                 fire_detection_coordinator,
                 operational_coordinator,
                 fire_severity_coordinator,
+                simulation_refresh_coordinator,
             )
             summary.add(result)
 
@@ -281,6 +302,7 @@ def execute_and_report_event(
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
+    simulation_refresh_coordinator: SimulationRefreshCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
     event_timestamp = simulation_event_timestamp(scenario_started_at, event)
@@ -304,7 +326,7 @@ def execute_and_report_event(
         )
         if fire_danger_result.triggered:
             print_fire_danger_result(fire_danger_result, output)
-    if fire_detection_coordinator is not None:
+    if fire_detection_coordinator is not None and event.event_type.name in {"SATELLITE", "NEWS"}:
         fire_detection_result = fire_detection_coordinator.handle_event(
             scenario=scenario,
             event=event,
@@ -325,7 +347,22 @@ def execute_and_report_event(
                 )
     else:
         fire_detection_result = None
-    if fire_severity_coordinator is not None:
+
+    if simulation_refresh_coordinator is not None:
+        refresh_result = simulation_refresh_coordinator.handle_event(
+            scenario=scenario,
+            event=event,
+            execution_result=result,
+            event_timestamp=event_timestamp,
+            detection_result=(
+                fire_detection_result.detection_result
+                if fire_detection_result is not None and fire_detection_result.triggered
+                else None
+            ),
+        )
+        if refresh_result.triggered:
+            print_simulation_refresh_result(refresh_result, output)
+    elif fire_severity_coordinator is not None:
         severity_result = fire_severity_coordinator.handle_event(
             scenario=scenario,
             event=event,
@@ -495,6 +532,56 @@ def build_response_target_coordinator() -> SimulationResponseTargetCoordinator:
     return SimulationResponseTargetCoordinator(generation_agent=agent)
 
 
+def build_simulation_refresh_coordinator(
+    operational_coordinator: SimulationOperationalCoordinator | None = None,
+) -> SimulationRefreshCoordinator:
+    """Build the central US 4.4 simulation refresh coordinator."""
+    fire_event_repository = FireEventRepository()
+
+    severity_agent = FireSeverityAssessmentAgent(
+        input_service=FireSeverityInputService(fire_event_repository=fire_event_repository),
+        calculator=FireSeverityCalculator(),
+        repository=FireSeverityAssessmentRepository(),
+    )
+
+    spread_input_service = FireSpreadInputService()
+    spread_calculator = FireSpreadCalculator()
+    spread_prediction_repository = FireSpreadPredictionRepository()
+    spread_agent = FireSpreadPredictionAgent(
+        input_service=spread_input_service,
+        calculator=spread_calculator,
+        repository=spread_prediction_repository,
+    )
+    spread_refresh_orchestrator = FireSpreadRefreshOrchestrator(
+        input_service=spread_input_service,
+        prediction_agent=spread_agent,
+        prediction_repository=spread_prediction_repository,
+    )
+
+    response_target_agent = ResponseTargetGenerationAgent(
+        input_service=ResponseTargetInputService(),
+        calculator=ResponseTargetCalculator(),
+        repository=ResponseTargetRepository(),
+    )
+
+    resource_repository = FirefightingResourceRepository()
+    resource_status_service = ResourceStatusUpdateService(resource_repository)
+    operational_refresh_orchestrator = OperationalRefreshOrchestrator(
+        severity_agent=severity_agent,
+        spread_refresh_orchestrator=spread_refresh_orchestrator,
+        response_target_agent=response_target_agent,
+        resource_status_service=resource_status_service,
+        resource_repository=resource_repository,
+        fire_event_repository=fire_event_repository,
+    )
+
+    return SimulationRefreshCoordinator(
+        operational_refresh_orchestrator=operational_refresh_orchestrator,
+        fire_event_repository=fire_event_repository,
+        operational_coordinator=operational_coordinator or build_operational_coordinator(),
+    )
+
+
 _fire_spread_coordinator: SimulationFireSpreadCoordinator | None = None
 _response_target_coordinator: SimulationResponseTargetCoordinator | None = None
 
@@ -642,6 +729,70 @@ def print_response_target_result(
                 print(f"target_{index}_spread_prediction_id={target.spread_prediction_id}", file=output)
             if target.spread_prediction_cell_id is not None:
                 print(f"target_{index}_spread_prediction_cell_id={target.spread_prediction_cell_id}", file=output)
+
+
+def print_simulation_refresh_result(
+    simulation_refresh_result: SimulationRefreshResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    for refresh_result in simulation_refresh_result.refresh_results:
+        if refresh_result.trigger_type.value == "resource_status_update":
+            print_resource_refresh_result(refresh_result, output)
+        else:
+            print_operational_refresh_result(refresh_result, output)
+
+
+def print_operational_refresh_result(
+    refresh_result: OperationalRefreshResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    print("OPERATIONAL REFRESH", file=output)
+    print(f"trigger={refresh_result.trigger_type.name}", file=output)
+    print(f"fire_event_id={refresh_result.fire_event_id}", file=output)
+    print(f"status={refresh_result.status.name}", file=output)
+    print(f"success={refresh_result.success}", file=output)
+    if refresh_result.severity_result is not None:
+        severity = refresh_result.severity_result.assessment
+        print("Severity:", file=output)
+        print(f"severity_status={severity.status.name}", file=output)
+        print(f"severity_score={_format_optional_score(severity.score)}", file=output)
+        print(f"severity_assessment_id={refresh_result.severity_result.assessment_id}", file=output)
+    if refresh_result.spread_refresh_result is not None:
+        print("Spread:", file=output)
+        for horizon_result in refresh_result.spread_refresh_result.horizon_results:
+            prediction_id = horizon_result.prediction_id if horizon_result.prediction_id is not None else "-"
+            print(f"{horizon_result.horizon_minutes}m={horizon_result.status.name}", file=output)
+            print(f"{horizon_result.horizon_minutes}m_prediction_id={prediction_id}", file=output)
+    if refresh_result.response_target_result is not None:
+        targets = refresh_result.response_target_result
+        target_set_id = targets.target_set_id if targets.target_set_id is not None else "-"
+        print("Response Targets:", file=output)
+        print(f"target_status={targets.status.name}", file=output)
+        print(f"target_set_id={target_set_id}", file=output)
+        print(f"target_count={targets.target_count}", file=output)
+    if refresh_result.error_message:
+        print(f"message={refresh_result.error_message}", file=output)
+
+
+def print_resource_refresh_result(
+    refresh_result: OperationalRefreshResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    status_result = refresh_result.resource_status_result
+    print("RESOURCE STATUS UPDATE", file=output)
+    if status_result is None:
+        print(f"status={refresh_result.status.name}", file=output)
+        if refresh_result.error_message:
+            print(f"message={refresh_result.error_message}", file=output)
+        return
+    previous_status = status_result.previous_status.name if status_result.previous_status is not None else "-"
+    current_status = status_result.current_status.name if status_result.current_status is not None else "-"
+    print(f"resource_id={status_result.resource_id}", file=output)
+    print(f"{previous_status} -> {current_status}", file=output)
+    print(f"status={refresh_result.status.name}", file=output)
+    print(f"available_resources={len(refresh_result.available_resources)}", file=output)
+    if refresh_result.error_message:
+        print(f"message={refresh_result.error_message}", file=output)
 
 
 def _format_optional_score(score: float | None) -> str:

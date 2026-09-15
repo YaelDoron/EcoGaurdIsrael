@@ -35,3 +35,7 @@ class FireSpreadPredictionRepositoryError(Exception):
 
 class ResponseTargetRepositoryError(Exception):
     """Base exception for response-target repository errors."""
+
+
+class FirefightingResourceRepositoryError(Exception):
+    """Base exception for firefighting-resource repository errors."""

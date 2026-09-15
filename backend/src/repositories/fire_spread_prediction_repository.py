@@ -192,6 +192,7 @@ class FireSpreadPredictionRepository:
             status=prediction.status.value,
             methodology=prediction.methodology,
             methodology_version=prediction.methodology_version,
+            effective_state_fingerprint=prediction.effective_state_fingerprint,
         )
 
     @staticmethod
@@ -251,6 +252,7 @@ class FireSpreadPredictionRepository:
                 methodology=db_prediction.methodology,
                 methodology_version=db_prediction.methodology_version,
                 cells=cells,
+                effective_state_fingerprint=db_prediction.effective_state_fingerprint,
             ),
             weather_observation_id=weather_ids[0] if weather_ids else None,
         )
@@ -296,6 +298,7 @@ class FireSpreadPredictionRepository:
                 methodology=db_prediction.methodology,
                 methodology_version=db_prediction.methodology_version,
                 cells=tuple(stored_cell.cell for stored_cell in stored_cells),
+                effective_state_fingerprint=db_prediction.effective_state_fingerprint,
             ),
             cells=stored_cells,
             weather_observation_id=weather_ids[0] if weather_ids else None,

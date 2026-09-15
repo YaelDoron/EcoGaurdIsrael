@@ -53,6 +53,7 @@ class FireSpreadPredictionDB(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     methodology: Mapped[str] = mapped_column(String, nullable=False)
     methodology_version: Mapped[str] = mapped_column(String, nullable=False)
+    effective_state_fingerprint: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

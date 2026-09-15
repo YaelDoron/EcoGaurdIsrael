@@ -9,6 +9,7 @@ import pytest
 from src.agents.analysis import FireSpreadPredictionAgent
 from src.calculators.fire_spread.fire_spread_config import METHODOLOGY_NAME, METHODOLOGY_VERSION
 from src.models import (
+    FireSpreadEffectiveState,
     FireSpreadCalculation,
     FireSpreadFuelClass,
     FireSpreadInput,
@@ -169,6 +170,27 @@ def test_ready_input_creates_valid_prediction_with_expected_fields():
     assert prediction.methodology == METHODOLOGY_NAME
     assert prediction.methodology_version == METHODOLOGY_VERSION
     assert prediction.cells == (CELL,)
+    assert prediction.effective_state_fingerprint == FireSpreadEffectiveState.from_input(
+        fire_event_id=FIRE_EVENT_ID,
+        spread_input=INPUT_DATA,
+    ).fingerprint
+
+
+def test_predict_from_prepared_input_uses_supplied_fingerprint_without_preparing_again():
+    input_service = FakeInputService(ready_input_result())
+    repository = FakeRepository()
+    fingerprint = "a" * 64
+    agent = make_agent(input_service, repository=repository)
+
+    result = agent.predict_from_input_result(
+        input_result=ready_input_result(),
+        as_of=AS_OF,
+        horizon_minutes=30,
+        effective_state_fingerprint=fingerprint,
+    )
+
+    assert input_service.calls == []
+    assert result.prediction.effective_state_fingerprint == fingerprint
 
 
 def test_ready_flow_passes_selected_weather_observation_id_to_repository():

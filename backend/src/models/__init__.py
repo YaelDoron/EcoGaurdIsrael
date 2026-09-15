@@ -28,6 +28,7 @@ from src.models.fire_severity_input_result import FireSeverityInputResult
 from src.models.fire_severity_input_status import FireSeverityInputStatus
 from src.models.fire_severity_level import FireSeverityLevel
 from src.models.fire_spread_calculation import FireSpreadCalculation
+from src.models.fire_spread_effective_state import FireSpreadEffectiveState
 from src.models.fire_spread_fuel_class import FireSpreadFuelClass
 from src.models.fire_spread_input import FireSpreadInput
 from src.models.fire_spread_input_result import FireSpreadInputResult
@@ -36,6 +37,7 @@ from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPr
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
+from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
 from src.models.predicted_risk_target_candidate import PredictedRiskTargetCandidate
 from src.models.response_target import ResponseTarget
 from src.models.response_target_input import ResponseTargetInput
@@ -80,6 +82,7 @@ __all__ = [
     "FireSeverityLevel",
     "FireSeverityCalculation",
     "FireSpreadCalculation",
+    "FireSpreadEffectiveState",
     "FireSpreadFuelClass",
     "FireSpreadInput",
     "FireSpreadInputResult",
@@ -97,4 +100,5 @@ __all__ = [
     "VegetationData",
     "GraphNode",
     "GraphEdge",
+    "OperationalRefreshTriggerType",
 ]

@@ -2,7 +2,8 @@
 
 import pytest
 
-from src.simulation import SimulationEvent, SimulationEventType
+from src.models.resource_status import ResourceStatus
+from src.simulation import SimulationEvent, SimulationEventType, SimulationResourceStatusChange
 
 
 def test_valid_event_construction():
@@ -23,6 +24,47 @@ def test_event_types_are_represented():
     assert SimulationEventType.WEATHER.value == "weather"
     assert SimulationEventType.SATELLITE.value == "satellite"
     assert SimulationEventType.NEWS.value == "news"
+    assert SimulationEventType.RESOURCE_STATUS.value == "resource_status"
+
+
+def test_resource_status_event_requires_resource_payload():
+    with pytest.raises(ValueError):
+        SimulationEvent(
+            offset_seconds=60,
+            event_type=SimulationEventType.RESOURCE_STATUS,
+            incident_id="incident-carmel-01",
+            source_event_index=0,
+        )
+
+
+def test_resource_status_event_accepts_existing_resource_status_enum():
+    event = SimulationEvent(
+        offset_seconds=60,
+        event_type=SimulationEventType.RESOURCE_STATUS,
+        incident_id="incident-carmel-01",
+        source_event_index=0,
+        resource_status_change=SimulationResourceStatusChange(
+            new_status=ResourceStatus.UNAVAILABLE,
+            resource_id="TRUCK-A",
+        ),
+    )
+
+    assert event.resource_status_change.new_status is ResourceStatus.UNAVAILABLE
+    assert event.resource_status_change.resource_id == "TRUCK-A"
+
+
+def test_non_resource_event_rejects_resource_payload():
+    with pytest.raises(ValueError):
+        SimulationEvent(
+            offset_seconds=0,
+            event_type=SimulationEventType.WEATHER,
+            incident_id="incident-carmel-01",
+            source_event_index=0,
+            resource_status_change=SimulationResourceStatusChange(
+                new_status=ResourceStatus.UNAVAILABLE,
+                resource_id="TRUCK-A",
+            ),
+        )
 
 
 @pytest.mark.parametrize("offset_seconds", [-1, None, "10", True])
