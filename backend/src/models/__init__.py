@@ -17,6 +17,9 @@ from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
+from src.models.fire_station import FireStation
+from src.models.firefighting_resource import FirefightingResource
+from src.models.resource_status import ResourceStatus
 from src.models.fire_severity_calculation import FireSeverityCalculation
 from src.models.fire_severity_assessment import FireSeverityAssessment
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
@@ -57,6 +60,9 @@ __all__ = [
     "FireDetectionDecision",
     "FireEvent",
     "FireEventStatus",
+    "FireStation",
+    "FirefightingResource",
+    "ResourceStatus",
     "FireSeverityInput",
     "FireSeverityAssessment",
     "FireSeverityAssessmentStatus",

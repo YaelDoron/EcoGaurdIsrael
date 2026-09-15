@@ -12,6 +12,7 @@ from src.simulation.analysis.simulation_fire_detection_coordinator import (
     SimulationFireDetectionCoordinator,
 )
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
+from src.simulation.analysis.simulation_operational_coordinator import SimulationOperationalCoordinator
 from src.simulation.analysis.simulation_fire_severity_coordinator import SimulationFireSeverityCoordinator
 from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
 from src.simulation.analysis.simulation_fire_spread_coordinator import (
@@ -36,4 +37,5 @@ __all__ = [
     "NO_SOURCE_DATA_AVAILABLE_REASON",
     "SEVERITY_NOT_TRIGGERED_REASON",
     "NO_SEVERITY_ASSESSMENTS_REASON",
+    "SimulationOperationalCoordinator",
 ]

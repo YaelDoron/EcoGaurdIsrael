@@ -101,6 +101,8 @@ def init_db() -> None:
         fire_spread_prediction_cell_db,
         fire_spread_prediction_db,
         fire_spread_prediction_weather_input_db,
+        fire_station_db,
+        firefighting_resource_db,
         satellite_hotspot_db,
         weather_observation_db,
         weather_station_db,

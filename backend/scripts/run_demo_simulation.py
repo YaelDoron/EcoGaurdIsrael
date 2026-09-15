@@ -25,6 +25,8 @@ from src.calculators.fire_severity.fire_severity_calculator import FireSeverityC
 from src.calculators.fire_spread import FireSpreadCalculator
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
+from src.repositories.fire_station_repository import FireStationRepository
+from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
 from src.repositories.fire_spread_prediction_repository import FireSpreadPredictionRepository
 from src.repositories.news_repository import NewsRepository
@@ -32,15 +34,18 @@ from src.repositories.satellite_hotspot_repository import SatelliteHotspotReposi
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
+from src.services.operational import OperationalContextService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
+    SimulatedIncident,
     SimulationEvent,
     SimulationEventExecutionResult,
     SimulationEventExecutor,
     SimulationMode,
+    SimulationOperationalCoordinator,
     SimulationScenario,
     SimulationScenarioService,
     SimulationFireDangerCoordinator,
@@ -163,6 +168,7 @@ def run_manual(
     executor: SimulationEventExecutor | None = None,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
+    operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
@@ -172,6 +178,7 @@ def run_manual(
     executor = executor or SimulationEventExecutor()
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
+    operational_coordinator = operational_coordinator or build_operational_coordinator()
     fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
@@ -197,6 +204,7 @@ def run_manual(
             output,
             fire_danger_coordinator,
             fire_detection_coordinator,
+            operational_coordinator,
             fire_severity_coordinator,
         )
         summary.add(result)
@@ -210,6 +218,7 @@ def run_automatic(
     executor: SimulationEventExecutor | None = None,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
+    operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
@@ -220,6 +229,7 @@ def run_automatic(
     executor = executor or SimulationEventExecutor()
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
+    operational_coordinator = operational_coordinator or build_operational_coordinator()
     fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
@@ -239,6 +249,7 @@ def run_automatic(
                 output,
                 fire_danger_coordinator,
                 fire_detection_coordinator,
+                operational_coordinator,
                 fire_severity_coordinator,
             )
             summary.add(result)
@@ -258,6 +269,7 @@ def execute_and_report_event(
     output: TextIO = sys.stdout,
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
+    operational_coordinator: SimulationOperationalCoordinator | None = None,
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
@@ -290,6 +302,13 @@ def execute_and_report_event(
         )
         if fire_detection_result.triggered:
             print_fire_detection_result(fire_detection_result, output)
+            if operational_coordinator is not None:
+                scramble_resources_for_new_fire_events(
+                    fire_detection_result,
+                    incident,
+                    operational_coordinator,
+                    output,
+                )
     else:
         fire_detection_result = None
     if fire_severity_coordinator is not None:
@@ -314,6 +333,31 @@ def execute_and_report_event(
                 print_fire_spread_result(spread_result, output)
     print("", file=output)
     return result
+
+
+def scramble_resources_for_new_fire_events(
+    fire_detection_result: SimulationFireDetectionResult,
+    incident: SimulatedIncident,
+    operational_coordinator: SimulationOperationalCoordinator,
+    output: TextIO = sys.stdout,
+) -> None:
+    """Deplete resource availability near an incident once it becomes an active fire.
+
+    Only fires when detection actually created a new fire event (not merely
+    updated an existing one or found no event), so the operational context
+    is scrambled once, at the moment an incident location genuinely becomes
+    an active wildfire.
+    """
+    detection_result = fire_detection_result.detection_result
+    if detection_result is None or not detection_result.success or detection_result.events_created <= 0:
+        return
+
+    depleted_resources = operational_coordinator.scramble_resource_availability(
+        incident.location.latitude,
+        incident.location.longitude,
+    )
+    print("OPERATIONAL CONTEXT", file=output)
+    print(f"depleted_resources={len(depleted_resources)}", file=output)
 
 
 def format_execution_result(result: SimulationEventExecutionResult) -> str:
@@ -360,6 +404,17 @@ def build_fire_detection_coordinator() -> SimulationFireDetectionCoordinator:
     return SimulationFireDetectionCoordinator(detection_agent=agent)
 
 
+def build_operational_coordinator() -> SimulationOperationalCoordinator:
+    """Build the simulation operational-context stack using shared repositories."""
+    fire_station_repository = FireStationRepository()
+    firefighting_resource_repository = FirefightingResourceRepository()
+    operational_context_service = OperationalContextService(
+        fire_station_repository=fire_station_repository,
+        firefighting_resource_repository=firefighting_resource_repository,
+    )
+    return SimulationOperationalCoordinator(
+        operational_context_service=operational_context_service,
+        firefighting_resource_repository=firefighting_resource_repository,
 def build_fire_severity_coordinator() -> SimulationFireSeverityCoordinator:
     """Build the simulation fire-severity analysis stack using shared repositories."""
     fire_event_repository = FireEventRepository()
