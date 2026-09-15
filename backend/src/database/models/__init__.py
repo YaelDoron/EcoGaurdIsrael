@@ -9,6 +9,13 @@ from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenc
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
 from src.database.models.fire_station_db import FireStationDB
 from src.database.models.firefighting_resource_db import FirefightingResourceDB
+from src.database.models.fire_severity_assessment_db import FireSeverityAssessmentDB
+from src.database.models.fire_severity_assessment_satellite_input_db import (
+    FireSeverityAssessmentSatelliteInputDB,
+)
+from src.database.models.fire_severity_assessment_weather_input_db import (
+    FireSeverityAssessmentWeatherInputDB,
+)
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
@@ -26,4 +33,7 @@ __all__ = [
     "FireEventNewsEvidenceDB",
     "FireStationDB",
     "FirefightingResourceDB",
+    "FireSeverityAssessmentDB",
+    "FireSeverityAssessmentWeatherInputDB",
+    "FireSeverityAssessmentSatelliteInputDB",
 ]

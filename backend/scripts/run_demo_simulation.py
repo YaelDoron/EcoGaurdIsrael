@@ -17,19 +17,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
-from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent
+from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent, FireSeverityAssessmentAgent
 from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
+from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
 from src.repositories.fire_station_repository import FireStationRepository
 from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
+from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
 from src.repositories.news_repository import NewsRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.operational import OperationalContextService
+from src.services.fire_severity import FireSeverityInputService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
@@ -45,6 +48,8 @@ from src.simulation import (
     SimulationFireDangerResult,
     SimulationFireDetectionCoordinator,
     SimulationFireDetectionResult,
+    SimulationFireSeverityCoordinator,
+    SimulationFireSeverityResult,
     build_carmel_golan_active_fire_scenario,
     build_scenario,
     get_simulation_location,
@@ -159,6 +164,7 @@ def run_manual(
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
+    fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     input_func: Callable[[str], str] = input,
@@ -168,6 +174,7 @@ def run_manual(
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     operational_coordinator = operational_coordinator or build_operational_coordinator()
+    fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -193,6 +200,7 @@ def run_manual(
             fire_danger_coordinator,
             fire_detection_coordinator,
             operational_coordinator,
+            fire_severity_coordinator,
         )
         summary.add(result)
 
@@ -206,6 +214,7 @@ def run_automatic(
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
+    fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
     service: SimulationScenarioService | None = None,
     scenario_started_at: datetime | None = None,
     sleep_func: Callable[[float], None] = time.sleep,
@@ -216,6 +225,7 @@ def run_automatic(
     fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
     fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
     operational_coordinator = operational_coordinator or build_operational_coordinator()
+    fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
     service = service or SimulationScenarioService()
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
@@ -235,6 +245,7 @@ def run_automatic(
                 fire_danger_coordinator,
                 fire_detection_coordinator,
                 operational_coordinator,
+                fire_severity_coordinator,
             )
             summary.add(result)
 
@@ -254,6 +265,7 @@ def execute_and_report_event(
     fire_danger_coordinator: SimulationFireDangerCoordinator | None = None,
     fire_detection_coordinator: SimulationFireDetectionCoordinator | None = None,
     operational_coordinator: SimulationOperationalCoordinator | None = None,
+    fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
     event_timestamp = simulation_event_timestamp(scenario_started_at, event)
@@ -292,6 +304,22 @@ def execute_and_report_event(
                     operational_coordinator,
                     output,
                 )
+    else:
+        fire_detection_result = None
+    if fire_severity_coordinator is not None:
+        severity_result = fire_severity_coordinator.handle_event(
+            scenario=scenario,
+            event=event,
+            execution_result=result,
+            event_timestamp=event_timestamp,
+            detection_result=(
+                fire_detection_result.detection_result
+                if fire_detection_result is not None and fire_detection_result.triggered
+                else None
+            ),
+        )
+        if severity_result.triggered:
+            print_fire_severity_result(severity_result, output)
     print("", file=output)
     return result
 
@@ -376,6 +404,20 @@ def build_operational_coordinator() -> SimulationOperationalCoordinator:
     return SimulationOperationalCoordinator(
         operational_context_service=operational_context_service,
         firefighting_resource_repository=firefighting_resource_repository,
+def build_fire_severity_coordinator() -> SimulationFireSeverityCoordinator:
+    """Build the simulation fire-severity analysis stack using shared repositories."""
+    fire_event_repository = FireEventRepository()
+    input_service = FireSeverityInputService(fire_event_repository=fire_event_repository)
+    calculator = FireSeverityCalculator()
+    assessment_repository = FireSeverityAssessmentRepository()
+    agent = FireSeverityAssessmentAgent(
+        input_service=input_service,
+        calculator=calculator,
+        repository=assessment_repository,
+    )
+    return SimulationFireSeverityCoordinator(
+        severity_agent=agent,
+        fire_event_repository=fire_event_repository,
     )
 
 
@@ -425,6 +467,27 @@ def print_fire_detection_result(
     print(f"events_created={detection_result.events_created}", file=output)
     print(f"events_updated={detection_result.events_updated}", file=output)
     print(f"event_ids={_format_event_ids(detection_result.event_ids)}", file=output)
+
+
+def print_fire_severity_result(
+    fire_severity_result: SimulationFireSeverityResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    print("FIRE SEVERITY ASSESSMENT", file=output)
+    for stored_assessment in fire_severity_result.assessment_results:
+        assessment = stored_assessment.assessment
+        print(f"event_id={assessment.fire_event_id}", file=output)
+        print(f"status={assessment.status.name}", file=output)
+        print(f"score={_format_optional_score(assessment.score)}", file=output)
+        print(f"level={assessment.level.name if assessment.level is not None else '-'}", file=output)
+        print(f"assessment_id={stored_assessment.assessment_id}", file=output)
+    for fire_event_id, message in zip(
+        fire_severity_result.failed_fire_event_ids,
+        fire_severity_result.error_messages,
+    ):
+        print(f"event_id={fire_event_id}", file=output)
+        print("status=ERROR", file=output)
+        print(f"message={message}", file=output)
 
 
 def _format_optional_score(score: float | None) -> str:

@@ -23,3 +23,7 @@ class FireDangerAssessmentRepositoryError(Exception):
 
 class FireEventRepositoryError(Exception):
     """Base exception for wildfire event repository errors."""
+
+
+class FireSeverityAssessmentRepositoryError(Exception):
+    """Base exception for fire-severity assessment repository errors."""

@@ -9,11 +9,13 @@ from src.mappers.exceptions import (
     WeatherMappingError,
 )
 from src.mappers.satellite_hotspot_mapper import SatelliteHotspotMapper
+from src.mappers.vegetation_mapper import VegetationMapper
 from src.mappers.weather_mapper import WeatherMapper
 
 __all__ = [
     "WeatherMapper",
     "SatelliteHotspotMapper",
+    "VegetationMapper",
     "WeatherMappingError",
     "MissingRequiredWeatherFieldError",
     "InvalidWeatherTimestampError",

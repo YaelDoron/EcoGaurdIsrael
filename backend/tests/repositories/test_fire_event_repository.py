@@ -356,6 +356,92 @@ def test_recent_but_distant_event_does_not_match(repository, satellite_repositor
     assert repository.find_matching_active_event(32.731, 35.046, UPDATED_AT) is None
 
 
+def test_get_active_events_near_returns_active_events_within_radius(repository, satellite_repository):
+    nearby = create_event_with_satellite(repository, satellite_repository, latitude=32.732)
+    create_event_with_satellite(repository, satellite_repository, latitude=33.5, longitude=35.5)
+
+    found = repository.get_active_events_near(
+        latitude=32.731,
+        longitude=35.046,
+        radius_km=5,
+        as_of=UPDATED_AT,
+    )
+
+    assert tuple(event.id for event in found) == (nearby.id,)
+
+
+@pytest.mark.parametrize("inactive_status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_get_active_events_near_excludes_inactive_events(repository, satellite_repository, inactive_status):
+    saved = create_event_with_satellite(repository, satellite_repository)
+    repository.update_event(saved.id, make_event(status=inactive_status, updated_at=UPDATED_AT + timedelta(minutes=1)))
+
+    found = repository.get_active_events_near(
+        latitude=32.731,
+        longitude=35.046,
+        radius_km=5,
+        as_of=UPDATED_AT + timedelta(minutes=2),
+    )
+
+    assert found == ()
+
+
+def test_get_active_events_near_excludes_future_detected_events(repository, satellite_repository):
+    create_event_with_satellite(
+        repository,
+        satellite_repository,
+        detected_at=UPDATED_AT + timedelta(hours=1),
+        updated_at=UPDATED_AT + timedelta(hours=1),
+    )
+
+    found = repository.get_active_events_near(
+        latitude=32.731,
+        longitude=35.046,
+        radius_km=5,
+        as_of=UPDATED_AT,
+    )
+
+    assert found == ()
+
+
+def test_get_active_events_near_orders_by_distance_then_id(repository, satellite_repository):
+    farther = create_event_with_satellite(repository, satellite_repository, latitude=32.740)
+    closer = create_event_with_satellite(repository, satellite_repository, latitude=32.732)
+
+    found = repository.get_active_events_near(
+        latitude=32.731,
+        longitude=35.046,
+        radius_km=5,
+        as_of=UPDATED_AT + timedelta(minutes=1),
+    )
+
+    assert tuple(event.id for event in found) == (closer.id, farther.id)
+
+
+def test_get_active_events_near_exact_distance_boundary_matches(repository, satellite_repository):
+    lat, lon = coordinate_north_at_distance(5)
+    saved = create_event_with_satellite(repository, satellite_repository, latitude=lat, longitude=lon)
+
+    found = repository.get_active_events_near(
+        latitude=32.731,
+        longitude=35.046,
+        radius_km=5,
+        as_of=UPDATED_AT,
+    )
+
+    assert tuple(event.id for event in found) == (saved.id,)
+
+
+@pytest.mark.parametrize("invalid_radius", [0, -1, True, float("inf"), "5"])
+def test_get_active_events_near_rejects_invalid_radius(repository, invalid_radius):
+    with pytest.raises(FireEventRepositoryError):
+        repository.get_active_events_near(
+            latitude=32.731,
+            longitude=35.046,
+            radius_km=invalid_radius,
+            as_of=UPDATED_AT,
+        )
+
+
 def test_multiple_matching_events_choose_closest(repository, satellite_repository):
     farther = create_event_with_satellite(repository, satellite_repository, latitude=32.740, detected_at=DETECTED_AT)
     closer = create_event_with_satellite(

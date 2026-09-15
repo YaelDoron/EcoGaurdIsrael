@@ -1,0 +1,741 @@
+2026-09-15 08:28:38,725 [INFO] src.agents.collection.news_monitoring_agent: 1/1 entries matched keyword filter
+2026-09-15 08:28:38,725 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=Haifa (32.794, 34.9896)
+2026-09-15 08:28:38,725 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 1 new reports saved
+2026-09-15 08:28:38,733 [INFO] src.agents.collection.news_monitoring_agent: 0/1 entries matched keyword filter
+2026-09-15 08:28:38,733 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 0 new reports saved
+2026-09-15 08:28:38,740 [INFO] src.agents.collection.news_monitoring_agent: 1/1 entries matched keyword filter
+2026-09-15 08:28:38,740 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 0 new reports saved
+2026-09-15 08:28:38,748 [INFO] src.agents.collection.news_monitoring_agent: 1/1 entries matched keyword filter
+2026-09-15 08:28:38,748 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 0 new reports saved
+2026-09-15 08:28:38,755 [INFO] src.agents.collection.news_monitoring_agent: 1/1 entries matched keyword filter
+2026-09-15 08:28:38,756 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=None (None, None)
+2026-09-15 08:28:38,756 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 1 new reports saved
+2026-09-15 08:28:38,765 [INFO] src.agents.collection.news_monitoring_agent: 1/1 entries matched keyword filter
+2026-09-15 08:28:38,765 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=Haifa (32.794, 34.9896)
+2026-09-15 08:28:38,765 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 1 new reports saved
+2026-09-15 08:28:38,771 [INFO] src.agents.collection.news_monitoring_agent: 2/2 entries matched keyword filter
+2026-09-15 08:28:38,771 [WARNING] src.agents.collection.news_monitoring_agent: Ignoring malformed RSS publication timestamp: 'not a date'
+2026-09-15 08:28:38,771 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=Haifa (32.794, 34.9896)
+2026-09-15 08:28:38,772 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=Haifa (32.794, 34.9896)
+2026-09-15 08:28:38,772 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 2 new reports saved
+2026-09-15 08:28:38,778 [INFO] src.agents.collection.news_monitoring_agent: 2/2 entries matched keyword filter
+2026-09-15 08:28:38,779 [ERROR] src.agents.collection.news_monitoring_agent: Failed to save wildfire news report: https://example.com/news/first
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\agents\collection\news_monitoring_agent.py", line 96, in run_once
+    save_result = self.news_repository.save_report(report)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python39\lib\unittest\mock.py", line 1093, in __call__
+    return self._mock_call(*args, **kwargs)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python39\lib\unittest\mock.py", line 1097, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+  File "C:\Users\admin\AppData\Local\Programs\Python\Python39\lib\unittest\mock.py", line 1156, in _execute_mock_call
+    raise result
+src.repositories.exceptions.NewsRepositoryError: DB write failed
+2026-09-15 08:28:38,798 [INFO] src.agents.collection.news_monitoring_agent: Saved report: 'Wildfire near Haifa...' -> location=Haifa (32.794, 34.9896)
+2026-09-15 08:28:38,798 [INFO] src.agents.collection.news_monitoring_agent: Cycle complete: 1 new reports saved
+2026-09-15 08:28:38,806 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,806 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 3 detections
+2026-09-15 08:28:38,806 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,806 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,807 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,807 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 3 received, 3 saved, 0 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,810 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,810 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned no detections
+2026-09-15 08:28:38,810 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 0 received, 0 saved, 0 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,814 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,815 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 2 detections
+2026-09-15 08:28:38,815 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,815 [INFO] src.agents.collection.satellite_hotspot_agent: Ignoring detection outside configured area
+2026-09-15 08:28:38,815 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 2 received, 1 saved, 0 duplicates skipped, 1 ignored outside area, 0 failed
+2026-09-15 08:28:38,819 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,819 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,819 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,819 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 1 saved, 0 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,823 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,823 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,823 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,823 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 1 saved, 0 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,826 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,826 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,826 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to read FIRMS detection coordinates
+2026-09-15 08:28:38,826 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 0 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,829 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,829 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,829 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to read FIRMS detection coordinates
+2026-09-15 08:28:38,829 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 0 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,832 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,833 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,833 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to read FIRMS detection coordinates
+2026-09-15 08:28:38,833 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 0 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,835 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,835 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,835 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to read FIRMS detection coordinates
+2026-09-15 08:28:38,835 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 0 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,839 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,839 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 2 detections
+2026-09-15 08:28:38,839 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to map FIRMS detection: bad detection
+2026-09-15 08:28:38,839 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,839 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 2 received, 1 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,843 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,843 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,843 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,843 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 1 saved, 0 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,846 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,846 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 1 detections
+2026-09-15 08:28:38,847 [INFO] src.agents.collection.satellite_hotspot_agent: Skipped duplicate satellite hotspot
+2026-09-15 08:28:38,847 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 1 received, 0 saved, 1 duplicates skipped, 0 ignored outside area, 0 failed
+2026-09-15 08:28:38,849 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,849 [INFO] src.agents.collection.satellite_hotspot_agent: FIRMS returned 2 detections
+2026-09-15 08:28:38,849 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to save satellite hotspot: DB write failed
+2026-09-15 08:28:38,849 [INFO] src.agents.collection.satellite_hotspot_agent: Stored satellite hotspot
+2026-09-15 08:28:38,849 [INFO] src.agents.collection.satellite_hotspot_agent: Satellite hotspot collection completed: 2 received, 1 saved, 0 duplicates skipped, 0 ignored outside area, 1 failed
+2026-09-15 08:28:38,852 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,852 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to retrieve FIRMS area hotspots: FIRMS service returned HTTP 503.
+2026-09-15 08:28:38,855 [INFO] src.agents.collection.satellite_hotspot_agent: Starting satellite hotspot collection
+2026-09-15 08:28:38,855 [ERROR] src.agents.collection.satellite_hotspot_agent: Failed to retrieve FIRMS area hotspots: FIRMS authentication failed.
+2026-09-15 08:28:38,858 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,858 [INFO] src.agents.collection.weather_agent: IMS returned 2 stations
+2026-09-15 08:28:38,858 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,859 [INFO] src.agents.collection.weather_agent: Stored observation for station 1
+2026-09-15 08:28:38,859 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,859 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,859 [INFO] src.agents.collection.weather_agent: Weather collection completed: 2/2 stations processed, 0 failed, 2 observations saved, 0 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,862 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,862 [INFO] src.agents.collection.weather_agent: IMS returned 1 stations
+2026-09-15 08:28:38,862 [INFO] src.agents.collection.weather_agent: Stored/updated station 42
+2026-09-15 08:28:38,862 [INFO] src.agents.collection.weather_agent: Stored observation for station 42
+2026-09-15 08:28:38,862 [INFO] src.agents.collection.weather_agent: Weather collection completed: 1/1 stations processed, 0 failed, 1 observations saved, 0 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,866 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,866 [INFO] src.agents.collection.weather_agent: IMS returned 4 stations
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored observation for station 1
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored/updated station 3
+2026-09-15 08:28:38,867 [ERROR] src.agents.collection.weather_agent: Failed to retrieve data for station 3: IMS request timed out.
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored/updated station 4
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Stored observation for station 4
+2026-09-15 08:28:38,867 [INFO] src.agents.collection.weather_agent: Weather collection completed: 4/4 stations processed, 0 failed, 3 observations saved, 0 duplicates skipped, 1 observation failures
+2026-09-15 08:28:38,871 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,871 [INFO] src.agents.collection.weather_agent: IMS returned 1 stations
+2026-09-15 08:28:38,871 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,871 [INFO] src.agents.collection.weather_agent: Stored observation for station 1
+2026-09-15 08:28:38,871 [INFO] src.agents.collection.weather_agent: Weather collection completed: 1/1 stations processed, 0 failed, 1 observations saved, 0 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,874 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,874 [INFO] src.agents.collection.weather_agent: IMS returned 1 stations
+2026-09-15 08:28:38,874 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,874 [INFO] src.agents.collection.weather_agent: Skipped duplicate observation for station 1
+2026-09-15 08:28:38,874 [INFO] src.agents.collection.weather_agent: Weather collection completed: 1/1 stations processed, 0 failed, 0 observations saved, 1 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,877 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,877 [ERROR] src.agents.collection.weather_agent: Failed to retrieve IMS station list: IMS service returned HTTP 503.
+2026-09-15 08:28:38,881 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,881 [INFO] src.agents.collection.weather_agent: IMS returned 2 stations
+2026-09-15 08:28:38,881 [ERROR] src.agents.collection.weather_agent: Failed to map station: Raw IMS station is missing required field 'name'.
+2026-09-15 08:28:38,881 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,881 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,882 [INFO] src.agents.collection.weather_agent: Weather collection completed: 1/2 stations processed, 1 failed, 1 observations saved, 0 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,884 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,885 [INFO] src.agents.collection.weather_agent: IMS returned 2 stations
+2026-09-15 08:28:38,885 [ERROR] src.agents.collection.weather_agent: Failed to save station 1: DB write failed
+2026-09-15 08:28:38,885 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,885 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,885 [INFO] src.agents.collection.weather_agent: Weather collection completed: 1/2 stations processed, 1 failed, 1 observations saved, 0 duplicates skipped, 0 observation failures
+2026-09-15 08:28:38,888 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,889 [INFO] src.agents.collection.weather_agent: IMS returned 2 stations
+2026-09-15 08:28:38,889 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,889 [ERROR] src.agents.collection.weather_agent: Failed to map observation for station 1: IMS observation timestamp could not be parsed.
+2026-09-15 08:28:38,889 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,889 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,889 [INFO] src.agents.collection.weather_agent: Weather collection completed: 2/2 stations processed, 0 failed, 1 observations saved, 0 duplicates skipped, 1 observation failures
+2026-09-15 08:28:38,892 [INFO] src.agents.collection.weather_agent: Starting weather collection
+2026-09-15 08:28:38,893 [INFO] src.agents.collection.weather_agent: IMS returned 2 stations
+2026-09-15 08:28:38,893 [INFO] src.agents.collection.weather_agent: Stored/updated station 1
+2026-09-15 08:28:38,893 [ERROR] src.agents.collection.weather_agent: Failed to save observation for station 1: No stored station with external_station_id=1.
+2026-09-15 08:28:38,893 [INFO] src.agents.collection.weather_agent: Stored/updated station 2
+2026-09-15 08:28:38,893 [INFO] src.agents.collection.weather_agent: Stored observation for station 2
+2026-09-15 08:28:38,893 [INFO] src.agents.collection.weather_agent: Weather collection completed: 2/2 stations processed, 0 failed, 1 observations saved, 0 duplicates skipped, 1 observation failures
+2026-09-15 08:28:39,445 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,446 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,447 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source MODIS_NRT
+2026-09-15 08:28:39,447 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,449 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,449 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,450 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,450 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,452 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,452 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,454 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,454 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,455 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,455 [INFO] src.external.firms.firms_client: FIRMS returned 2 detections
+2026-09-15 08:28:39,458 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,458 [INFO] src.external.firms.firms_client: FIRMS returned no detections
+2026-09-15 08:28:39,459 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,459 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,461 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,461 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,462 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,463 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,466 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,467 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,467 [ERROR] src.external.firms.firms_client: FIRMS authentication failed with HTTP 401
+2026-09-15 08:28:39,469 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,470 [ERROR] src.external.firms.firms_client: FIRMS authentication failed with HTTP 403
+2026-09-15 08:28:39,471 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,473 [ERROR] src.external.firms.firms_client: FIRMS service unavailable with HTTP 500
+2026-09-15 08:28:39,474 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,474 [ERROR] src.external.firms.firms_client: FIRMS service unavailable with HTTP 502
+2026-09-15 08:28:39,476 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,476 [ERROR] src.external.firms.firms_client: FIRMS service unavailable with HTTP 503
+2026-09-15 08:28:39,477 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,477 [ERROR] src.external.firms.firms_client: FIRMS service unavailable with HTTP 504
+2026-09-15 08:28:39,479 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,479 [ERROR] src.external.firms.firms_client: FIRMS request timed out
+2026-09-15 08:28:39,481 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,481 [ERROR] src.external.firms.firms_client: FIRMS connection failed
+2026-09-15 08:28:39,482 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,482 [ERROR] src.external.firms.firms_client: FIRMS request failed
+2026-09-15 08:28:39,484 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,485 [ERROR] src.external.firms.firms_client: FIRMS request failed with unexpected HTTP 418
+2026-09-15 08:28:39,487 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,488 [ERROR] src.external.firms.firms_client: FIRMS service unavailable with HTTP 500
+2026-09-15 08:28:39,489 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,489 [ERROR] src.external.firms.firms_client: FIRMS connection failed
+2026-09-15 08:28:39,491 [INFO] src.external.firms.firms_client: Requesting FIRMS area hotspot data using source VIIRS_NOAA20_NRT
+2026-09-15 08:28:39,491 [INFO] src.external.firms.firms_client: FIRMS returned 1 detections
+2026-09-15 08:28:39,494 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,495 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,497 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,499 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,500 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,502 [INFO] src.external.ims.ims_client: Requesting IMS station 1
+2026-09-15 08:28:39,504 [INFO] src.external.ims.ims_client: Requesting IMS station 2
+2026-09-15 08:28:39,506 [INFO] src.external.ims.ims_client: Requesting IMS station 85
+2026-09-15 08:28:39,512 [INFO] src.external.ims.ims_client: Requesting IMS station 999
+2026-09-15 08:28:39,512 [ERROR] src.external.ims.ims_client: IMS resource not found (HTTP 404)
+2026-09-15 08:28:39,515 [INFO] src.external.ims.ims_client: Requesting IMS station 17
+2026-09-15 08:28:39,516 [INFO] src.external.ims.ims_client: Requesting IMS station data for station 17
+2026-09-15 08:28:39,518 [INFO] src.external.ims.ims_client: Requesting IMS station data for station 17
+2026-09-15 08:28:39,520 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,520 [ERROR] src.external.ims.ims_client: IMS authentication failed with HTTP 401
+2026-09-15 08:28:39,522 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,522 [ERROR] src.external.ims.ims_client: IMS authentication failed with HTTP 403
+2026-09-15 08:28:39,524 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,524 [ERROR] src.external.ims.ims_client: IMS service returned HTTP 500
+2026-09-15 08:28:39,526 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,526 [ERROR] src.external.ims.ims_client: IMS service returned HTTP 502
+2026-09-15 08:28:39,527 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,528 [ERROR] src.external.ims.ims_client: IMS service returned HTTP 503
+2026-09-15 08:28:39,529 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,529 [ERROR] src.external.ims.ims_client: IMS service returned HTTP 504
+2026-09-15 08:28:39,531 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,531 [ERROR] src.external.ims.ims_client: IMS request timed out: stations
+2026-09-15 08:28:39,533 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,534 [ERROR] src.external.ims.ims_client: IMS connection failed: stations
+2026-09-15 08:28:39,536 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,536 [ERROR] src.external.ims.ims_client: IMS returned an invalid (non-JSON) response: stations
+2026-09-15 08:28:39,538 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,538 [ERROR] src.external.ims.ims_client: IMS service returned HTTP 500
+2026-09-15 08:28:39,541 [INFO] src.external.ims.ims_client: Requesting IMS stations
+2026-09-15 08:28:39,599 [WARNING] src.mappers.satellite_hotspot_mapper: Ignoring unparseable FIRMS value for frp
+2026-09-15 08:28:39,603 [WARNING] src.mappers.satellite_hotspot_mapper: Ignoring unparseable FIRMS value for bright_ti4
+2026-09-15 08:28:39,644 [WARNING] src.mappers.weather_mapper: Ignoring unparseable value for IMS channel TD
+2026-09-15 08:28:40,133 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,137 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,142 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,156 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,160 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,164 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,183 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,187 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,192 [INFO] src.repositories.weather_repository: Inserted weather station 1002
+2026-09-15 08:28:40,194 [INFO] src.repositories.weather_repository: Stored weather observation for station 1002 at 2026-09-14 11:42:00+00:00
+2026-09-15 08:28:40,197 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,213 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,218 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,221 [INFO] src.repositories.weather_repository: Inserted weather station 1002
+2026-09-15 08:28:40,224 [INFO] src.repositories.weather_repository: Stored weather observation for station 1002 at 2026-09-14 11:42:00+00:00
+2026-09-15 08:28:40,227 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,245 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,249 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,253 [INFO] src.repositories.weather_repository: Inserted weather station 1002
+2026-09-15 08:28:40,255 [INFO] src.repositories.weather_repository: Stored weather observation for station 1002 at 2026-09-14 11:42:00+00:00
+2026-09-15 08:28:40,259 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,275 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,279 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,306 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,323 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,327 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,346 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,350 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,357 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,441 [INFO] src.repositories.weather_repository: Inserted weather station 1001
+2026-09-15 08:28:40,446 [INFO] src.repositories.weather_repository: Stored weather observation for station 1001 at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:40,454 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 1 for area area-carmel
+2026-09-15 08:28:40,457 [INFO] src.repositories.fire_danger_assessment_repository: Stored fire-danger assessment 2 for area area-carmel
+2026-09-15 08:28:40,499 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,507 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,523 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,529 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,545 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,550 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,574 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,579 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,594 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,599 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,615 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743309906304
+2026-09-15 08:28:40,621 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,637 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,641 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743307235136
+2026-09-15 08:28:40,647 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 2 evidence refs
+2026-09-15 08:28:40,662 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,664 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:01:00+00:00
+2026-09-15 08:28:40,667 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743307054848
+2026-09-15 08:28:40,672 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 3 evidence refs
+2026-09-15 08:28:40,714 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,720 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,736 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743307067776
+2026-09-15 08:28:40,742 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,758 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,763 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,784 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743306497472
+2026-09-15 08:28:40,790 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,812 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,815 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743306539392
+2026-09-15 08:28:40,822 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,844 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,848 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743307068544
+2026-09-15 08:28:40,855 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,875 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,880 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,899 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,905 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,925 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,931 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,954 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,959 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:40,986 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:40,991 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,011 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,016 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,036 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,040 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,059 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,064 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,081 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 04:00:00+00:00
+2026-09-15 08:28:41,087 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,103 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,111 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,128 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,133 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,134 [INFO] src.repositories.satellite_hotspot_repository: Skipped duplicate satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,138 [INFO] src.repositories.fire_event_repository: Stored FireEvent 2 with 1 evidence refs
+2026-09-15 08:28:41,157 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,162 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,181 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,186 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,204 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 13:10:00+00:00
+2026-09-15 08:28:41,208 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,223 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,227 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,227 [INFO] src.repositories.satellite_hotspot_repository: Skipped duplicate satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,229 [INFO] src.repositories.fire_event_repository: Stored FireEvent 2 with 1 evidence refs
+2026-09-15 08:28:41,248 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,253 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,323 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,328 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,329 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:01:00+00:00
+2026-09-15 08:28:41,332 [INFO] src.repositories.fire_event_repository: Stored FireEvent 2 with 1 evidence refs
+2026-09-15 08:28:41,350 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 09:00:00+00:00
+2026-09-15 08:28:41,355 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,357 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:59:00+00:00
+2026-09-15 08:28:41,359 [INFO] src.repositories.fire_event_repository: Stored FireEvent 2 with 1 evidence refs
+2026-09-15 08:28:41,378 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,383 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,384 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:01:00+00:00
+2026-09-15 08:28:41,387 [INFO] src.repositories.fire_event_repository: Stored FireEvent 2 with 1 evidence refs
+2026-09-15 08:28:41,407 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,412 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,432 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,438 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,458 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,463 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,484 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,489 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,510 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,513 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/fire-event/1789387200.0/2743315947264
+2026-09-15 08:28:41,519 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 2 evidence refs
+2026-09-15 08:28:41,541 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,546 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,566 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 12:00:00+00:00
+2026-09-15 08:28:41,573 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,598 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,602 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,605 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:41,607 [INFO] src.repositories.weather_repository: Inserted weather station 910001
+2026-09-15 08:28:41,610 [INFO] src.repositories.weather_repository: Stored weather observation for station 910001 at 2026-09-14 11:54:00+00:00
+2026-09-15 08:28:41,612 [INFO] src.repositories.weather_repository: Inserted weather station 910002
+2026-09-15 08:28:41,614 [INFO] src.repositories.weather_repository: Stored weather observation for station 910002 at 2026-09-14 11:53:00+00:00
+2026-09-15 08:28:41,620 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,637 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,641 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,643 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,646 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,651 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,666 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,671 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,673 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:41:00+00:00
+2026-09-15 08:28:41,674 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,677 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,681 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,758 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,763 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,774 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,794 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,799 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,817 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,824 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,825 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,828 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,849 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,855 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,856 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,860 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,864 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,882 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,887 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,889 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,893 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,897 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,914 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,920 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:41,922 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:41,925 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:41,931 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:41,950 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:41,956 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:42,027 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:42,033 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:42,039 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:42,060 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:42,065 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:42,067 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:42,071 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:42,077 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:42,097 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:42,103 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:42,105 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:42,110 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:42,115 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:42,118 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 2 for FireEvent 1
+2026-09-15 08:28:42,144 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-14 11:40:00+00:00
+2026-09-15 08:28:42,149 [INFO] src.repositories.fire_event_repository: Stored FireEvent 1 with 1 evidence refs
+2026-09-15 08:28:42,150 [INFO] src.repositories.weather_repository: Inserted weather station 910000
+2026-09-15 08:28:42,154 [INFO] src.repositories.weather_repository: Stored weather observation for station 910000 at 2026-09-14 11:55:00+00:00
+2026-09-15 08:28:42,158 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 1 for FireEvent 1
+2026-09-15 08:28:42,161 [INFO] src.repositories.fire_severity_assessment_repository: Stored fire-severity assessment 2 for FireEvent 1
+2026-09-15 08:28:42,192 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,207 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,223 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,224 [INFO] src.repositories.news_repository: Skipped duplicate wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,240 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,254 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,285 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,302 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,319 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,338 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/old
+2026-09-15 08:28:42,340 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/future
+2026-09-15 08:28:42,341 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/recent
+2026-09-15 08:28:42,357 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/oldest
+2026-09-15 08:28:42,358 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/newest
+2026-09-15 08:28:42,359 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/middle
+2026-09-15 08:28:42,375 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,376 [INFO] src.repositories.news_repository: Duplicate wildfire news report detected on write: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,392 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,392 [INFO] src.repositories.news_repository: Duplicate wildfire news report detected on write: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,408 [INFO] src.repositories.news_repository: Stored wildfire news report: https://example.com/news/wildfire-1
+2026-09-15 08:28:42,423 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,437 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,452 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,468 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,485 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,486 [INFO] src.repositories.satellite_hotspot_repository: Skipped duplicate satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,502 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,503 [INFO] src.repositories.satellite_hotspot_repository: Skipped duplicate satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,518 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,520 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,536 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,538 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:33:00
+2026-09-15 08:28:42,554 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,555 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,648 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 12:00:00
+2026-09-15 08:28:42,650 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:00:00
+2026-09-15 08:28:42,651 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:00:00
+2026-09-15 08:28:42,666 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 12:00:00
+2026-09-15 08:28:42,667 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:00:00
+2026-09-15 08:28:42,669 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:00:00
+2026-09-15 08:28:42,752 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 11:00:00
+2026-09-15 08:28:42,753 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 12:00:00
+2026-09-15 08:28:42,754 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:00:00
+2026-09-15 08:28:42,786 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:50:00+00:00
+2026-09-15 08:28:42,804 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 12:00:00+00:00
+2026-09-15 08:28:42,819 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 11:59:00+00:00
+2026-09-15 08:28:42,821 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:01:00+00:00
+2026-09-15 08:28:42,822 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:59:00+00:00
+2026-09-15 08:28:42,839 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:30:00+00:00
+2026-09-15 08:28:42,841 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:50:00+00:00
+2026-09-15 08:28:42,842 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 13:40:00+00:00
+2026-09-15 08:28:42,859 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,860 [INFO] src.repositories.satellite_hotspot_repository: Duplicate satellite hotspot detected on write at 2026-09-05 14:32:00
+2026-09-15 08:28:42,876 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,876 [INFO] src.repositories.satellite_hotspot_repository: Duplicate satellite hotspot detected on write at 2026-09-05 14:32:00
+2026-09-15 08:28:42,891 [INFO] src.repositories.satellite_hotspot_repository: Stored satellite hotspot at 2026-09-05 14:32:00
+2026-09-15 08:28:42,905 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:42,922 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:42,923 [INFO] src.repositories.weather_repository: Updated weather station 17
+2026-09-15 08:28:42,939 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:42,941 [INFO] src.repositories.weather_repository: Updated weather station 17
+2026-09-15 08:28:42,956 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:42,985 [INFO] src.repositories.weather_repository: Inserted weather station 21
+2026-09-15 08:28:42,987 [INFO] src.repositories.weather_repository: Inserted weather station 5
+2026-09-15 08:28:42,988 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,003 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,006 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,023 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,024 [INFO] src.repositories.weather_repository: Inserted weather station 21
+2026-09-15 08:28:43,027 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,029 [INFO] src.repositories.weather_repository: Stored weather observation for station 21 at 2026-09-02 13:00:00
+2026-09-15 08:28:43,044 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,048 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,061 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,064 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,066 [INFO] src.repositories.weather_repository: Skipped duplicate weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,080 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,082 [INFO] src.repositories.weather_repository: Inserted weather station 21
+2026-09-15 08:28:43,086 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,088 [INFO] src.repositories.weather_repository: Stored weather observation for station 21 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,105 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,108 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,110 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 13:30:00
+2026-09-15 08:28:43,137 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,141 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:00:00
+2026-09-15 08:28:43,142 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 14:00:00
+2026-09-15 08:28:43,144 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 13:00:00
+2026-09-15 08:28:43,158 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,175 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,178 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:00:00
+2026-09-15 08:28:43,180 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 13:00:00
+2026-09-15 08:28:43,181 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 14:00:00
+2026-09-15 08:28:43,197 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,199 [INFO] src.repositories.weather_repository: Inserted weather station 21
+2026-09-15 08:28:43,200 [INFO] src.repositories.weather_repository: Inserted weather station 99
+2026-09-15 08:28:43,204 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:00:00
+2026-09-15 08:28:43,206 [INFO] src.repositories.weather_repository: Stored weather observation for station 21 at 2026-09-02 12:05:00
+2026-09-15 08:28:43,207 [INFO] src.repositories.weather_repository: Stored weather observation for station 99 at 2026-09-02 12:10:00
+2026-09-15 08:28:43,225 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,228 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:00:00
+2026-09-15 08:28:43,230 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:05:00
+2026-09-15 08:28:43,256 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,259 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,260 [INFO] src.repositories.weather_repository: Duplicate weather observation detected on write for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,276 [INFO] src.repositories.weather_repository: Inserted weather station 17
+2026-09-15 08:28:43,279 [INFO] src.repositories.weather_repository: Stored weather observation for station 17 at 2026-09-02 12:30:00
+2026-09-15 08:28:43,318 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,319 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,320 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,320 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,320 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,321 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,321 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,321 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,321 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,321 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 2 incident(s) (manual)
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +10s
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +35s
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,325 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +55s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +75s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +95s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +115s
+2026-09-15 08:28:43,326 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,344 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,344 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,345 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +60s
+2026-09-15 08:28:43,345 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,346 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,347 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,347 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +60s
+2026-09-15 08:28:43,347 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,348 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,348 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,348 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,348 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,348 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,349 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,349 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,349 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,350 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,350 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,351 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,355 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 2 incident(s) (manual)
+2026-09-15 08:28:43,355 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +10s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +35s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +55s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +75s
+2026-09-15 08:28:43,356 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,357 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +95s
+2026-09-15 08:28:43,357 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,357 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +115s
+2026-09-15 08:28:43,357 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,428 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 1 with unsupported confidence None.
+2026-09-15 08:28:43,429 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 1 with unsupported confidence ''.
+2026-09-15 08:28:43,430 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 1 with unsupported confidence 'medium'.
+2026-09-15 08:28:43,431 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 1 with unsupported confidence '42'.
+2026-09-15 08:28:43,435 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping wildfire report 1 without coordinates.
+2026-09-15 08:28:43,437 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping wildfire report 1 without coordinates.
+2026-09-15 08:28:43,438 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping wildfire report 1 without coordinates.
+2026-09-15 08:28:43,451 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 1 with unsupported confidence 'medium'.
+2026-09-15 08:28:43,452 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping wildfire report 3 without coordinates.
+2026-09-15 08:28:43,464 [INFO] src.services.fire_detection.fire_detection_evidence_service: Skipping satellite hotspot 5 with unsupported confidence 'medium'.
+2026-09-15 08:28:43,560 [ERROR] src.simulation.analysis.simulation_fire_severity_coordinator: Simulation fire-severity assessment failed for FireEvent 55
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\analysis\simulation_fire_severity_coordinator.py", line 109, in _assess_fire_events
+    self._severity_agent.assess(
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\tests\simulation\analysis\test_simulation_fire_severity_coordinator.py", line 55, in assess
+    raise RuntimeError(f"severity failed for {fire_event_id}")
+RuntimeError: severity failed for 55
+2026-09-15 08:28:43,562 [ERROR] src.simulation.analysis.simulation_fire_severity_coordinator: Simulation fire-severity assessment failed for FireEvent 9
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\analysis\simulation_fire_severity_coordinator.py", line 109, in _assess_fire_events
+    self._severity_agent.assess(
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\tests\simulation\analysis\test_simulation_fire_severity_coordinator.py", line 55, in assess
+    raise RuntimeError(f"severity failed for {fire_event_id}")
+RuntimeError: severity failed for 9
+2026-09-15 08:28:43,675 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=weather offset=40
+2026-09-15 08:28:43,675 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=weather generated=3 saved=3 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,676 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=weather offset=40
+2026-09-15 08:28:43,677 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=weather generated=3 saved=1 duplicates=2 failed=0 success=True
+2026-09-15 08:28:43,678 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=weather offset=40
+2026-09-15 08:28:43,678 [ERROR] src.simulation.simulation_event_executor: Weather simulation measurement failed: incident=incident-carmel-01 station=2
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_event_executor.py", line 139, in _execute_weather_event
+    save_result = self._weather_repository.save_observation(measurement.observation)
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\tests\simulation\test_simulation_event_executor.py", line 61, in save_observation
+    raise RuntimeError(f"weather observation failure {index}")
+RuntimeError: weather observation failure 1
+2026-09-15 08:28:43,681 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=weather generated=3 saved=2 duplicates=0 failed=1 success=False
+2026-09-15 08:28:43,682 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=satellite offset=40
+2026-09-15 08:28:43,682 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=satellite generated=1 saved=1 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,684 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=satellite offset=40
+2026-09-15 08:28:43,684 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=satellite generated=0 saved=0 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,685 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=satellite offset=40
+2026-09-15 08:28:43,685 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=satellite generated=1 saved=0 duplicates=1 failed=0 success=True
+2026-09-15 08:28:43,688 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=news offset=40
+2026-09-15 08:28:43,688 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=news generated=1 saved=1 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,689 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=news offset=40
+2026-09-15 08:28:43,689 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=news generated=1 saved=0 duplicates=1 failed=0 success=True
+2026-09-15 08:28:43,690 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=news offset=40
+2026-09-15 08:28:43,691 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=news generated=1 saved=1 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,691 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-golan-01 event_type=news offset=55
+2026-09-15 08:28:43,691 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-golan-01 event_type=news generated=1 saved=1 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,692 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=weather offset=0
+2026-09-15 08:28:43,693 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=weather generated=3 saved=3 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,693 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-golan-01 event_type=weather offset=10
+2026-09-15 08:28:43,693 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-golan-01 event_type=weather generated=3 saved=3 duplicates=0 failed=0 success=True
+2026-09-15 08:28:43,694 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=weather offset=40
+2026-09-15 08:28:43,694 [ERROR] src.simulation.simulation_event_executor: Simulation event execution failed: incident=incident-carmel-01 event_type=weather
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_event_executor.py", line 88, in execute
+    result = self._execute_weather_event(scenario, event, event_timestamp, incident)
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_event_executor.py", line 123, in _execute_weather_event
+    generated = self._get_weather_generator(scenario.seed).generate(
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\tests\simulation\test_simulation_event_executor.py", line 108, in generate
+    raise RuntimeError("generator exploded")
+RuntimeError: generator exploded
+2026-09-15 08:28:43,696 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=news offset=40
+2026-09-15 08:28:43,696 [ERROR] src.simulation.simulation_event_executor: News simulation report failed: incident=incident-carmel-01
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_event_executor.py", line 229, in _execute_news_event
+    save_result = self._news_repository.save_report(report)
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\tests\simulation\test_simulation_event_executor.py", line 92, in save_report
+    raise RuntimeError(f"news failure {index}")
+RuntimeError: news failure 0
+2026-09-15 08:28:43,696 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=news generated=1 saved=0 duplicates=0 failed=1 success=False
+2026-09-15 08:28:43,697 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-carmel-01 event_type=unknown offset=10
+2026-09-15 08:28:43,698 [INFO] src.simulation.simulation_event_executor: Simulation event execution finished: incident=incident-carmel-01 event_type=unknown generated=0 saved=0 duplicates=0 failed=1 success=False
+2026-09-15 08:28:43,699 [INFO] src.simulation.simulation_event_executor: Simulation event execution started: incident=incident-golan-01 event_type=news offset=40
+2026-09-15 08:28:43,699 [ERROR] src.simulation.simulation_event_executor: Simulation event execution failed: incident=incident-golan-01 event_type=news
+Traceback (most recent call last):
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_event_executor.py", line 86, in execute
+    incident = scenario.get_incident(event.incident_id)
+  File "C:\Users\admin\Desktop\bar-Ilan\EcoGaurdIsrael\backend\src\simulation\simulation_scenario.py", line 97, in get_incident
+    raise KeyError(f"Unknown incident_id: {incident_id!r}")
+KeyError: "Unknown incident_id: 'incident-golan-01'"
+2026-09-15 08:28:43,742 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,742 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,742 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,742 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,742 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,743 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,743 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,745 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed: no events
+2026-09-15 08:28:43,746 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,747 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,747 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,747 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,747 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,747 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +0s
+2026-09-15 08:28:43,748 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,750 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (manual)
+2026-09-15 08:28:43,752 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (automatic)
+2026-09-15 08:28:43,752 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +0s
+2026-09-15 08:28:43,752 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: satellite at +20s
+2026-09-15 08:28:43,753 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (automatic)
+2026-09-15 08:28:43,753 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +0s
+2026-09-15 08:28:43,753 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: satellite at +20s
+2026-09-15 08:28:43,754 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: news at +40s
+2026-09-15 08:28:43,754 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +65s
+2026-09-15 08:28:43,754 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,755 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 1 incident(s) (automatic)
+2026-09-15 08:28:43,755 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +0s
+2026-09-15 08:28:43,755 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: satellite at +20s
+2026-09-15 08:28:43,755 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,756 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 2 incident(s) (manual)
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +0s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +10s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +20s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +35s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +40s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +55s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +65s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: weather at +75s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +80s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: satellite at +95s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +100s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation event manually advanced: news at +115s
+2026-09-15 08:28:43,757 [INFO] src.simulation.simulation_scenario_service: Simulation scenario completed
+2026-09-15 08:28:43,759 [INFO] src.simulation.simulation_scenario_service: Simulation scenario started: 2 incident(s) (automatic)
+2026-09-15 08:28:43,759 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +0s
+2026-09-15 08:28:43,760 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: weather at +10s
+2026-09-15 08:28:43,760 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: satellite at +20s
+2026-09-15 08:28:43,760 [INFO] src.simulation.simulation_scenario_service: Simulation event became due: satellite at +35s
