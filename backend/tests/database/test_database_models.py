@@ -15,6 +15,8 @@ from src.database.models.fire_danger_assessment_db import FireDangerAssessmentDB
 from src.database.models.fire_danger_assessment_weather_input_db import (
     FireDangerAssessmentWeatherInputDB,
 )
+from src.database.models.response_target_db import ResponseTargetDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
 
@@ -42,6 +44,22 @@ def test_table_names():
     assert FireDangerAssessmentWeatherInputDB.__tablename__ == (
         "fire_danger_assessment_weather_inputs"
     )
+    assert ResponseTargetSetDB.__tablename__ == "response_target_sets"
+    assert ResponseTargetDB.__tablename__ == "response_targets"
+
+
+def test_response_target_tables_registered_in_metadata():
+    table_names = set(ResponseTargetSetDB.metadata.tables)
+
+    assert "response_target_sets" in table_names
+    assert "response_targets" in table_names
+
+
+def test_response_target_order_unique_constraint_present():
+    constraint_names = {constraint.name for constraint in ResponseTargetDB.__table__.constraints}
+
+    assert "uq_response_targets_set_order" in constraint_names
+    assert "ck_response_targets_type_source_metadata" in constraint_names
 
 
 def test_station_primary_key_autoincrements(sqlite_session_factory):

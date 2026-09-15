@@ -16,8 +16,15 @@ from src.database.models.fire_severity_assessment_satellite_input_db import (
 from src.database.models.fire_severity_assessment_weather_input_db import (
     FireSeverityAssessmentWeatherInputDB,
 )
+from src.database.models.fire_spread_prediction_cell_db import FireSpreadPredictionCellDB
+from src.database.models.fire_spread_prediction_db import FireSpreadPredictionDB
+from src.database.models.fire_spread_prediction_weather_input_db import (
+    FireSpreadPredictionWeatherInputDB,
+)
 from src.database.models.graph_edge_db import GraphEdgeDB
 from src.database.models.graph_node_db import GraphNodeDB
+from src.database.models.response_target_db import ResponseTargetDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
@@ -38,6 +45,11 @@ __all__ = [
     "FireSeverityAssessmentDB",
     "FireSeverityAssessmentWeatherInputDB",
     "FireSeverityAssessmentSatelliteInputDB",
+    "FireSpreadPredictionDB",
+    "FireSpreadPredictionCellDB",
+    "FireSpreadPredictionWeatherInputDB",
     "GraphNodeDB",
     "GraphEdgeDB",
+    "ResponseTargetSetDB",
+    "ResponseTargetDB",
 ]

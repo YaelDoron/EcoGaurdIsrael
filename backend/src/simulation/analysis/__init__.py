@@ -21,6 +21,11 @@ from src.simulation.analysis.simulation_fire_spread_coordinator import (
     SimulationFireSpreadCoordinator,
 )
 from src.simulation.analysis.simulation_fire_spread_result import SimulationFireSpreadResult
+from src.simulation.analysis.simulation_response_target_coordinator import (
+    NO_AFFECTED_FIRE_EVENTS_REASON,
+    SimulationResponseTargetCoordinator,
+)
+from src.simulation.analysis.simulation_response_target_result import SimulationResponseTargetResult
 
 __all__ = [
     "ASSESSMENT_RADIUS_KM",
@@ -32,10 +37,13 @@ __all__ = [
     "SimulationFireSeverityResult",
     "SimulationFireSpreadCoordinator",
     "SimulationFireSpreadResult",
+    "SimulationResponseTargetCoordinator",
+    "SimulationResponseTargetResult",
     "NON_DETECTION_EVENT_REASON",
     "SOURCE_EVENT_FAILED_REASON",
     "NO_SOURCE_DATA_AVAILABLE_REASON",
     "SEVERITY_NOT_TRIGGERED_REASON",
     "NO_SEVERITY_ASSESSMENTS_REASON",
+    "NO_AFFECTED_FIRE_EVENTS_REASON",
     "SimulationOperationalCoordinator",
 ]

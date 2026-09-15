@@ -44,6 +44,8 @@ from src.simulation.analysis import (
     SimulationFireSeverityResult,
     SimulationFireSpreadCoordinator,
     SimulationFireSpreadResult,
+    SimulationResponseTargetCoordinator,
+    SimulationResponseTargetResult,
 )
 
 __all__ = [
@@ -83,4 +85,6 @@ __all__ = [
     "SimulationFireSeverityResult",
     "SimulationFireSpreadCoordinator",
     "SimulationFireSpreadResult",
+    "SimulationResponseTargetCoordinator",
+    "SimulationResponseTargetResult",
 ]

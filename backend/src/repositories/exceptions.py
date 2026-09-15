@@ -31,3 +31,7 @@ class FireSeverityAssessmentRepositoryError(Exception):
 
 class FireSpreadPredictionRepositoryError(Exception):
     """Base exception for wildfire-spread prediction repository errors."""
+
+
+class ResponseTargetRepositoryError(Exception):
+    """Base exception for response-target repository errors."""

@@ -6,6 +6,11 @@ from src.agents.analysis.fire_detection_agent import FireDetectionAgent
 from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.agents.analysis.fire_severity_assessment_agent import FireSeverityAssessmentAgent
 from src.agents.analysis.fire_spread_prediction_agent import FireSpreadPredictionAgent
+from src.agents.analysis.response_target_generation_agent import ResponseTargetGenerationAgent
+from src.agents.analysis.response_target_generation_result import (
+    ResponseTargetGenerationResult,
+    ResponseTargetGenerationStatus,
+)
 
 __all__ = [
     "FireDangerAssessmentAgent",
@@ -14,4 +19,7 @@ __all__ = [
     "FireDetectionResult",
     "FireSeverityAssessmentAgent",
     "FireSpreadPredictionAgent",
+    "ResponseTargetGenerationAgent",
+    "ResponseTargetGenerationResult",
+    "ResponseTargetGenerationStatus",
 ]

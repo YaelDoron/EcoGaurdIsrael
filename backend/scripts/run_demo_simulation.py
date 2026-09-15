@@ -17,10 +17,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
-from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent, FireSeverityAssessmentAgent
+from src.agents.analysis import (
+    FireDangerAssessmentAgent,
+    FireDetectionAgent,
+    FireSeverityAssessmentAgent,
+    ResponseTargetGenerationAgent,
+)
 from src.agents.analysis import FireSpreadPredictionAgent
 from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
+from src.calculators.response_target import ResponseTargetCalculator
 from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
 from src.calculators.fire_spread import FireSpreadCalculator
 from src.repositories.fire_event_repository import FireEventRepository
@@ -30,11 +36,13 @@ from src.repositories.firefighting_resource_repository import FirefightingResour
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
 from src.repositories.fire_spread_prediction_repository import FireSpreadPredictionRepository
 from src.repositories.news_repository import NewsRepository
+from src.repositories.response_target_repository import ResponseTargetRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.operational import OperationalContextService
+from src.services.response_target import ResponseTargetInputService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
 from src.simulation import (
@@ -54,6 +62,8 @@ from src.simulation import (
     SimulationFireDetectionResult,
     SimulationFireSeverityCoordinator,
     SimulationFireSeverityResult,
+    SimulationResponseTargetCoordinator,
+    SimulationResponseTargetResult,
     build_carmel_golan_active_fire_scenario,
     build_scenario,
     get_simulation_location,
@@ -274,6 +284,7 @@ def execute_and_report_event(
 ) -> SimulationEventExecutionResult:
     incident = scenario.get_incident(event.incident_id)
     event_timestamp = simulation_event_timestamp(scenario_started_at, event)
+    affected_fire_event_ids: list[int] = []
 
     print(
         f"[T+{event.offset_seconds}s] {event.event_type.value.upper()} | "
@@ -302,6 +313,9 @@ def execute_and_report_event(
         )
         if fire_detection_result.triggered:
             print_fire_detection_result(fire_detection_result, output)
+            detection_result = fire_detection_result.detection_result
+            if detection_result is not None and detection_result.success:
+                affected_fire_event_ids.extend(detection_result.event_ids)
             if operational_coordinator is not None:
                 scramble_resources_for_new_fire_events(
                     fire_detection_result,
@@ -325,12 +339,27 @@ def execute_and_report_event(
         )
         if severity_result.triggered:
             print_fire_severity_result(severity_result, output)
+            affected_fire_event_ids.extend(
+                stored.assessment.fire_event_id for stored in severity_result.assessment_results
+            )
+            affected_fire_event_ids.extend(severity_result.failed_fire_event_ids)
             spread_result = get_fire_spread_coordinator().handle_severity_result(
                 severity_result=severity_result,
                 event_timestamp=event_timestamp,
             )
             if spread_result.triggered:
                 print_fire_spread_result(spread_result, output)
+                affected_fire_event_ids.extend(
+                    stored.prediction.fire_event_id for stored in spread_result.prediction_results
+                )
+                affected_fire_event_ids.extend(spread_result.failed_fire_event_ids)
+    if affected_fire_event_ids:
+        response_target_result = get_response_target_coordinator().generate_for_fire_events(
+            fire_event_ids=affected_fire_event_ids,
+            as_of=event_timestamp,
+        )
+        if response_target_result.triggered:
+            print_response_target_result(response_target_result, output)
     print("", file=output)
     return result
 
@@ -415,6 +444,9 @@ def build_operational_coordinator() -> SimulationOperationalCoordinator:
     return SimulationOperationalCoordinator(
         operational_context_service=operational_context_service,
         firefighting_resource_repository=firefighting_resource_repository,
+    )
+
+
 def build_fire_severity_coordinator() -> SimulationFireSeverityCoordinator:
     """Build the simulation fire-severity analysis stack using shared repositories."""
     fire_event_repository = FireEventRepository()
@@ -450,7 +482,21 @@ def build_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
     return SimulationFireSpreadCoordinator(spread_agent=agent)
 
 
+def build_response_target_coordinator() -> SimulationResponseTargetCoordinator:
+    """Build the simulation response-target stack using the production agent."""
+    input_service = ResponseTargetInputService()
+    calculator = ResponseTargetCalculator()
+    repository = ResponseTargetRepository()
+    agent = ResponseTargetGenerationAgent(
+        input_service=input_service,
+        calculator=calculator,
+        repository=repository,
+    )
+    return SimulationResponseTargetCoordinator(generation_agent=agent)
+
+
 _fire_spread_coordinator: SimulationFireSpreadCoordinator | None = None
+_response_target_coordinator: SimulationResponseTargetCoordinator | None = None
 
 
 def get_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
@@ -467,6 +513,14 @@ def get_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
     if _fire_spread_coordinator is None:
         _fire_spread_coordinator = build_fire_spread_coordinator()
     return _fire_spread_coordinator
+
+
+def get_response_target_coordinator() -> SimulationResponseTargetCoordinator:
+    """Return the response-target simulation coordinator, built lazily on first use."""
+    global _response_target_coordinator
+    if _response_target_coordinator is None:
+        _response_target_coordinator = build_response_target_coordinator()
+    return _response_target_coordinator
 
 
 def print_fire_danger_result(
@@ -557,6 +611,37 @@ def print_fire_spread_result(
         print(f"event_id={fire_event_id}", file=output)
         print("status=ERROR", file=output)
         print(f"message={message}", file=output)
+
+
+def print_response_target_result(
+    response_target_result: SimulationResponseTargetResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    print("RESPONSE TARGETS", file=output)
+    print(f"fire_events_requested={response_target_result.fire_events_requested}", file=output)
+    print(f"target_sets_generated={response_target_result.target_sets_generated}", file=output)
+    print(f"inactive_events={response_target_result.inactive_events}", file=output)
+    print(f"failed_events={response_target_result.failed_events}", file=output)
+    print(f"targets={response_target_result.target_count}", file=output)
+    for generation_result in response_target_result.generation_results:
+        print(f"event_id={generation_result.fire_event_id}", file=output)
+        print(f"status={generation_result.status.name}", file=output)
+        target_set_id = generation_result.target_set_id if generation_result.target_set_id is not None else "-"
+        print(f"target_set_id={target_set_id}", file=output)
+        print(f"target_count={generation_result.target_count}", file=output)
+        if generation_result.error_message:
+            print(f"message={generation_result.error_message}", file=output)
+        for index, target in enumerate(generation_result.targets, start=1):
+            print(f"target_{index}_type={target.target_type.name}", file=output)
+            print(f"target_{index}_priority={target.priority_score:.2f}", file=output)
+            print(f"target_{index}_lat={target.latitude:.6f}", file=output)
+            print(f"target_{index}_lon={target.longitude:.6f}", file=output)
+            if target.prediction_horizon_minutes is not None:
+                print(f"target_{index}_horizon_minutes={target.prediction_horizon_minutes}", file=output)
+            if target.spread_prediction_id is not None:
+                print(f"target_{index}_spread_prediction_id={target.spread_prediction_id}", file=output)
+            if target.spread_prediction_cell_id is not None:
+                print(f"target_{index}_spread_prediction_cell_id={target.spread_prediction_cell_id}", file=output)
 
 
 def _format_optional_score(score: float | None) -> str:
