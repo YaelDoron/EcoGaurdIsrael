@@ -39,6 +39,7 @@ from src.simulation.analysis import (
     SimulationFireDangerResult,
     SimulationFireDetectionCoordinator,
     SimulationFireDetectionResult,
+    SimulationOperationalCoordinator,
 )
 
 __all__ = [
@@ -73,4 +74,5 @@ __all__ = [
     "SimulationFireDangerResult",
     "SimulationFireDetectionCoordinator",
     "SimulationFireDetectionResult",
+    "SimulationOperationalCoordinator",
 ]

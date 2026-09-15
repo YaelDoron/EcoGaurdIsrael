@@ -13,6 +13,8 @@ from src.repositories.fire_danger_assessment_repository import (
     StoredFireDangerAssessment,
 )
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
+from src.repositories.fire_station_repository import FireStationRepository
+from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult, StoredWildfireReport
 from src.repositories.satellite_hotspot_repository import (
     SaveHotspotResult,
@@ -39,6 +41,8 @@ __all__ = [
     "StoredFireDangerAssessment",
     "FireEventRepository",
     "StoredFireEvent",
+    "FireStationRepository",
+    "FirefightingResourceRepository",
     "WeatherRepositoryError",
     "WeatherStationNotStoredError",
     "SatelliteHotspotRepositoryError",

@@ -12,6 +12,7 @@ from src.simulation.analysis.simulation_fire_detection_coordinator import (
     SimulationFireDetectionCoordinator,
 )
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
+from src.simulation.analysis.simulation_operational_coordinator import SimulationOperationalCoordinator
 
 __all__ = [
     "ASSESSMENT_RADIUS_KM",
@@ -22,4 +23,5 @@ __all__ = [
     "NON_DETECTION_EVENT_REASON",
     "SOURCE_EVENT_FAILED_REASON",
     "NO_SOURCE_DATA_AVAILABLE_REASON",
+    "SimulationOperationalCoordinator",
 ]
