@@ -34,6 +34,8 @@ from src.models.fire_spread_input_result import FireSpreadInputResult
 from src.models.fire_spread_input_status import FireSpreadInputStatus
 from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPredictionCell
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
+from src.models.graph_edge import GraphEdge
+from src.models.graph_node import GraphNode
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.vegetation_data import VegetationData
 from src.models.weather_observation import WeatherObservation
@@ -79,4 +81,6 @@ __all__ = [
     "FireSpreadPredictionCell",
     "FireSpreadPredictionStatus",
     "VegetationData",
+    "GraphNode",
+    "GraphEdge",
 ]
