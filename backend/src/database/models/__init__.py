@@ -25,6 +25,8 @@ from src.database.models.graph_edge_db import GraphEdgeDB
 from src.database.models.graph_node_db import GraphNodeDB
 from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
+from src.database.models.route_result_db import RouteResultDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
@@ -52,4 +54,6 @@ __all__ = [
     "GraphEdgeDB",
     "ResponseTargetSetDB",
     "ResponseTargetDB",
+    "RoutePlanningRunDB",
+    "RouteResultDB",
 ]
