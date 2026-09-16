@@ -54,6 +54,14 @@ from src.models.response_target_input_result import ResponseTargetInputResult
 from src.models.response_target_input_status import ResponseTargetInputStatus
 from src.models.response_target_set import ResponseTargetSet
 from src.models.response_target_type import ResponseTargetType
+from src.models.routing import (
+    RoutePlanningRun,
+    RouteResult,
+    RouteStatus,
+    RoutingResource,
+    RoutingTarget,
+    StoredRouteResult,
+)
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.models.vegetation_data import VegetationData
 from src.models.weather_observation import WeatherObservation
@@ -110,6 +118,12 @@ __all__ = [
     "GraphNode",
     "GraphEdge",
     "OperationalRefreshTriggerType",
+    "RouteStatus",
+    "RoutingResource",
+    "RoutingTarget",
+    "RouteResult",
+    "RoutePlanningRun",
+    "StoredRouteResult",
     "OptimizationTarget",
     "OptimizationResource",
     "OptimizationRouteOption",

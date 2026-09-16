@@ -26,6 +26,8 @@ from src.database.models.graph_node_db import GraphNodeDB
 from src.database.models.plan_comparison_db import PlanComparisonDB
 from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
+from src.database.models.route_result_db import RouteResultDB
 from src.database.models.response_plan_db import ResponsePlanDB
 from src.database.models.response_action_db import ResponseActionDB
 from src.database.models.response_plan_uncovered_target_db import ResponsePlanUncoveredTargetDB
@@ -57,6 +59,8 @@ __all__ = [
     "PlanComparisonDB",
     "ResponseTargetSetDB",
     "ResponseTargetDB",
+    "RoutePlanningRunDB",
+    "RouteResultDB",
     "ResponsePlanDB",
     "ResponseActionDB",
     "ResponsePlanUncoveredTargetDB",

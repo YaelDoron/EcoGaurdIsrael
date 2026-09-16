@@ -67,3 +67,6 @@ env/
 # Environment variables (never commit real credentials)
 .env
 backend/.env
+
+# Logs
+*.log

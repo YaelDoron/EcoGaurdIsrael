@@ -41,5 +41,7 @@ class FirefightingResourceRepositoryError(Exception):
     """Base exception for firefighting-resource repository errors."""
 
 
+class RoutePlanningRepositoryError(Exception):
+    """Base exception for routing-run repository errors."""
 class ResponsePlanRepositoryError(Exception):
     """Base exception for response-plan repository errors."""
