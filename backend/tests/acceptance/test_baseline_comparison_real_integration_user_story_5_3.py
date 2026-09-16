@@ -232,11 +232,17 @@ def independent_real_baseline_score(stack, route_planning_run_id: int):
             response_target_id=option.response_target_id,
             status="reachable" if option.is_reachable else "unreachable",
             travel_time_seconds=option.travel_time_seconds,
+            distance_meters=option.distance_meters,
         )
         for option in optimization_input.route_options
     )
     targets = tuple(
-        TargetOrder(response_target_id=target.response_target_id, target_order=target.target_order)
+        TargetOrder(
+            response_target_id=target.response_target_id,
+            target_order=target.target_order,
+            target_type=target.target_type,
+            priority_score=target.priority_score,
+        )
         for target in optimization_input.targets
     )
     allocation = BaselinePlanCalculator().allocate(targets=targets, route_candidates=candidates)
