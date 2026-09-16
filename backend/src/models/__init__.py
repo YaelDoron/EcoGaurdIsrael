@@ -54,6 +54,11 @@ from src.models.response_action import ResponseAction
 from src.models.response_optimization_input import ResponseOptimizationInput
 from src.models.response_plan_chromosome import ResponsePlanChromosome
 from src.models.response_plan import ResponsePlan
+from src.models.response_plan_details import (
+    BaselineComparisonDetails,
+    ResponseActionDetails,
+    ResponsePlanDetails,
+)
 from src.models.response_plan_status import ResponsePlanStatus
 from src.models.response_target import ResponseTarget
 from src.models.response_target_input import ResponseTargetInput
@@ -139,6 +144,9 @@ __all__ = [
     "ResponsePlanChromosome",
     "ResponsePlanStatus",
     "ResponsePlan",
+    "ResponseActionDetails",
+    "BaselineComparisonDetails",
+    "ResponsePlanDetails",
     "PlanScoreBreakdown",
     "derive_response_plan_status",
     "PlanningTargetState",
