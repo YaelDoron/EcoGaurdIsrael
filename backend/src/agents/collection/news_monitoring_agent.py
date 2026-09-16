@@ -14,6 +14,7 @@ from src.repositories.exceptions import NewsRepositoryError
 from src.repositories.news_repository import NewsRepository
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 
 
 class NewsMonitoringAgent:
@@ -26,9 +27,10 @@ class NewsMonitoringAgent:
         text_processor: Any | None = None,
         geocoder: Any | None = None,
         news_repository: NewsRepository | None = None,
+        enable_file_logging: bool = True,
     ) -> None:
         self.config = load_config(config_path) if config_path else load_config()
-        self._setup_logging()
+        self._setup_logging(enable_file_logging=enable_file_logging)
 
         if rss_fetcher is None or text_processor is None:
             from src.external.news.news_client import RSSFetcher, TextProcessor
@@ -43,19 +45,27 @@ class NewsMonitoringAgent:
         self.interval_seconds = self.config["scraping"]["interval_seconds"]
 
     # Sets up logging based on the configuration, allowing for console and optional file logging.
-    def _setup_logging(self) -> None:
+    def _setup_logging(self, *, enable_file_logging: bool = True) -> None:
         log_config = self.config.get("logging", {})
         handlers = [logging.StreamHandler()]
         log_file = log_config.get("file")
-        if log_file:
-            Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-            handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+        if enable_file_logging and log_file:
+            log_path = self._resolve_log_path(log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
         logging.basicConfig(
             level=getattr(logging, log_config.get("level", "INFO")),
             format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             handlers=handlers,
             force=True,
         )
+
+    @staticmethod
+    def _resolve_log_path(log_file: str) -> Path:
+        path = Path(log_file).expanduser()
+        if path.is_absolute():
+            return path
+        return PROJECT_ROOT / path
 
     # The cycle of fetching, filtering, extracting, geocoding, and storing is encapsulated in this method.
     def run_once(self) -> int:
