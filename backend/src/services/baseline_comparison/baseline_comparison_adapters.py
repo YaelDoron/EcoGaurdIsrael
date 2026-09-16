@@ -46,6 +46,7 @@ class PersistedRouteResultSnapshot:
     response_target_id: int
     status: str
     travel_time_seconds: float | None
+    distance_meters: float | None
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,7 @@ class RoutePlanningRepositoryRunReader:
                     response_target_id=stored_route.route_result.response_target_id,
                     status=stored_route.route_result.status.value,
                     travel_time_seconds=stored_route.route_result.travel_time_seconds,
+                    distance_meters=stored_route.route_result.distance_meters,
                 )
                 for stored_route in stored_run.routes
             ),
