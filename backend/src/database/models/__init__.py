@@ -26,6 +26,9 @@ from src.database.models.graph_node_db import GraphNodeDB
 from src.database.models.plan_comparison_db import PlanComparisonDB
 from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.response_plan_db import ResponsePlanDB
+from src.database.models.response_action_db import ResponseActionDB
+from src.database.models.response_plan_uncovered_target_db import ResponsePlanUncoveredTargetDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
@@ -54,4 +57,7 @@ __all__ = [
     "PlanComparisonDB",
     "ResponseTargetSetDB",
     "ResponseTargetDB",
+    "ResponsePlanDB",
+    "ResponseActionDB",
+    "ResponsePlanUncoveredTargetDB",
 ]

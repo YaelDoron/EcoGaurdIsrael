@@ -4,6 +4,7 @@ from src.repositories.exceptions import (
     FireDangerAssessmentRepositoryError,
     FireEventRepositoryError,
     ResponseTargetRepositoryError,
+    ResponsePlanRepositoryError,
     FireSeverityAssessmentRepositoryError,
     NewsRepositoryError,
     SatelliteHotspotRepositoryError,
@@ -29,6 +30,7 @@ from src.repositories.response_target_repository import (
     StoredResponseTarget,
     StoredResponseTargetSet,
 )
+from src.repositories.response_plan_repository import ResponsePlanRepository, StoredResponsePlan
 from src.repositories.satellite_hotspot_repository import (
     SaveHotspotResult,
     SatelliteHotspotRepository,
@@ -64,6 +66,8 @@ __all__ = [
     "StoredResponseTargetSet",
     "PlanComparisonRepository",
     "StoredPlanComparison",
+    "ResponsePlanRepository",
+    "StoredResponsePlan",
     "WeatherRepositoryError",
     "WeatherStationNotStoredError",
     "SatelliteHotspotRepositoryError",
@@ -72,4 +76,5 @@ __all__ = [
     "FireEventRepositoryError",
     "FireSeverityAssessmentRepositoryError",
     "ResponseTargetRepositoryError",
+    "ResponsePlanRepositoryError",
 ]
