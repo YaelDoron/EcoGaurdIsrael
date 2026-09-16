@@ -23,6 +23,7 @@ from src.database.models.fire_spread_prediction_weather_input_db import (
 )
 from src.database.models.graph_edge_db import GraphEdgeDB
 from src.database.models.graph_node_db import GraphNodeDB
+from src.database.models.plan_comparison_db import PlanComparisonDB
 from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
 from src.database.models.response_plan_db import ResponsePlanDB
@@ -53,6 +54,7 @@ __all__ = [
     "FireSpreadPredictionWeatherInputDB",
     "GraphNodeDB",
     "GraphEdgeDB",
+    "PlanComparisonDB",
     "ResponseTargetSetDB",
     "ResponseTargetDB",
     "ResponsePlanDB",

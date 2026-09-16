@@ -108,6 +108,7 @@ def init_db() -> None:
         firefighting_resource_db,
         graph_edge_db,
         graph_node_db,
+        plan_comparison_db,
         response_action_db,
         response_plan_db,
         response_plan_uncovered_target_db,
