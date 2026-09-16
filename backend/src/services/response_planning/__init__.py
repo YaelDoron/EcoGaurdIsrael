@@ -17,6 +17,7 @@ from src.services.response_planning.response_planning_production_factory import 
 from src.services.response_planning.response_planning_refresh_orchestrator import (
     ResponsePlanningRefreshOrchestrator,
 )
+from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
 
 __all__ = [
     "CurrentResponsePlanResolver",
@@ -24,6 +25,7 @@ __all__ = [
     "PlanningRefreshResult",
     "PlanningRefreshStatus",
     "ResponsePlanningRefreshOrchestrator",
+    "ResponsePlanDetailsService",
     "ResponseOptimizationCollaboratorAdapter",
     "ResponseOptimizationAdapterError",
     "BaselineComparisonCollaboratorAdapter",
