@@ -43,6 +43,11 @@ from src.calculators.baseline_plan.baseline_plan_comparison_calculator import (
 from src.calculators.baseline_plan.baseline_plan_evaluator import BaselinePlanEvaluator, BaselinePlanScorer
 from src.repositories.plan_comparison_repository import PlanComparisonRepository
 from src.repositories.response_target_repository import ResponseTargetRepository, StoredResponseTargetSet
+from src.services.baseline_comparison.baseline_comparison_adapters import (
+    ResponsePlanRepositoryOptimizedPlanReader,
+    ResponsePlanScorerBaselineAdapter,
+    RoutePlanningRepositoryRunReader,
+)
 from src.services.baseline_comparison.baseline_comparison_ports import (
     OptimizedPlanLike,
     OptimizedPlanReader,
@@ -64,17 +69,17 @@ class BaselineComparisonService:
     def __init__(
         self,
         *,
-        optimized_plan_reader: OptimizedPlanReader,
-        route_planning_run_reader: RoutePlanningRunReader,
-        scorer: BaselinePlanScorer,
+        optimized_plan_reader: OptimizedPlanReader | None = None,
+        route_planning_run_reader: RoutePlanningRunReader | None = None,
+        scorer: BaselinePlanScorer | None = None,
         response_target_set_reader: ResponseTargetSetReader | None = None,
         plan_comparison_repository: PlanComparisonRepository | None = None,
         baseline_evaluator: BaselinePlanEvaluator | None = None,
         comparison_calculator: BaselinePlanComparisonCalculator | None = None,
     ) -> None:
-        self._optimized_plan_reader = optimized_plan_reader
-        self._route_planning_run_reader = route_planning_run_reader
-        self._scorer = scorer
+        self._optimized_plan_reader = optimized_plan_reader or ResponsePlanRepositoryOptimizedPlanReader()
+        self._route_planning_run_reader = route_planning_run_reader or RoutePlanningRepositoryRunReader()
+        self._scorer = scorer or ResponsePlanScorerBaselineAdapter()
         self._response_target_set_reader = (
             response_target_set_reader if response_target_set_reader is not None else ResponseTargetRepository()
         )
