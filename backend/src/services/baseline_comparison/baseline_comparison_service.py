@@ -4,31 +4,36 @@
 Task 0 entry point. It introduces NO new algorithm -- it is the conductor
 that wires together already-complete Company 3 components in order:
 
-1. load the EXACT persisted optimized plan by `response_plan_id`
-   (`OptimizedPlanReader`, a structural port -- see
-   `baseline_comparison_ports.py` for why);
-2. load the EXACT `RoutePlanningRun` and `ResponseTargetSet` it references
-   (`RoutePlanningRunReader` port; `ResponseTargetSetReader`, satisfied in
-   production by the real US 4.3 `ResponseTargetRepository`);
+1. load the EXACT persisted optimized plan by `response_plan_id`, by
+   default through `ResponsePlanRepositoryOptimizedPlanReader`, a real
+   adapter over US 5.2's `ResponsePlanRepository` (`OptimizedPlanReader`
+   is the structural port -- see `baseline_comparison_ports.py`);
+2. load the EXACT `RoutePlanningRun` and `ResponseTargetSet` it references,
+   by default through `RoutePlanningRepositoryRunReader` (a real adapter
+   over US 5.1's `RoutePlanningRepository`) and the real US 4.3
+   `ResponseTargetRepository` directly;
 3. validate the planning chain is self-consistent (same FireEvent, same
    routing run id, same target set id);
 4. convert the persisted snapshot into Task 1's existing pure input types
    (`TargetOrder`, `RouteCandidate`) using ONLY already-persisted values --
    no ETA/reachability/priority/routing recalculation;
 5. call Task 2's `BaselinePlanEvaluator` exactly once (it already runs
-   Task 1's greedy allocation and the shared scorer);
+   Task 1's greedy allocation and, by default via
+   `ResponsePlanScorerBaselineAdapter`, the real US 5.2
+   `ResponsePlanScorer` reached through `ResponseOptimizationInputService`);
 6. build `OptimizedPlanEvaluation` from the optimized plan's
-   already-computed score and call Task 3's
-   `BaselinePlanComparisonCalculator` exactly once;
+   already-computed, already-persisted score (never rescored here) and
+   call Task 3's `BaselinePlanComparisonCalculator` exactly once;
 7. call Task 4's `PlanComparisonRepository.save(...)` exactly once;
 8. return the `PlanComparison` Task 3 produced.
 
 This module does not reimplement any Task 1-4 logic, does not invoke any
 detection/severity/spread/routing/GA agent, and does not query "current"
 resource/target/routing state -- the baseline must use the exact same
-planning snapshot the optimized plan used (see module docstring in
-`baseline_comparison_ports.py` for why real Company 1/2 persistence is
-still represented as structural ports).
+planning snapshot the optimized plan used. The real adapters live in
+`baseline_comparison_adapters.py`; the `Protocol` ports in
+`baseline_comparison_ports.py` keep the service decoupled from any one
+persistence implementation and remain overridable (e.g. by tests).
 """
 from __future__ import annotations
 
