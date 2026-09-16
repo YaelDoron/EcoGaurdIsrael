@@ -42,6 +42,13 @@ from src.models.optimization_resource import OptimizationResource
 from src.models.optimization_route_option import OptimizationRouteOption
 from src.models.optimization_target import OptimizationTarget
 from src.models.plan_score_breakdown import PlanScoreBreakdown, derive_response_plan_status
+from src.models.planning_effective_state import (
+    PlanningEffectiveState,
+    PlanningResourceState,
+    PlanningTargetState,
+)
+from src.models.planning_effective_state_result import PlanningEffectiveStateResult
+from src.models.planning_effective_state_status import PlanningEffectiveStateStatus
 from src.models.predicted_risk_target_candidate import PredictedRiskTargetCandidate
 from src.models.response_action import ResponseAction
 from src.models.response_optimization_input import ResponseOptimizationInput
@@ -134,4 +141,9 @@ __all__ = [
     "ResponsePlan",
     "PlanScoreBreakdown",
     "derive_response_plan_status",
+    "PlanningTargetState",
+    "PlanningResourceState",
+    "PlanningEffectiveState",
+    "PlanningEffectiveStateStatus",
+    "PlanningEffectiveStateResult",
 ]

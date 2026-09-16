@@ -30,6 +30,7 @@ from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.database.models.route_result_db import RouteResultDB
 from src.database.models.response_plan_db import ResponsePlanDB
 from src.database.models.response_action_db import ResponseActionDB
+from src.database.models.response_plan_planning_state_db import ResponsePlanPlanningStateDB
 from src.database.models.response_plan_uncovered_target_db import ResponsePlanUncoveredTargetDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
@@ -63,5 +64,6 @@ __all__ = [
     "RouteResultDB",
     "ResponsePlanDB",
     "ResponseActionDB",
+    "ResponsePlanPlanningStateDB",
     "ResponsePlanUncoveredTargetDB",
 ]

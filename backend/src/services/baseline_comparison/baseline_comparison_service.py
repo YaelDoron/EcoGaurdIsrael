@@ -127,6 +127,7 @@ class BaselineComparisonService:
         route_candidates = self._build_route_candidates(routing_run, stored_target_set)
 
         baseline_result = self._baseline_evaluator.evaluate(
+            fire_event_id=optimized_plan.fire_event_id,
             route_planning_run_id=optimized_plan.route_planning_run_id,
             response_target_set_id=optimized_plan.response_target_set_id,
             targets=targets,
@@ -193,11 +194,18 @@ class BaselineComparisonService:
 
     @staticmethod
     def _build_target_order(stored_target_set: StoredResponseTargetSet) -> tuple[TargetOrder, ...]:
-        # Persisted response_target_id + target_order ONLY -- Task 1 already
-        # handles deterministic target_order sorting; priority is never
-        # recalculated here.
+        # Persisted response_target_id / target_order / target_type /
+        # priority_score ONLY, copied unchanged from the exact stored
+        # target -- Task 1's own ordering/allocation logic is unaffected;
+        # target_type/priority_score are carried through solely for the
+        # shared scorer (Task 6.1).
         return tuple(
-            TargetOrder(response_target_id=stored_target.id, target_order=stored_target.target_order)
+            TargetOrder(
+                response_target_id=stored_target.id,
+                target_order=stored_target.target_order,
+                target_type=stored_target.target.target_type,
+                priority_score=stored_target.target.priority_score,
+            )
             for stored_target in stored_target_set.targets
         )
 
@@ -207,7 +215,8 @@ class BaselineComparisonService:
         stored_target_set: StoredResponseTargetSet,
     ) -> tuple[RouteCandidate, ...]:
         # Persisted route_result_id / resource_id / response_target_id /
-        # status / travel_time_seconds ONLY -- no ETA/path/distance/node
+        # status / travel_time_seconds / distance_meters ONLY, copied
+        # unchanged from the exact stored route -- no ETA/path/distance/node
         # mapping is calculated here.
         valid_target_ids = {stored_target.id for stored_target in stored_target_set.targets}
         valid_resource_ids = set(routing_run.resource_ids)
@@ -233,6 +242,7 @@ class BaselineComparisonService:
                     response_target_id=route_result.response_target_id,
                     status=route_result.status,
                     travel_time_seconds=route_result.travel_time_seconds,
+                    distance_meters=route_result.distance_meters,
                 )
             )
         return tuple(candidates)

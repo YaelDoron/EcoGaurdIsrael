@@ -82,8 +82,14 @@ class BaselinePlanScoringContext:
     Every field here is either a caller-supplied identifier or something
     `BaselinePlanCalculator.allocate(...)` already produced/consumed --
     nothing is recalculated.
+
+    `fire_event_id` was added in Task 6.1 purely so a `BaselinePlanScorer`
+    adapter can build a valid shared-scorer input without a fresh repository
+    lookup - it is the same fire_event_id BaselineComparisonService already
+    validated across the plan/run/target-set chain before calling evaluate().
     """
 
+    fire_event_id: int
     route_planning_run_id: int
     response_target_set_id: int
     targets: tuple[TargetOrder, ...]
@@ -143,6 +149,7 @@ class BaselinePlanEvaluator:
     def evaluate(
         self,
         *,
+        fire_event_id: int,
         route_planning_run_id: int,
         response_target_set_id: int,
         targets: Sequence[TargetOrder],
@@ -154,12 +161,14 @@ class BaselinePlanEvaluator:
         Never computes a score locally: `scorer.evaluate(...)` is called
         exactly once and its return value is preserved unchanged.
         """
+        _validate_positive_int("fire_event_id", fire_event_id)
         _validate_positive_int("route_planning_run_id", route_planning_run_id)
         _validate_positive_int("response_target_set_id", response_target_set_id)
 
         allocation = self._calculator.allocate(targets=targets, route_candidates=route_candidates)
 
         context = BaselinePlanScoringContext(
+            fire_event_id=fire_event_id,
             route_planning_run_id=route_planning_run_id,
             response_target_set_id=response_target_set_id,
             targets=tuple(targets),
