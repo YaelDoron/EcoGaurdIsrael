@@ -86,6 +86,7 @@ class FakeRouteResult:
     response_target_id: int
     status: str
     travel_time_seconds: float | None
+    distance_meters: float | None = None
 
 
 @dataclass(frozen=True)
@@ -208,8 +209,14 @@ def make_run(**overrides) -> FakeRoutePlanningRun:
         response_target_set_id=RESPONSE_TARGET_SET_ID,
         resource_ids=("R1", "R2"),
         route_results=(
-            FakeRouteResult(id=501, resource_id="R1", response_target_id=201, status="reachable", travel_time_seconds=50.0),
-            FakeRouteResult(id=502, resource_id="R2", response_target_id=202, status="reachable", travel_time_seconds=30.0),
+            FakeRouteResult(
+                id=501, resource_id="R1", response_target_id=201, status="reachable",
+                travel_time_seconds=50.0, distance_meters=500.0,
+            ),
+            FakeRouteResult(
+                id=502, resource_id="R2", response_target_id=202, status="reachable",
+                travel_time_seconds=30.0, distance_meters=300.0,
+            ),
         ),
     )
     defaults.update(overrides)
@@ -283,23 +290,32 @@ def test_end_to_end_happy_path_reuses_exact_snapshot_and_persists_once(sqlite_se
     assert scorer.call_count == 1
     context = scorer.received_contexts[0]
 
-    # 4, 5, 8: exact persisted target_order / response_target_id reach Task 1's input, in the exact stored order
+    # 4, 5, 8: exact persisted target_order / response_target_id / target_type / priority_score reach Task 1's input
     assert context.targets == (
-        TargetOrder(response_target_id=201, target_order=1),
-        TargetOrder(response_target_id=202, target_order=2),
+        TargetOrder(
+            response_target_id=201, target_order=1,
+            target_type=ResponseTargetType.ACTIVE_FIRE, priority_score=100.0,
+        ),
+        TargetOrder(
+            response_target_id=202, target_order=2,
+            target_type=ResponseTargetType.PREDICTED_RISK, priority_score=80.0,
+        ),
     )
 
-    # 4, 6, 7, 8, 9: exact route_result_id / resource_id / status / travel_time_seconds reach Task 1's input
+    # 4, 6, 7, 8, 9: exact route_result_id / resource_id / status / travel_time_seconds / distance_meters reach Task 1's input
     assert context.route_candidates == (
         RouteCandidate(
             route_result_id=501, resource_id="R1", response_target_id=201,
-            status="reachable", travel_time_seconds=50.0,
+            status="reachable", travel_time_seconds=50.0, distance_meters=500.0,
         ),
         RouteCandidate(
             route_result_id=502, resource_id="R2", response_target_id=202,
-            status="reachable", travel_time_seconds=30.0,
+            status="reachable", travel_time_seconds=30.0, distance_meters=300.0,
         ),
     )
+
+    # Task 6.1: fire_event_id is also carried through to the scoring context
+    assert context.fire_event_id == FIRE_EVENT_ID
 
     # 12, 13, 14: optimized score/coverage/average ETA reused unchanged
     assert result.optimized_score == 850.0
@@ -416,7 +432,14 @@ def test_real_response_target_repository_end_to_end_through_the_service(sqlite_s
 
     result = service.compare(response_plan_id=RESPONSE_PLAN_ID)
 
-    assert scorer.received_contexts[0].targets == (TargetOrder(response_target_id=stored_target_id, target_order=0),)
+    assert scorer.received_contexts[0].targets == (
+        TargetOrder(
+            response_target_id=stored_target_id,
+            target_order=0,
+            target_type=ResponseTargetType.ACTIVE_FIRE,
+            priority_score=100.0,
+        ),
+    )
     assert result.route_planning_run_id == run.id
     assert result.response_target_set_id == stored.id
 

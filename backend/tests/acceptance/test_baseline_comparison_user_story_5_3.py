@@ -95,6 +95,7 @@ class FakeRouteResult:
     response_target_id: int
     status: str
     travel_time_seconds: float | None
+    distance_meters: float | None = None
 
 
 @dataclass(frozen=True)

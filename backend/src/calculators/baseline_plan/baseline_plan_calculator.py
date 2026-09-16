@@ -34,6 +34,14 @@ from those frozen contracts:
 Task 2 (once US 5.1/5.2 are merged) is expected to translate between these
 and the real shared models -- e.g. build a `RouteCandidate` from each
 `StoredRouteResult`, and a `ResponseAction` from each `BaselineAssignment`.
+
+Epic 5 Task 6.1 note: `TargetOrder.target_type`/`.priority_score` and
+`RouteCandidate.distance_meters` were added once US 5.1/5.2's real models
+existed, purely to carry already-loaded snapshot data through to the shared
+`ResponsePlanScorer` (see `baseline_comparison_service.py`). None of them are
+read by `BaselinePlanCalculator.allocate()` itself - target processing
+order, candidate eligibility, and tie-breaking are unchanged; only the
+information carried alongside each target/candidate was enriched.
 """
 from __future__ import annotations
 
@@ -41,6 +49,8 @@ from dataclasses import dataclass
 import math
 from numbers import Real
 from typing import Literal, Sequence
+
+from src.models.response_target_type import ResponseTargetType
 
 # Local mirror of the frozen `RouteStatus` contract's persisted string
 # values (lowercase: "reachable" / "unreachable" / "unmappable"). A
@@ -66,6 +76,7 @@ class RouteCandidate:
     response_target_id: int
     status: RouteCandidateStatus
     travel_time_seconds: float | None
+    distance_meters: float | None
 
     def __post_init__(self) -> None:
         _validate_positive_int("route_result_id", self.route_result_id)
@@ -75,6 +86,8 @@ class RouteCandidate:
             raise ValueError(f"status must be one of {_VALID_STATUSES}, got {self.status!r}")
         if self.travel_time_seconds is not None:
             _validate_finite_non_negative("travel_time_seconds", self.travel_time_seconds)
+        if self.distance_meters is not None:
+            _validate_finite_non_negative("distance_meters", self.distance_meters)
 
 
 @dataclass(frozen=True)
@@ -88,10 +101,15 @@ class TargetOrder:
 
     response_target_id: int
     target_order: int
+    target_type: ResponseTargetType
+    priority_score: float
 
     def __post_init__(self) -> None:
         _validate_positive_int("response_target_id", self.response_target_id)
         _validate_non_negative_int("target_order", self.target_order)
+        if not isinstance(self.target_type, ResponseTargetType):
+            raise ValueError(f"target_type must be a ResponseTargetType, got {self.target_type!r}")
+        _validate_finite("priority_score", self.priority_score)
 
 
 @dataclass(frozen=True)
@@ -227,3 +245,8 @@ def _validate_non_negative_int(field_name: str, value: object) -> None:
 def _validate_finite_non_negative(field_name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value) or value < 0:
         raise ValueError(f"{field_name} must be a finite non-negative number, got {value!r}")
+
+
+def _validate_finite(field_name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
+        raise ValueError(f"{field_name} must be a finite number, got {value!r}")

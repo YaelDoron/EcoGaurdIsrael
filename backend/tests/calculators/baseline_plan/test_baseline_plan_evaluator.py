@@ -25,6 +25,9 @@ from src.calculators.baseline_plan.baseline_plan_config import (
     BASELINE_PLAN_METHODOLOGY,
     BASELINE_PLAN_METHODOLOGY_VERSION,
 )
+from src.models import ResponseTargetType
+
+FIRE_EVENT_ID = 1
 
 
 @dataclass(frozen=True)
@@ -77,19 +80,26 @@ def make_candidate(**overrides) -> RouteCandidate:
         response_target_id=1,
         status="reachable",
         travel_time_seconds=100.0,
+        distance_meters=1000.0,
     )
     defaults.update(overrides)
     return RouteCandidate(**defaults)
 
 
 def make_target(**overrides) -> TargetOrder:
-    defaults = dict(response_target_id=1, target_order=0)
+    defaults = dict(
+        response_target_id=1,
+        target_order=0,
+        target_type=ResponseTargetType.ACTIVE_FIRE,
+        priority_score=100.0,
+    )
     defaults.update(overrides)
     return TargetOrder(**defaults)
 
 
 def evaluate(
     *,
+    fire_event_id=FIRE_EVENT_ID,
     route_planning_run_id=1,
     response_target_set_id=1,
     targets,
@@ -97,6 +107,7 @@ def evaluate(
     scorer,
 ) -> BaselinePlanResult:
     return BaselinePlanEvaluator().evaluate(
+        fire_event_id=fire_event_id,
         route_planning_run_id=route_planning_run_id,
         response_target_set_id=response_target_set_id,
         targets=targets,
@@ -373,6 +384,16 @@ def test_scorer_exception_propagates_without_inventing_a_score():
 # ---------------------------------------------------------------------------
 # Input / result validation
 # ---------------------------------------------------------------------------
+
+
+def test_non_positive_fire_event_id_rejected():
+    targets = (make_target(response_target_id=1, target_order=0),)
+    candidates = (make_candidate(route_result_id=1, resource_id="R1", travel_time_seconds=50.0),)
+    scorer = RecordingScorer(result=KNOWN_SCORE)
+
+    with pytest.raises(ValueError):
+        evaluate(fire_event_id=0, targets=targets, route_candidates=candidates, scorer=scorer)
+    assert scorer.call_count == 0
 
 
 def test_non_positive_route_planning_run_id_rejected():

@@ -11,6 +11,7 @@ from src.calculators.baseline_plan import (
     RouteCandidate,
     TargetOrder,
 )
+from src.models import ResponseTargetType
 
 
 def make_candidate(**overrides) -> RouteCandidate:
@@ -20,13 +21,19 @@ def make_candidate(**overrides) -> RouteCandidate:
         response_target_id=1,
         status="reachable",
         travel_time_seconds=100.0,
+        distance_meters=1000.0,
     )
     defaults.update(overrides)
     return RouteCandidate(**defaults)
 
 
 def make_target(**overrides) -> TargetOrder:
-    defaults = dict(response_target_id=1, target_order=0)
+    defaults = dict(
+        response_target_id=1,
+        target_order=0,
+        target_type=ResponseTargetType.ACTIVE_FIRE,
+        priority_score=100.0,
+    )
     defaults.update(overrides)
     return TargetOrder(**defaults)
 

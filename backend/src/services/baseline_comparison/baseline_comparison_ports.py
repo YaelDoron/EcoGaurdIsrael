@@ -40,6 +40,7 @@ class RouteResultLike(Protocol):
     response_target_id: int
     status: RouteCandidateStatus
     travel_time_seconds: float | None
+    distance_meters: float | None
 
 
 class RoutePlanningRunLike(Protocol):

@@ -8,9 +8,16 @@ from src.services.baseline_comparison.baseline_comparison_ports import (
     RoutePlanningRunReader,
     RouteResultLike,
 )
+from src.services.baseline_comparison.baseline_comparison_production_readers import (
+    ResponsePlanOptimizedPlanReaderAdapter,
+    RoutePlanningRunReaderAdapter,
+)
 from src.services.baseline_comparison.baseline_comparison_service import (
     BaselineComparisonService,
     BaselineComparisonServiceError,
+)
+from src.services.baseline_comparison.response_plan_baseline_scorer_adapter import (
+    ResponsePlanBaselineScorerAdapter,
 )
 
 __all__ = [
@@ -22,4 +29,7 @@ __all__ = [
     "RoutePlanningRunLike",
     "RoutePlanningRunReader",
     "RouteResultLike",
+    "ResponsePlanOptimizedPlanReaderAdapter",
+    "RoutePlanningRunReaderAdapter",
+    "ResponsePlanBaselineScorerAdapter",
 ]

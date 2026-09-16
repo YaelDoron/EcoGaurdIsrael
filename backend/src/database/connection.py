@@ -111,6 +111,7 @@ def init_db() -> None:
         plan_comparison_db,
         response_action_db,
         response_plan_db,
+        response_plan_planning_state_db,
         response_plan_uncovered_target_db,
         response_target_db,
         response_target_set_db,
