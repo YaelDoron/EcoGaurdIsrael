@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
-from src.agents.collection.news_monitoring_agent import NewsMonitoringAgent
+from src.agents.collection.news_monitoring_agent import PROJECT_ROOT, NewsMonitoringAgent
 from src.models.fire_report import WildfireReport
 from src.repositories.exceptions import NewsRepositoryError
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult
@@ -40,6 +40,7 @@ def make_agent(
         text_processor=text_processor,
         geocoder=geocoder,
         news_repository=news_repository,
+        enable_file_logging=False,
     )
 
 
@@ -52,6 +53,40 @@ def _wire_success(text_processor: Mock, geocoder: Mock, news_repository: Mock) -
         report=report,
         is_duplicate=False,
     )
+
+
+def test_relative_log_file_resolves_to_project_root():
+    log_path = NewsMonitoringAgent._resolve_log_path("logs/news_monitoring_agent.log")
+
+    assert log_path == PROJECT_ROOT / "logs" / "news_monitoring_agent.log"
+
+
+def test_file_logging_can_be_disabled_for_tests(tmp_path):
+    config_path = tmp_path / "news_config.yaml"
+    log_path = tmp_path / "news_monitoring_agent.log"
+    config_path.write_text(
+        "\n".join(
+            [
+                "scraping:",
+                "  interval_seconds: 300",
+                "logging:",
+                "  level: INFO",
+                f"  file: \"{log_path.as_posix()}\"",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    NewsMonitoringAgent(
+        config_path=str(config_path),
+        rss_fetcher=Mock(),
+        text_processor=Mock(),
+        geocoder=Mock(),
+        news_repository=Mock(spec=NewsRepository),
+        enable_file_logging=False,
+    )
+
+    assert not log_path.exists()
 
 
 def test_valid_relevant_article_is_saved():
