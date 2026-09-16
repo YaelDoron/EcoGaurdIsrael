@@ -38,7 +38,16 @@ from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
 from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
+from src.models.optimization_resource import OptimizationResource
+from src.models.optimization_route_option import OptimizationRouteOption
+from src.models.optimization_target import OptimizationTarget
+from src.models.plan_score_breakdown import PlanScoreBreakdown, derive_response_plan_status
 from src.models.predicted_risk_target_candidate import PredictedRiskTargetCandidate
+from src.models.response_action import ResponseAction
+from src.models.response_optimization_input import ResponseOptimizationInput
+from src.models.response_plan_chromosome import ResponsePlanChromosome
+from src.models.response_plan import ResponsePlan
+from src.models.response_plan_status import ResponsePlanStatus
 from src.models.response_target import ResponseTarget
 from src.models.response_target_input import ResponseTargetInput
 from src.models.response_target_input_result import ResponseTargetInputResult
@@ -115,4 +124,14 @@ __all__ = [
     "RouteResult",
     "RoutePlanningRun",
     "StoredRouteResult",
+    "OptimizationTarget",
+    "OptimizationResource",
+    "OptimizationRouteOption",
+    "ResponseOptimizationInput",
+    "ResponseAction",
+    "ResponsePlanChromosome",
+    "ResponsePlanStatus",
+    "ResponsePlan",
+    "PlanScoreBreakdown",
+    "derive_response_plan_status",
 ]
