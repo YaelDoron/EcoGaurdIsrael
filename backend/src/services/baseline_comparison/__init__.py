@@ -1,5 +1,14 @@
 """Orchestration for comparing an optimized plan against its deterministic baseline."""
 
+from src.services.baseline_comparison.baseline_comparison_adapters import (
+    PersistedOptimizedPlanScore,
+    PersistedOptimizedPlanSnapshot,
+    PersistedRoutePlanningRunSnapshot,
+    PersistedRouteResultSnapshot,
+    ResponsePlanRepositoryOptimizedPlanReader,
+    ResponsePlanScorerBaselineAdapter,
+    RoutePlanningRepositoryRunReader,
+)
 from src.services.baseline_comparison.baseline_comparison_ports import (
     OptimizedPlanLike,
     OptimizedPlanReader,
@@ -23,6 +32,13 @@ from src.services.baseline_comparison.response_plan_baseline_scorer_adapter impo
 __all__ = [
     "BaselineComparisonService",
     "BaselineComparisonServiceError",
+    "PersistedOptimizedPlanScore",
+    "PersistedOptimizedPlanSnapshot",
+    "PersistedRoutePlanningRunSnapshot",
+    "PersistedRouteResultSnapshot",
+    "ResponsePlanRepositoryOptimizedPlanReader",
+    "ResponsePlanScorerBaselineAdapter",
+    "RoutePlanningRepositoryRunReader",
     "OptimizedPlanLike",
     "OptimizedPlanReader",
     "ResponseTargetSetReader",

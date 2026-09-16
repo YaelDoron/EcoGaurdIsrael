@@ -17,6 +17,7 @@ from src.calculators.response_optimization import (
 from src.models.response_optimization_input import ResponseOptimizationInput
 from src.models.response_plan import ResponsePlan
 from src.repositories.response_plan_repository import ResponsePlanRepository
+from src.services.response_optimization.response_optimization_input_service import ResponseOptimizationInputService
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +29,31 @@ class ResponseOptimizationAgent:
         self,
         repository: ResponsePlanRepository,
         optimizer: GeneticResponsePlanOptimizer | None = None,
+        input_service: ResponseOptimizationInputService | None = None,
     ) -> None:
         self._repository = repository
         self._optimizer = optimizer or GeneticResponsePlanOptimizer()
+        self._input_service = input_service or ResponseOptimizationInputService()
+
+    def optimize_from_route_planning_run(
+        self,
+        route_planning_run_id: int,
+        *,
+        as_of: datetime,
+        config: ResponseOptimizationConfig | None = None,
+    ) -> ResponseOptimizationResult:
+        """Optimize and persist a response plan for one exact persisted routing run."""
+        if (
+            isinstance(route_planning_run_id, bool)
+            or not isinstance(route_planning_run_id, int)
+            or route_planning_run_id <= 0
+        ):
+            raise ValueError(f"route_planning_run_id must be a positive integer, got {route_planning_run_id!r}")
+        if not isinstance(as_of, datetime) or as_of.tzinfo is None:
+            raise ValueError(f"as_of must be a timezone-aware datetime, got {as_of!r}")
+
+        input_data = self._input_service.build_from_route_planning_run(route_planning_run_id)
+        return self.optimize_from_input(input_data, as_of=as_of, config=config)
 
     def optimize_from_input(
         self,

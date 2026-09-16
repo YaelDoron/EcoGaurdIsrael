@@ -2,21 +2,24 @@
 
 `BaselineComparisonService` needs to load an exact persisted optimized
 plan, the exact `RoutePlanningRun` it used, and the exact
-`ResponseTargetSet` it used. As of Task 5, Company 1's `RoutePlanningRun`/
-`RouteResult` persistence and Company 2's `ResponsePlan` persistence still
-do not exist in this codebase (re-checked -- see
-`baseline_comparison_service.py`). Rather than fabricate production copies
-of those tables/repositories, this module defines minimal structural
-`Protocol` ports describing only the fields/methods Task 5 actually reads.
+`ResponseTargetSet` it used. These `Protocol` ports describe only the
+fields/methods Task 5 actually reads; they now have real production
+adapters (see `baseline_comparison_adapters.py`) backed by US 5.1's
+`RoutePlanningRepository` and US 5.2's `ResponsePlanRepository` /
+`ResponseOptimizationInputService`, wired as `BaselineComparisonService`'s
+defaults. The ports remain the dependency contracts (not replacement
+repositories) so the service stays decoupled from any one persistence
+implementation and unit tests can inject lightweight fakes:
 
-These are dependency contracts, not replacement repositories:
-- `OptimizedPlanReader` / `RoutePlanningRunReader` need real adapters once
-  Company 1/2 merge their persistence -- any object whose `get_by_id`
-  returns something shaped like `OptimizedPlanLike`/`RoutePlanningRunLike`
-  satisfies the port structurally, no inheritance required.
-- `ResponseTargetSetReader` is already satisfied by the real, existing US
-  4.3 `ResponseTargetRepository.get_by_id(...) -> StoredResponseTargetSet
-  | None` -- no adapter needed, it is used directly in production.
+- `OptimizedPlanReader` is satisfied in production by
+  `ResponsePlanRepositoryOptimizedPlanReader` (wraps the real
+  `ResponsePlanRepository`).
+- `RoutePlanningRunReader` is satisfied in production by
+  `RoutePlanningRepositoryRunReader` (wraps the real
+  `RoutePlanningRepository`).
+- `ResponseTargetSetReader` is satisfied directly by the real US 4.3
+  `ResponseTargetRepository.get_by_id(...) -> StoredResponseTargetSet |
+  None` -- no adapter needed, it is used directly in production.
 
 `RouteResultLike.status` reuses Task 1's exact `RouteCandidateStatus`
 literal and `OptimizedPlanLike.score` reuses Task 2's exact
