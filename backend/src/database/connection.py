@@ -108,6 +108,7 @@ def init_db() -> None:
         firefighting_resource_db,
         graph_edge_db,
         graph_node_db,
+        plan_comparison_db,
         satellite_hotspot_db,
         weather_observation_db,
         weather_station_db,
