@@ -3,7 +3,7 @@ import { AppShell } from "../components/layout/AppShell";
 import { ActiveWildfiresPage } from "../pages/ActiveWildfiresPage";
 import { EventDetailsPage } from "../pages/EventDetailsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
-import { ResponsePlanPlaceholderPage } from "../pages/ResponsePlanPlaceholderPage";
+import { ResponsePlanPage } from "../pages/ResponsePlanPage";
 
 /**
  * The application's route table. Generic on purpose (Task 15): it only
@@ -21,8 +21,8 @@ export function AppRouter() {
         <Route path="/" element={<Navigate to="/events" replace />} />
         <Route path="/events" element={<ActiveWildfiresPage />} />
         <Route path="/events/:fireEventId" element={<EventDetailsPage />} />
-        <Route path="/events/:fireEventId/plan" element={<ResponsePlanPlaceholderPage />} />
-        <Route path="/plans/:planId" element={<ResponsePlanPlaceholderPage />} />
+        <Route path="/events/:fireEventId/plan" element={<ResponsePlanPage />} />
+        <Route path="/plans/:planId" element={<ResponsePlanPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

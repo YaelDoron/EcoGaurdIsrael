@@ -1,7 +1,17 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRouter } from "./AppRouter";
+
+const { getCurrentResponsePlanMock, getResponsePlanByIdMock } = vi.hoisted(() => ({
+  getCurrentResponsePlanMock: vi.fn(),
+  getResponsePlanByIdMock: vi.fn(),
+}));
+
+vi.mock("../api/responsePlans", () => ({
+  getCurrentResponsePlan: getCurrentResponsePlanMock,
+  getResponsePlanById: getResponsePlanByIdMock,
+}));
 
 function renderAt(path: string) {
   return render(
@@ -12,6 +22,20 @@ function renderAt(path: string) {
 }
 
 describe("AppRouter", () => {
+  beforeEach(() => {
+    getCurrentResponsePlanMock.mockReset();
+    getResponsePlanByIdMock.mockReset();
+    // Both routes render their PageHeader synchronously, before the plan
+    // fetch resolves - these routing tests only need that heading, so an
+    // always-pending promise keeps each test from depending on fetch timing.
+    getCurrentResponsePlanMock.mockReturnValue(new Promise<never>(() => {}));
+    getResponsePlanByIdMock.mockReturnValue(new Promise<never>(() => {}));
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("redirects / to /events", () => {
     renderAt("/");
 
@@ -31,18 +55,18 @@ describe("AppRouter", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/loading/i);
   });
 
-  it("renders the Response Plan placeholder at /events/:fireEventId/plan", () => {
+  it("renders ResponsePlanPage at /events/:fireEventId/plan", () => {
     renderAt("/events/123/plan");
 
     expect(screen.getByRole("heading", { name: "Response Plan" })).toBeInTheDocument();
-    expect(screen.getByText(/123/)).toBeInTheDocument();
+    expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(123);
   });
 
-  it("renders the Response Plan placeholder at /plans/:planId", () => {
+  it("renders ResponsePlanPage at /plans/:planId", () => {
     renderAt("/plans/42");
 
     expect(screen.getByRole("heading", { name: "Response Plan" })).toBeInTheDocument();
-    expect(screen.getByText(/42/)).toBeInTheDocument();
+    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(42);
   });
 
   it("renders Not Found for an unknown route", () => {

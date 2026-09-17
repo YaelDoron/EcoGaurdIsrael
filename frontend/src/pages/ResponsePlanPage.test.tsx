@@ -16,6 +16,8 @@ vi.mock("../api/responsePlans", () => ({
   getResponsePlanById: getResponsePlanByIdMock,
 }));
 
+vi.mock("react-leaflet", async () => import("../test/reactLeafletStub"));
+
 function makePlan(overrides: Partial<ResponsePlan> = {}): ResponsePlan {
   return {
     plan_id: 7,
@@ -439,5 +441,251 @@ describe("ResponsePlanPage", () => {
     expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-pressed", "true");
     const resourceIds = screen.getAllByText(/^engine-[12]$/).map((el) => el.textContent);
     expect(resourceIds).toEqual(["engine-1", "engine-2"]);
+  });
+
+  // -------------------------------------------------------------------------
+  // US 6.2 map integration (Integration Task 2)
+  // -------------------------------------------------------------------------
+
+  it("renders the shared US 6.2 map", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan() });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByRole("region", { name: "Map of Response Plan #7" })).toBeInTheDocument();
+    expect(screen.getByTestId("tile-layer")).toBeInTheDocument();
+  });
+
+  it("draws a reachable action's persisted route with coordinate order preserved", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: { latitude: 32.0, longitude: 35.0 } },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 32.9, longitude: 35.9 },
+            route: {
+              status: "reachable",
+              eta_seconds: 120,
+              distance_meters: 800,
+              node_path: [1, 2, 3],
+              path_coordinates: [
+                { latitude: 32.0, longitude: 35.0 },
+                { latitude: 32.5, longitude: 35.5 },
+                { latitude: 32.9, longitude: 35.9 },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    const polyline = await screen.findByTestId("polyline");
+    expect(JSON.parse(polyline.getAttribute("data-positions")!)).toEqual([
+      [32.0, 35.0],
+      [32.5, 35.5],
+      [32.9, 35.9],
+    ]);
+  });
+
+  it("renders the origin marker at the resource's persisted coordinates", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: { latitude: 32.1, longitude: 35.2 } },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 32.9, longitude: 35.9 },
+            route: { status: "unreachable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    const markers = await screen.findAllByTestId("marker");
+    const origin = markers.find((marker) => marker.getAttribute("data-lat") === "32.1");
+    expect(origin).toHaveAttribute("data-lng", "35.2");
+  });
+
+  it("renders the target marker at the target's persisted coordinates", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: null },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 32.9, longitude: 35.9 },
+            route: { status: "unreachable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    const marker = await screen.findByTestId("marker");
+    expect(marker).toHaveAttribute("data-lat", "32.9");
+    expect(marker).toHaveAttribute("data-lng", "35.9");
+  });
+
+  it("selecting a Response Action highlights only its own route", async () => {
+    const user = userEvent.setup();
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: { latitude: 32.0, longitude: 35.0 } },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 32.9, longitude: 35.9 },
+            route: {
+              status: "reachable",
+              eta_seconds: 120,
+              distance_meters: 800,
+              node_path: null,
+              path_coordinates: [
+                { latitude: 32.0, longitude: 35.0 },
+                { latitude: 32.9, longitude: 35.9 },
+              ],
+            },
+          },
+          {
+            resource: { resource_id: "engine-2", station_id: "station-2", station_name: "North", origin: { latitude: 33.0, longitude: 36.0 } },
+            target: { response_target_id: 2, target_type: "active_fire", priority_score: 0.5, latitude: 33.9, longitude: 36.9 },
+            route: {
+              status: "reachable",
+              eta_seconds: 90,
+              distance_meters: 500,
+              node_path: null,
+              path_coordinates: [
+                { latitude: 33.0, longitude: 36.0 },
+                { latitude: 33.9, longitude: 36.9 },
+              ],
+            },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+    const selectButtons = await screen.findAllByRole("button", { name: "Highlight on map" });
+
+    await user.click(selectButtons[1]);
+
+    const polylines = await screen.findAllByTestId("polyline");
+    const engine1Route = polylines.find(
+      (line) => JSON.parse(line.getAttribute("data-positions")!)[0][0] === 32.0,
+    )!;
+    const engine2Route = polylines.find(
+      (line) => JSON.parse(line.getAttribute("data-positions")!)[0][0] === 33.0,
+    )!;
+    expect(engine2Route.getAttribute("data-color")).not.toBe(engine1Route.getAttribute("data-color"));
+  });
+
+  it("draws no route line for an unreachable action", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: null },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 1, longitude: 1 },
+            route: { status: "unreachable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    await screen.findByText("engine-1");
+    expect(screen.queryByTestId("polyline")).not.toBeInTheDocument();
+  });
+
+  it("draws no route line for an unmappable action", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: null },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 1, longitude: 1 },
+            route: { status: "unmappable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    await screen.findByText("engine-1");
+    expect(screen.queryByTestId("polyline")).not.toBeInTheDocument();
+  });
+
+  it("draws no fake route line for a reachable action with no persisted path_coordinates", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: null },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 1, longitude: 1 },
+            route: { status: "reachable", eta_seconds: 60, distance_meters: 400, node_path: [1, 2], path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    await screen.findByText("engine-1");
+    expect(screen.queryByTestId("polyline")).not.toBeInTheDocument();
+  });
+
+  it("does not crash and keeps the action visible when its resource has no persisted origin", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: null },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 1, longitude: 1 },
+            route: { status: "unreachable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByText("engine-1")).toBeInTheDocument();
+    // Exactly one marker (the target) - no origin marker was fabricated.
+    expect(screen.getAllByTestId("marker")).toHaveLength(1);
+  });
+
+  it("does not crash and keeps the action visible when its target has no persisted coordinates", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "station-1", station_name: "Central", origin: { latitude: 32.0, longitude: 35.0 } },
+            target: { response_target_id: 1, target_type: null, priority_score: null, latitude: null, longitude: null },
+            route: { status: "unreachable", eta_seconds: null, distance_meters: null, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByText("engine-1")).toBeInTheDocument();
+    // Exactly one marker (the origin) - no target marker was fabricated.
+    expect(screen.getAllByTestId("marker")).toHaveLength(1);
+  });
+
+  it("performs no network call while rendering the map beyond the one plan fetch", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan() });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Plan ID");
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
