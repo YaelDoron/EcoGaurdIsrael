@@ -525,3 +525,96 @@ def test_get_latest_for_event_as_of_returns_none_when_no_past_assessment(reposit
     fire_event_id, _ = persist_fire_event(fire_event_repository, satellite_repository)
 
     assert repository.get_latest_for_event_as_of(fire_event_id, ASSESSED_AT) is None
+
+
+def test_get_latest_for_events_returns_latest_per_event(
+    repository,
+    fire_event_repository,
+    weather_repository,
+    satellite_repository,
+):
+    first_event_id, first_hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    second_event_id, second_hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    weather_id = persist_weather(weather_repository)
+
+    repository.save_assessment(
+        make_assessment(first_event_id, assessed_at=ASSESSED_AT - timedelta(hours=1), score=50, level=FireSeverityLevel.HIGH),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(first_hotspot_id,),
+        selected_frp_hotspot_id=first_hotspot_id,
+    )
+    first_latest = repository.save_assessment(
+        make_assessment(first_event_id, assessed_at=ASSESSED_AT, score=80, level=FireSeverityLevel.CRITICAL),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(first_hotspot_id,),
+        selected_frp_hotspot_id=first_hotspot_id,
+    )
+    second_latest = repository.save_assessment(
+        make_assessment(second_event_id, assessed_at=ASSESSED_AT + timedelta(minutes=1), score=30, level=FireSeverityLevel.LOW),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(second_hotspot_id,),
+        selected_frp_hotspot_id=second_hotspot_id,
+    )
+
+    found = repository.get_latest_for_events([first_event_id, second_event_id])
+
+    assert found[first_event_id].assessment_id == first_latest.assessment_id
+    assert found[second_event_id].assessment_id == second_latest.assessment_id
+
+
+def test_get_latest_for_events_never_crosses_events(
+    repository,
+    fire_event_repository,
+    weather_repository,
+    satellite_repository,
+):
+    first_event_id, first_hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    second_event_id, _ = persist_fire_event(fire_event_repository, satellite_repository)
+    weather_id = persist_weather(weather_repository)
+    only_assessment = repository.save_assessment(
+        make_assessment(first_event_id, assessed_at=ASSESSED_AT, score=70, level=FireSeverityLevel.HIGH),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(first_hotspot_id,),
+        selected_frp_hotspot_id=first_hotspot_id,
+    )
+
+    found = repository.get_latest_for_events([first_event_id, second_event_id])
+
+    assert found[first_event_id].assessment_id == only_assessment.assessment_id
+    assert second_event_id not in found
+
+
+def test_get_latest_for_events_tie_break_uses_newest_id(
+    repository,
+    fire_event_repository,
+    weather_repository,
+    satellite_repository,
+):
+    fire_event_id, hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    weather_id = persist_weather(weather_repository)
+    repository.save_assessment(
+        make_assessment(fire_event_id),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(hotspot_id,),
+        selected_frp_hotspot_id=hotspot_id,
+    )
+    second = repository.save_assessment(
+        make_assessment(fire_event_id),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(hotspot_id,),
+        selected_frp_hotspot_id=hotspot_id,
+    )
+
+    found = repository.get_latest_for_events([fire_event_id])
+
+    assert found[fire_event_id].assessment_id == second.assessment_id
+
+
+def test_get_latest_for_events_omits_events_with_no_assessment(repository, fire_event_repository, satellite_repository):
+    fire_event_id, _ = persist_fire_event(fire_event_repository, satellite_repository)
+
+    assert repository.get_latest_for_events([fire_event_id]) == {}
+
+
+def test_get_latest_for_events_returns_empty_dict_for_empty_input(repository):
+    assert repository.get_latest_for_events([]) == {}

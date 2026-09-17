@@ -1,5 +1,10 @@
 """EcoGuard internal domain models (plain dataclasses, no persistence)."""
 
+from src.models.active_fire_events import (
+    ActiveFireEventSeveritySummary,
+    ActiveFireEventSummary,
+    ActiveFireEventsResult,
+)
 from src.models.assessment_area import AssessmentArea
 from src.models.fire_danger_assessment import FireDangerAssessment
 from src.models.fire_danger_assessment_status import FireDangerAssessmentStatus
@@ -81,6 +86,9 @@ from src.models.weather_observation import WeatherObservation
 from src.models.weather_station import WeatherStation
 
 __all__ = [
+    "ActiveFireEventSeveritySummary",
+    "ActiveFireEventSummary",
+    "ActiveFireEventsResult",
     "WeatherStation",
     "WeatherObservation",
     "SatelliteHotspot",

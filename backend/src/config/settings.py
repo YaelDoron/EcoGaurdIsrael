@@ -22,6 +22,7 @@ DEFAULT_COPERNICUS_TOKEN_URL = (
 DEFAULT_COPERNICUS_STATISTICS_URL = "https://sh.dataspace.copernicus.eu/statistics/v1"
 DEFAULT_COPERNICUS_LAND_COVER_COLLECTION_ID = "35fecfec-8a73-4723-bb08-b775f283a535"
 DEFAULT_COPERNICUS_REQUEST_TIMEOUT = 20
+DEFAULT_FRONTEND_ORIGINS = "http://localhost:5173"
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,15 @@ class Settings:
     # URL normalization (postgresql:// -> postgresql+psycopg://) happens in
     # src.database.connection, not here.
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+
+    # Comma-separated list of origins allowed to call the API via CORS
+    # (React/Vite dev server by default). Parsed once here so callers get a
+    # ready-to-use tuple instead of re-splitting a raw string.
+    FRONTEND_ORIGINS: tuple[str, ...] = tuple(
+        origin.strip()
+        for origin in os.getenv("FRONTEND_ORIGINS", DEFAULT_FRONTEND_ORIGINS).split(",")
+        if origin.strip()
+    )
 
 
 settings = Settings()

@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -156,6 +156,62 @@ class FireSeverityAssessmentRepository:
                 .one_or_none()
             )
             return self._to_stored_assessment(db_assessment) if db_assessment is not None else None
+
+    def get_latest_for_events(self, fire_event_ids: Iterable[int]) -> dict[int, StoredFireSeverityAssessment]:
+        """Return each event's latest persisted severity assessment, batched in one query.
+
+        Same "latest" ordering as get_latest_for_event (assessed_at desc, id
+        desc) per fire_event_id, resolved for many events at once via a
+        window function instead of one query per event - avoids N+1 queries
+        when listing many active FireEvents (US 6.1). Does not populate
+        weather_observation_ids/satellite_hotspot_ids/selected_frp_hotspot_id
+        (left at their StoredFireSeverityAssessment defaults) since this
+        batched path does not join the input-trace tables; callers needing
+        those should look up the returned assessment_id via get_by_id.
+        FireEvent ids with no persisted assessment are simply absent from
+        the returned mapping.
+        """
+        ids = self._normalize_ids("fire_event_ids", tuple(fire_event_ids))
+        if not ids:
+            return {}
+        with self._session_scope() as session:
+            row_number = (
+                func.row_number()
+                .over(
+                    partition_by=FireSeverityAssessmentDB.fire_event_id,
+                    order_by=(
+                        FireSeverityAssessmentDB.assessed_at.desc(),
+                        FireSeverityAssessmentDB.id.desc(),
+                    ),
+                )
+                .label("row_number")
+            )
+            ranked = (
+                select(FireSeverityAssessmentDB, row_number)
+                .where(FireSeverityAssessmentDB.fire_event_id.in_(ids))
+                .subquery()
+            )
+            rows = session.execute(select(ranked).where(ranked.c.row_number == 1)).all()
+            return {
+                row.fire_event_id: StoredFireSeverityAssessment(
+                    assessment_id=row.id,
+                    assessment=FireSeverityAssessment(
+                        fire_event_id=row.fire_event_id,
+                        assessed_at=self._ensure_aware_datetime(row.assessed_at),
+                        status=FireSeverityAssessmentStatus(row.status),
+                        score=row.score,
+                        level=FireSeverityLevel(row.severity_level) if row.severity_level is not None else None,
+                        methodology=row.methodology,
+                        methodology_version=row.methodology_version,
+                        vegetation_source=row.vegetation_source,
+                        vegetation_dataset_year=row.vegetation_dataset_year,
+                        vegetation_radius_km=row.vegetation_radius_km,
+                        vegetation_dominant_land_cover=row.vegetation_dominant_land_cover,
+                        vegetation_fuel_score=row.vegetation_fuel_score,
+                    ),
+                )
+                for row in rows
+            }
 
     def get_weather_input_ids(self, assessment_id: int) -> tuple[int, ...]:
         """Return weather observation IDs linked to an assessment, sorted ascending."""
