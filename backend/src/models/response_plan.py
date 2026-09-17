@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.models.optimization_validation import (
     validate_non_empty_string,
     validate_optional_finite_non_negative_number,
@@ -19,6 +20,15 @@ class ResponsePlan:
 
     This pure model has no persistence, routing, or scoring behavior. Score
     values are externally supplied by later optimization tasks.
+
+    `optimization_config` is the exact, resolved `ResponseOptimizationConfig`
+    that produced this plan - not whatever today's defaults happen to be. It
+    is `None` for legacy plans persisted before full GA-configuration
+    capture existed (FND-04): that is a real "configuration unavailable"
+    state, never fabricated from current source-code defaults. `random_seed`
+    is kept as its own field for backward compatibility with existing
+    callers/persistence, and - when `optimization_config` is present - must
+    equal `optimization_config.random_seed`.
     """
 
     fire_event_id: int
@@ -34,6 +44,7 @@ class ResponsePlan:
     plan_score: float | None = None
     coverage_score: float | None = None
     average_eta_seconds: float | None = None
+    optimization_config: ResponseOptimizationConfig | None = None
 
     def __post_init__(self) -> None:
         validate_positive_int("fire_event_id", self.fire_event_id)
@@ -47,6 +58,17 @@ class ResponsePlan:
         validate_non_empty_string("methodology_version", self.methodology_version)
         if isinstance(self.random_seed, bool) or not isinstance(self.random_seed, int):
             raise ValueError(f"random_seed must be an integer, got {self.random_seed!r}")
+        if self.optimization_config is not None:
+            if not isinstance(self.optimization_config, ResponseOptimizationConfig):
+                raise ValueError(
+                    f"optimization_config must be a ResponseOptimizationConfig or None, "
+                    f"got {self.optimization_config!r}"
+                )
+            if self.optimization_config.random_seed != self.random_seed:
+                raise ValueError(
+                    "optimization_config.random_seed must match random_seed, got "
+                    f"{self.optimization_config.random_seed!r} != {self.random_seed!r}"
+                )
 
         actions = self._normalize_actions(self.actions)
         uncovered_target_ids = self._normalize_uncovered_target_ids(self.uncovered_target_ids)

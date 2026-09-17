@@ -277,6 +277,41 @@ def test_multiple_news_only_location_uses_news_centroid():
     assert decision.longitude == pytest.approx(35.02)
 
 
+def test_transitively_connected_group_is_accepted_though_first_and_last_do_not_correlate():
+    """Regression for FND-01: A-B and B-C correlate directly, A-C does not.
+
+    The group is one connected component under FireDetectionCandidate's
+    connectivity semantics, so the calculator must accept it rather than
+    requiring every pair to directly correlate.
+    """
+    item_a = satellite(1, "nominal", latitude=LATITUDE)
+    item_b = satellite(2, "nominal", latitude=LATITUDE + 0.035)
+    item_c = satellite(3, "nominal", latitude=LATITUDE + 0.070)
+
+    with pytest.raises(ValueError):
+        evaluate(item_a, item_c)  # sanity: A and C alone do not correlate
+
+    decision = evaluate(item_a, item_b, item_c)
+
+    assert decision.status is not FireDetectionStatus.NO_EVENT
+    assert decision.supporting_evidence == (satellite_ref(1), satellite_ref(2), satellite_ref(3))
+    assert evaluate(item_a, item_b, item_c) == decision
+
+
+def test_evidence_reachable_only_through_a_disconnected_subset_is_still_rejected():
+    """Guards against over-relaxing the FND-01 fix into accepting anything.
+
+    A genuinely disconnected group (no correlation path reaches the outlier)
+    must still fail evaluation, even though a subset of it correlates.
+    """
+    item_a = satellite(1, "nominal", latitude=LATITUDE)
+    item_b = satellite(2, "nominal", latitude=LATITUDE + 0.035)
+    item_c = satellite(3, "nominal", latitude=LATITUDE + 5.0)
+
+    with pytest.raises(ValueError):
+        evaluate(item_a, item_b, item_c)
+
+
 def test_duplicate_same_source_evidence_identity_is_rejected_deterministically():
     with pytest.raises(ValueError):
         evaluate(satellite(1), satellite(1))

@@ -28,6 +28,17 @@ class FireDetectionCandidate:
 
     Candidate identity is source-aware: satellite row 5 and news row 5 are
     distinct evidence items even though their integer database IDs overlap.
+
+    Evidence belongs to the same candidate when it forms one connected
+    component under the configured geographic and temporal correlation
+    relation (see ``is_connected``). Direct correlation is not required
+    between every pair inside that component: A-B and B-C correlating is
+    sufficient to group A, B, and C even when A and C do not directly
+    correlate. Any code that validates a group of evidence as "one
+    candidate" (including FireDetectionCalculator, which may be called with
+    a raw evidence tuple instead of a constructed FireDetectionCandidate)
+    must use this same connectivity definition, not a stricter all-pairs
+    check, or the two layers will disagree on the same data.
     """
 
     evidence: tuple[FireDetectionEvidence, ...]
@@ -36,7 +47,7 @@ class FireDetectionCandidate:
         evidence = self._normalize_evidence(self.evidence)
         if not evidence:
             raise ValueError("FireDetectionCandidate requires at least one evidence item.")
-        if not self._is_connected(evidence):
+        if not self.is_connected(evidence):
             raise ValueError("FireDetectionCandidate evidence must form one connected component.")
 
         object.__setattr__(self, "evidence", evidence)
@@ -72,7 +83,14 @@ class FireDetectionCandidate:
         return (observed_at.timestamp(), _EVIDENCE_TYPE_SORT_ORDER[evidence.evidence_type], evidence.evidence_id)
 
     @classmethod
-    def _is_connected(cls, evidence: tuple[FireDetectionEvidence, ...]) -> bool:
+    def is_connected(cls, evidence: tuple[FireDetectionEvidence, ...]) -> bool:
+        """Return whether evidence forms one connected component by location and time.
+
+        This is the authoritative "valid candidate" definition: evidence is
+        one candidate when every item is reachable from every other item
+        through a chain of pairwise correlations, not only when every pair
+        directly correlates.
+        """
         if len(evidence) == 1:
             return True
 

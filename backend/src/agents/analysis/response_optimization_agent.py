@@ -85,6 +85,7 @@ class ResponseOptimizationAgent:
                 plan_score=score.total_score,
                 coverage_score=score.coverage_score,
                 average_eta_seconds=score.average_eta_seconds,
+                optimization_config=effective_config,
             )
             stored = self._repository.save(plan)
             logger.info(

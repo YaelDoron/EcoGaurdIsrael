@@ -31,7 +31,7 @@ Retrieval is intentionally broader than correlation. Evidence may be retrieved f
 
 ## Correlation
 
-`FireDetectionCalculator` groups direct evidence into candidates using spatial and temporal correlation.
+`FireDetectionEvidenceService` groups direct evidence into candidates using spatial and temporal correlation.
 
 Current correlation thresholds:
 
@@ -40,7 +40,9 @@ Current correlation thresholds:
 | `MAX_EVIDENCE_DISTANCE_KM` | `5.0` |
 | `MAX_EVIDENCE_TIME_DIFFERENCE_MINUTES` | `60` |
 
-Evidence is correlated when it is within both thresholds. Exactly 60 minutes is included. More than 60 minutes is not correlated.
+Two evidence items directly correlate when they are within both thresholds. Exactly 60 minutes is included. More than 60 minutes is not correlated.
+
+Evidence belongs to the same candidate when it forms one connected component under this direct-correlation relation, not only when every pair directly correlates. For example, if A directly correlates with B, and B directly correlates with C, then A, B, and C form one candidate even if A and C do not directly correlate with each other. `FireDetectionCandidate.is_connected` is the single authoritative implementation of this rule, and `FireDetectionEvidenceService` (grouping) and `FireDetectionCalculator` (evaluation) both defer to it, so a candidate accepted by one is always accepted by the other.
 
 Correlation uses source-aware evidence identity. `SATELLITE` id `5` and `NEWS` id `5` are different evidence items and can both support the same decision.
 

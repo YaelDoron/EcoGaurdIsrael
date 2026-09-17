@@ -255,6 +255,27 @@ class FireEventRepository:
                 for match in sorted(matches, key=lambda match: (match[0], match[1]))
             )
 
+    def get_active_fire_event_ids(self) -> tuple[int, ...]:
+        """Return ids of all currently active (SUSPECTED/CONFIRMED) FireEvents.
+
+        Unscoped by location: unlike get_active_events_near, this has no
+        geographic filter. It exists for callers that need the full active
+        set - e.g. identifying which FireEvents' planning may depend on a
+        resource-wide status change, where no fixed-radius relationship
+        between a resource and a FireEvent already exists in this model.
+        Ordered by id for deterministic iteration.
+        """
+        with self._session_scope() as session:
+            return tuple(
+                sorted(
+                    session.execute(
+                        select(FireEventDB.id).where(
+                            FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES)
+                        )
+                    ).scalars()
+                )
+            )
+
     def _insert_missing_evidence_refs(
         self,
         session: Session,

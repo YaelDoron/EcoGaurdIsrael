@@ -42,12 +42,12 @@ from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.operational import OperationalContextService
-from src.services.operational_refresh import (
-    FireSpreadRefreshOrchestrator,
-    OperationalRefreshOrchestrator,
-    OperationalRefreshResult,
-    ResourceStatusUpdateService,
+from src.services.operational_planning_refresh.operational_planning_refresh_production_factory import (
+    build_operational_planning_refresh_coordinator,
 )
+from src.services.operational_refresh import OperationalRefreshResult
+from src.services.response_planning.planning_refresh_result import PlanningRefreshResult
+from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
 from src.services.response_target import ResponseTargetInputService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
@@ -535,55 +535,27 @@ def build_response_target_coordinator() -> SimulationResponseTargetCoordinator:
 def build_simulation_refresh_coordinator(
     operational_coordinator: SimulationOperationalCoordinator | None = None,
 ) -> SimulationRefreshCoordinator:
-    """Build the central US 4.4 simulation refresh coordinator."""
-    fire_event_repository = FireEventRepository()
+    """Build the central US 4.4 -> US 5.4 simulation refresh coordinator.
 
-    severity_agent = FireSeverityAssessmentAgent(
-        input_service=FireSeverityInputService(fire_event_repository=fire_event_repository),
-        calculator=FireSeverityCalculator(),
-        repository=FireSeverityAssessmentRepository(),
-    )
-
-    spread_input_service = FireSpreadInputService()
-    spread_calculator = FireSpreadCalculator()
-    spread_prediction_repository = FireSpreadPredictionRepository()
-    spread_agent = FireSpreadPredictionAgent(
-        input_service=spread_input_service,
-        calculator=spread_calculator,
-        repository=spread_prediction_repository,
-    )
-    spread_refresh_orchestrator = FireSpreadRefreshOrchestrator(
-        input_service=spread_input_service,
-        prediction_agent=spread_agent,
-        prediction_repository=spread_prediction_repository,
-    )
-
-    response_target_agent = ResponseTargetGenerationAgent(
-        input_service=ResponseTargetInputService(),
-        calculator=ResponseTargetCalculator(),
-        repository=ResponseTargetRepository(),
-    )
-
-    resource_repository = FirefightingResourceRepository()
-    resource_status_service = ResourceStatusUpdateService(resource_repository)
-    operational_refresh_orchestrator = OperationalRefreshOrchestrator(
-        severity_agent=severity_agent,
-        spread_refresh_orchestrator=spread_refresh_orchestrator,
-        response_target_agent=response_target_agent,
-        resource_status_service=resource_status_service,
-        resource_repository=resource_repository,
-        fire_event_repository=fire_event_repository,
-    )
+    Delegates the entire operational-refresh-then-planning-refresh sequence
+    to the same production OperationalPlanningRefreshCoordinator normal
+    runtime uses (build_operational_planning_refresh_coordinator) - this
+    script does not construct RoutePlanningAgent, ResponseOptimizationAgent,
+    or BaselineComparisonService itself, and does not re-derive the US4.4 ->
+    US5.4 sequence.
+    """
+    operational_planning_refresh_coordinator = build_operational_planning_refresh_coordinator()
 
     return SimulationRefreshCoordinator(
-        operational_refresh_orchestrator=operational_refresh_orchestrator,
-        fire_event_repository=fire_event_repository,
+        operational_planning_refresh=operational_planning_refresh_coordinator,
+        fire_event_repository=FireEventRepository(),
         operational_coordinator=operational_coordinator or build_operational_coordinator(),
     )
 
 
 _fire_spread_coordinator: SimulationFireSpreadCoordinator | None = None
 _response_target_coordinator: SimulationResponseTargetCoordinator | None = None
+_response_plan_details_service: ResponsePlanDetailsService | None = None
 
 
 def get_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
@@ -608,6 +580,14 @@ def get_response_target_coordinator() -> SimulationResponseTargetCoordinator:
     if _response_target_coordinator is None:
         _response_target_coordinator = build_response_target_coordinator()
     return _response_target_coordinator
+
+
+def get_response_plan_details_service() -> ResponsePlanDetailsService:
+    """Return the US 5.5 read service used to enrich planning-refresh output, built lazily."""
+    global _response_plan_details_service
+    if _response_plan_details_service is None:
+        _response_plan_details_service = ResponsePlanDetailsService()
+    return _response_plan_details_service
 
 
 def print_fire_danger_result(
@@ -740,6 +720,46 @@ def print_simulation_refresh_result(
             print_resource_refresh_result(refresh_result, output)
         else:
             print_operational_refresh_result(refresh_result, output)
+    for planning_result in simulation_refresh_result.planning_results:
+        print_planning_refresh_result(planning_result, output)
+
+
+def print_planning_refresh_result(
+    planning_result: PlanningRefreshResult,
+    output: TextIO = sys.stdout,
+) -> None:
+    """Show whether US 5.4 planning refresh ran, and its outcome, for one FireEvent.
+
+    Prints only fields already present on PlanningRefreshResult itself, plus
+    (when a response_plan_id exists) a compact enrichment reusing the
+    existing US 5.5 ResponsePlanDetailsService read - never recomputing
+    routes, optimization, or scores here.
+    """
+    print("RESPONSE PLANNING REFRESH", file=output)
+    print(f"fire_event_id={planning_result.fire_event_id}", file=output)
+    print(f"status={planning_result.status.name}", file=output)
+    if planning_result.route_planning_run_id is not None:
+        print(f"route_planning_run_id={planning_result.route_planning_run_id}", file=output)
+    if planning_result.response_plan_id is not None:
+        print(f"response_plan_id={planning_result.response_plan_id}", file=output)
+    if planning_result.comparison_id is not None:
+        print(f"comparison_id={planning_result.comparison_id}", file=output)
+    if planning_result.error:
+        print(f"message={planning_result.error}", file=output)
+
+    if planning_result.response_plan_id is None:
+        return
+    plan_details = get_response_plan_details_service().get_plan_details_by_id(planning_result.response_plan_id)
+    if plan_details is None:
+        return
+    average_eta = (
+        f"{plan_details.average_eta_seconds:.1f}" if plan_details.average_eta_seconds is not None else "-"
+    )
+    print(f"plan_score={plan_details.plan_score:.2f}", file=output)
+    print(f"coverage_score={plan_details.coverage_score:.2f}", file=output)
+    print(f"average_eta_seconds={average_eta}", file=output)
+    print(f"response_actions={len(plan_details.actions)}", file=output)
+    print(f"uncovered_targets={len(plan_details.uncovered_target_ids)}", file=output)
 
 
 def print_operational_refresh_result(

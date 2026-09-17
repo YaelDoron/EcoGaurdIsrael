@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.models import (
     OptimizationResource,
     OptimizationRouteOption,
@@ -288,6 +289,48 @@ def test_response_plan_valid_construction_and_deterministic_action_ordering():
     plan = make_plan(actions=(action("TRUCK-B", 20, 200), action("TRUCK-A", 10, 100)))
 
     assert [item.resource_id for item in plan.actions] == ["TRUCK-A", "TRUCK-B"]
+
+
+# ---------------------------------------------------------------------------
+# FND-04: optimization_config (exact GA configuration snapshot)
+# ---------------------------------------------------------------------------
+
+
+def test_response_plan_without_optimization_config_defaults_to_none():
+    plan = make_plan()
+
+    assert plan.optimization_config is None
+
+
+def test_response_plan_accepts_a_full_optimization_config():
+    config = ResponseOptimizationConfig(
+        population_size=30,
+        generation_count=55,
+        mutation_rate=0.12,
+        crossover_rate=0.65,
+        random_seed=42,
+        eta_reference_seconds=750.0,
+        initial_assignment_probability=0.6,
+        tournament_size=3,
+        elitism_count=2,
+    )
+
+    plan = make_plan(random_seed=42, optimization_config=config)
+
+    assert plan.optimization_config == config
+    assert plan.optimization_config is config
+
+
+def test_response_plan_rejects_non_config_optimization_config():
+    with pytest.raises(ValueError):
+        make_plan(optimization_config="not-a-config")
+
+
+def test_response_plan_rejects_optimization_config_seed_mismatch():
+    config = ResponseOptimizationConfig(random_seed=1)
+
+    with pytest.raises(ValueError):
+        make_plan(random_seed=2, optimization_config=config)
 
 
 @pytest.mark.parametrize(
