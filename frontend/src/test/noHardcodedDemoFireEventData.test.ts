@@ -12,6 +12,16 @@ const PRODUCTION_FILES = [
   "src/components/fire-events/ActiveFireEventCard.tsx",
   "src/hooks/useActiveFireEvents.ts",
   "src/api/activeFireEvents.ts",
+  "src/pages/EventDetailsPage.tsx",
+  "src/hooks/useEventDetails.ts",
+  "src/api/eventDetails.ts",
+  "src/components/map/MapView.tsx",
+  "src/components/map/FitBoundsToPoints.tsx",
+  "src/components/map/FireEventMarker.tsx",
+  "src/components/map/SpreadLayer.tsx",
+  "src/components/map/ResponseTargetLayer.tsx",
+  "src/components/map/StationLayer.tsx",
+  "src/components/map/OperationalLayer.tsx",
 ];
 
 const FORBIDDEN_LITERALS = ["Carmel", "Golan", "Jerusalem Forest", "Event #12", "32.731", "35.046"];

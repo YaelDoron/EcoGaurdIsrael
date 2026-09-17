@@ -1,0 +1,94 @@
+import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { SpreadLayer } from "./SpreadLayer";
+import type { SpreadPrediction } from "../../types/eventDetails";
+
+vi.mock("react-leaflet", async () => import("../../test/reactLeafletStub"));
+
+function makeCell(overrides: Partial<SpreadPrediction["cells"][number]> = {}) {
+  return {
+    latitude: 32.74,
+    longitude: 35.05,
+    spread_probability: 0.6,
+    spread_risk_score: 60,
+    reached_step: 1,
+    reached_minutes: 5,
+    ...overrides,
+  };
+}
+
+describe("SpreadLayer", () => {
+  it("renders nothing when every prediction has an empty cells array", () => {
+    const predictions: SpreadPrediction[] = [
+      { horizon_minutes: 30, status: "insufficient_data", predicted_at: "2026-09-17T13:25:00Z", cells: [] },
+      { horizon_minutes: 60, status: "inactive_event", predicted_at: "2026-09-17T13:25:00Z", cells: [] },
+    ];
+    const { container } = render(<SpreadLayer predictions={predictions} />);
+
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("renders one circle marker per cell across all horizons", () => {
+    const predictions: SpreadPrediction[] = [
+      {
+        horizon_minutes: 30,
+        status: "valid",
+        predicted_at: "2026-09-17T13:25:00Z",
+        cells: [makeCell(), makeCell({ latitude: 32.75 })],
+      },
+      {
+        horizon_minutes: 60,
+        status: "valid",
+        predicted_at: "2026-09-17T13:25:00Z",
+        cells: [makeCell({ latitude: 32.76 })],
+      },
+    ];
+    render(<SpreadLayer predictions={predictions} />);
+
+    expect(screen.getAllByTestId("circle-marker")).toHaveLength(3);
+  });
+
+  it("skips a horizon with no cells while still rendering another horizon's valid cells", () => {
+    const predictions: SpreadPrediction[] = [
+      { horizon_minutes: 30, status: "insufficient_data", predicted_at: "2026-09-17T13:25:00Z", cells: [] },
+      { horizon_minutes: 60, status: "valid", predicted_at: "2026-09-17T13:25:00Z", cells: [makeCell()] },
+    ];
+    render(<SpreadLayer predictions={predictions} />);
+
+    expect(screen.getAllByTestId("circle-marker")).toHaveLength(1);
+  });
+
+  it("shows the horizon, risk score, and probability in each cell's popup", () => {
+    const predictions: SpreadPrediction[] = [
+      {
+        horizon_minutes: 30,
+        status: "valid",
+        predicted_at: "2026-09-17T13:25:00Z",
+        cells: [makeCell({ spread_risk_score: 72.5, spread_probability: 0.5, reached_minutes: 10 })],
+      },
+    ];
+    render(<SpreadLayer predictions={predictions} />);
+
+    expect(screen.getByText("Predicted spread (30 min horizon)")).toBeInTheDocument();
+    expect(screen.getByText("Risk score: 72.5")).toBeInTheDocument();
+    expect(screen.getByText("Probability: 50%")).toBeInTheDocument();
+    expect(screen.getByText("Reached at: 10 min")).toBeInTheDocument();
+  });
+
+  it("uses a higher fill opacity for a higher spread probability", () => {
+    const predictions: SpreadPrediction[] = [
+      {
+        horizon_minutes: 30,
+        status: "valid",
+        predicted_at: "2026-09-17T13:25:00Z",
+        cells: [makeCell({ spread_probability: 0.1 }), makeCell({ spread_probability: 0.9, latitude: 32.8 })],
+      },
+    ];
+    render(<SpreadLayer predictions={predictions} />);
+
+    const markers = screen.getAllByTestId("circle-marker");
+    const lowOpacity = Number(markers[0].getAttribute("data-fill-opacity"));
+    const highOpacity = Number(markers[1].getAttribute("data-fill-opacity"));
+    expect(highOpacity).toBeGreaterThan(lowOpacity);
+  });
+});
