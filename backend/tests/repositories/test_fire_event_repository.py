@@ -477,6 +477,55 @@ def test_get_active_fire_event_ids_is_ordered_by_id(repository, satellite_reposi
     assert found == tuple(sorted((first.id, second.id)))
 
 
+@pytest.mark.parametrize("active_status", [FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED])
+def test_get_active_events_includes_suspected_and_confirmed(repository, satellite_repository, active_status):
+    created = create_event_with_satellite(repository, satellite_repository, status=active_status)
+
+    found = repository.get_active_events()
+
+    assert [stored.id for stored in found] == [created.id]
+    assert found[0].event.status is active_status
+
+
+@pytest.mark.parametrize("inactive_status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_get_active_events_excludes_resolved_and_dismissed(repository, satellite_repository, inactive_status):
+    active = create_event_with_satellite(repository, satellite_repository)
+    inactive = create_event_with_satellite(repository, satellite_repository, latitude=33.5, longitude=35.5)
+    repository.update_event(
+        inactive.id, make_event(status=inactive_status, latitude=33.5, longitude=35.5, updated_at=UPDATED_AT)
+    )
+
+    found = repository.get_active_events()
+
+    assert [stored.id for stored in found] == [active.id]
+
+
+def test_get_active_events_returns_empty_tuple_when_none_active(repository):
+    assert repository.get_active_events() == ()
+
+
+def test_get_active_events_orders_most_recently_updated_first(repository, satellite_repository):
+    older = create_event_with_satellite(repository, satellite_repository, updated_at=UPDATED_AT)
+    newer = create_event_with_satellite(
+        repository, satellite_repository, latitude=33.5, longitude=35.5, updated_at=UPDATED_AT + timedelta(hours=1)
+    )
+
+    found = repository.get_active_events()
+
+    assert [stored.id for stored in found] == [newer.id, older.id]
+
+
+def test_get_active_events_tie_break_uses_id_when_updated_at_matches(repository, satellite_repository):
+    first = create_event_with_satellite(repository, satellite_repository, updated_at=UPDATED_AT)
+    second = create_event_with_satellite(
+        repository, satellite_repository, latitude=33.5, longitude=35.5, updated_at=UPDATED_AT
+    )
+
+    found = repository.get_active_events()
+
+    assert [stored.id for stored in found] == sorted([first.id, second.id], reverse=True)
+
+
 def test_multiple_matching_events_choose_closest(repository, satellite_repository):
     farther = create_event_with_satellite(repository, satellite_repository, latitude=32.740, detected_at=DETECTED_AT)
     closer = create_event_with_satellite(

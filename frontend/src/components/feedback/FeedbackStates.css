@@ -1,0 +1,67 @@
+.feedback-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.feedback-state__title {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--color-text);
+}
+
+.feedback-state--error .feedback-state__title {
+  color: var(--color-danger);
+}
+
+.feedback-state__message {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.feedback-state__action {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.feedback-state__action:hover {
+  background: var(--color-background);
+}
+
+.feedback-state__action-slot {
+  margin-top: var(--space-2);
+}
+
+.feedback-state__spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-focus-ring);
+  border-radius: 50%;
+  animation: feedback-state-spin 0.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feedback-state__spinner {
+    animation: none;
+  }
+}
+
+@keyframes feedback-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

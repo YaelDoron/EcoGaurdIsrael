@@ -255,6 +255,29 @@ class FireEventRepository:
                 for match in sorted(matches, key=lambda match: (match[0], match[1]))
             )
 
+    def get_active_events(self) -> tuple[StoredFireEvent, ...]:
+        """Return all currently active (SUSPECTED/CONFIRMED) FireEvents.
+
+        Unscoped by location, like get_active_fire_event_ids, but returns
+        full FireEvent data instead of bare ids. Ordered most-recently-
+        updated first (updated_at desc), tie-broken by id desc, for
+        deterministic dashboard-style listing (US 6.1). Evidence traces are
+        not loaded here (supporting_evidence is left empty on each result)
+        since this listing doesn't need them - use get_by_id/
+        get_evidence_refs for a specific event's evidence.
+        """
+        with self._session_scope() as session:
+            db_events = (
+                session.execute(
+                    select(FireEventDB)
+                    .where(FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES))
+                    .order_by(FireEventDB.updated_at.desc(), FireEventDB.id.desc())
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(self._to_stored_event(db_event) for db_event in db_events)
+
     def get_active_fire_event_ids(self) -> tuple[int, ...]:
         """Return ids of all currently active (SUSPECTED/CONFIRMED) FireEvents.
 

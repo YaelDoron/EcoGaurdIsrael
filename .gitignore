@@ -70,3 +70,12 @@ backend/.env
 
 # Logs
 *.log
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/.env
+frontend/node_modules/.tmp/
+*.local
+npm-debug.log*
