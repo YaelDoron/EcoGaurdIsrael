@@ -221,6 +221,95 @@ def test_running_same_optimization_twice_is_append_only(repository, persisted_co
     assert {item.id for item in history} == {first.response_plan_id, second.response_plan_id}
 
 
+# ---------------------------------------------------------------------------
+# FND-04: exact GA configuration persistence and reproducibility
+# ---------------------------------------------------------------------------
+
+
+def test_non_default_config_is_persisted_exactly_not_defaults(repository, persisted_context):
+    """Regression for FND-04's exact failure mode: if optimize_from_input ever
+    silently reconstructed ResponseOptimizationConfig() during persistence
+    instead of using the caller's exact object, every field below would come
+    back at its default instead of these deliberately non-default values."""
+    input_data = optimization_input(persisted_context)
+    config = ResponseOptimizationConfig(
+        population_size=18,
+        generation_count=9,
+        mutation_rate=0.37,
+        crossover_rate=0.42,
+        random_seed=777,
+        eta_reference_seconds=555.0,
+        initial_assignment_probability=0.33,
+        tournament_size=4,
+        elitism_count=2,
+    )
+    assert config != ResponseOptimizationConfig()  # sanity: genuinely non-default
+
+    result = ResponseOptimizationAgent(repository).optimize_from_input(input_data, as_of=AS_OF, config=config)
+
+    stored_config = repository.get_by_id(result.response_plan_id).plan.optimization_config
+    assert stored_config == config
+    assert stored_config.population_size == 18
+    assert stored_config.generation_count == 9
+    assert stored_config.mutation_rate == pytest.approx(0.37)
+    assert stored_config.crossover_rate == pytest.approx(0.42)
+    assert stored_config.random_seed == 777
+    assert stored_config.eta_reference_seconds == pytest.approx(555.0)
+    assert stored_config.initial_assignment_probability == pytest.approx(0.33)
+    assert stored_config.tournament_size == 4
+    assert stored_config.elitism_count == 2
+
+
+def test_default_config_is_also_persisted_in_full(repository, persisted_context):
+    """A caller relying on defaults still gets a complete, non-None config -
+    optimization_config must not stay None just because the caller didn't
+    override anything."""
+    result = ResponseOptimizationAgent(repository).optimize_from_input(
+        optimization_input(persisted_context), as_of=AS_OF
+    )
+
+    stored_config = repository.get_by_id(result.response_plan_id).plan.optimization_config
+    assert stored_config == ResponseOptimizationConfig()
+
+
+def test_reload_and_reconstructed_config_reproduces_identical_optimization_output(repository, persisted_context):
+    """The actual FND-04 requirement: persisted data alone - not today's
+    source-code defaults - must be enough to reproduce a historical run.
+
+    Proven by actually running the optimizer a second time with only the
+    reconstructed config and the same input snapshot, not by comparing
+    config objects alone.
+    """
+    input_data = optimization_input(persisted_context)
+    original_config = ResponseOptimizationConfig(
+        population_size=16,
+        generation_count=6,
+        mutation_rate=0.22,
+        crossover_rate=0.55,
+        random_seed=999,
+        eta_reference_seconds=650.0,
+        initial_assignment_probability=0.4,
+        tournament_size=3,
+        elitism_count=1,
+    )
+
+    result = ResponseOptimizationAgent(repository).optimize_from_input(
+        input_data, as_of=AS_OF, config=original_config
+    )
+    stored = repository.get_by_id(result.response_plan_id)
+
+    reconstructed_config = stored.plan.optimization_config
+    assert reconstructed_config is not None
+    assert reconstructed_config == original_config
+
+    reproduced = GeneticResponsePlanOptimizer().optimize(input_data, reconstructed_config)
+
+    assert reproduced.actions == stored.plan.actions
+    assert reproduced.score.total_score == pytest.approx(stored.plan.plan_score)
+    assert reproduced.score.coverage_score == pytest.approx(stored.plan.coverage_score)
+    assert reproduced.score.average_eta_seconds == pytest.approx(stored.plan.average_eta_seconds)
+
+
 def test_persisted_scores_match_scorer(repository, persisted_context):
     input_data = optimization_input(persisted_context)
     result = ResponseOptimizationAgent(repository).optimize_from_input(

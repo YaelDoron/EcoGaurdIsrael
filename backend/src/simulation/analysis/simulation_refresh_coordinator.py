@@ -1,4 +1,4 @@
-"""Coordinate simulation events through the production operational refresh orchestrator."""
+"""Coordinate simulation events through the production US4.4 -> US5.4 bridge."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -8,7 +8,9 @@ from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
 from src.repositories.fire_event_repository import FireEventRepository
 from src.services.fire_severity.fire_severity_input_config import SEVERITY_WEATHER_RADIUS_KM
-from src.services.operational_refresh.operational_refresh_orchestrator import OperationalRefreshOrchestrator
+from src.services.operational_planning_refresh.operational_planning_refresh_coordinator import (
+    OperationalPlanningRefreshCoordinator,
+)
 from src.services.operational_refresh.operational_refresh_result import (
     OperationalRefreshResult,
     OperationalRefreshStatus,
@@ -37,11 +39,11 @@ class SimulationRefreshCoordinator:
     def __init__(
         self,
         *,
-        operational_refresh_orchestrator: OperationalRefreshOrchestrator,
+        operational_planning_refresh: OperationalPlanningRefreshCoordinator,
         fire_event_repository: FireEventRepository,
         operational_coordinator: SimulationOperationalCoordinator | None = None,
     ) -> None:
-        self._operational_refresh_orchestrator = operational_refresh_orchestrator
+        self._operational_planning_refresh = operational_planning_refresh
         self._fire_event_repository = fire_event_repository
         self._operational_coordinator = operational_coordinator
         self._resource_ids_by_selection_key: dict[str, int | str] = {}
@@ -67,7 +69,7 @@ class SimulationRefreshCoordinator:
                 detection_result=detection_result,
             )
         if event.event_type is SimulationEventType.RESOURCE_STATUS:
-            return self._handle_resource_event(scenario, event, execution_result)
+            return self._handle_resource_event(scenario, event, execution_result, event_timestamp)
         return SimulationRefreshResult(triggered=False, reason=NON_REFRESH_EVENT_REASON)
 
     def refresh_fire_events(
@@ -77,25 +79,24 @@ class SimulationRefreshCoordinator:
         trigger_type: OperationalRefreshTriggerType,
         as_of: datetime,
     ) -> SimulationRefreshResult:
-        """Refresh each unique FireEvent once in deterministic id order."""
+        """Refresh each unique FireEvent once, in deterministic id order, then trigger planning refresh."""
         self._validate_timestamp(as_of)
         normalized_ids = self._normalize_fire_event_ids(fire_event_ids)
         if not normalized_ids:
             return SimulationRefreshResult(triggered=False, reason=NO_AFFECTED_FIRE_EVENTS_REASON)
 
-        results = []
+        operational_results = []
+        planning_results = []
         for fire_event_id in normalized_ids:
             try:
-                results.append(
-                    self._operational_refresh_orchestrator.refresh_fire_event(
-                        fire_event_id=fire_event_id,
-                        trigger_type=trigger_type,
-                        as_of=as_of,
-                    )
+                combined_result = self._operational_planning_refresh.refresh_fire_event(
+                    fire_event_id=fire_event_id,
+                    trigger_type=trigger_type,
+                    as_of=as_of,
                 )
             except Exception as exc:  # noqa: BLE001 - isolate one incident refresh failure.
                 logger.exception("Simulation operational refresh failed for FireEvent %s", fire_event_id)
-                results.append(
+                operational_results.append(
                     OperationalRefreshResult(
                         trigger_type=trigger_type,
                         status=OperationalRefreshStatus.FAILED,
@@ -105,9 +106,13 @@ class SimulationRefreshCoordinator:
                         error_message=str(exc) or "Operational refresh failed.",
                     )
                 )
+                continue
+            operational_results.append(combined_result.operational_result)
+            planning_results.extend(combined_result.planning_results)
         return SimulationRefreshResult(
             triggered=True,
-            refresh_results=tuple(results),
+            refresh_results=tuple(operational_results),
+            planning_results=tuple(planning_results),
             fire_event_ids=normalized_ids,
         )
 
@@ -116,13 +121,19 @@ class SimulationRefreshCoordinator:
         *,
         resource_id: int | str,
         event,
+        as_of: datetime,
     ) -> SimulationRefreshResult:
-        """Refresh one resource through the production operational orchestrator."""
-        result = self._operational_refresh_orchestrator.refresh_resource(
+        """Refresh one resource, then trigger planning refresh for every active FireEvent."""
+        combined_result = self._operational_planning_refresh.refresh_resource(
             resource_id=resource_id,
             new_status=event.resource_status_change.new_status,
+            as_of=as_of,
         )
-        return SimulationRefreshResult(triggered=True, refresh_results=(result,))
+        return SimulationRefreshResult(
+            triggered=True,
+            refresh_results=(combined_result.operational_result,),
+            planning_results=combined_result.planning_results,
+        )
 
     def _handle_weather_event(
         self,
@@ -179,13 +190,14 @@ class SimulationRefreshCoordinator:
         scenario: SimulationScenario,
         event: SimulationEvent,
         execution_result: SimulationEventExecutionResult,
+        event_timestamp: datetime,
     ) -> SimulationRefreshResult:
         if not execution_result.success:
             return SimulationRefreshResult(triggered=False, reason=SOURCE_EVENT_FAILED_REASON)
         resource_id = self._resolve_resource_id(scenario, event)
         if resource_id is None:
             return SimulationRefreshResult(triggered=False, reason=NO_AVAILABLE_RESOURCE_REASON)
-        return self.refresh_resource(resource_id=resource_id, event=event)
+        return self.refresh_resource(resource_id=resource_id, event=event, as_of=event_timestamp)
 
     def _resolve_resource_id(self, scenario: SimulationScenario, event: SimulationEvent) -> int | str | None:
         resource_change = event.resource_status_change

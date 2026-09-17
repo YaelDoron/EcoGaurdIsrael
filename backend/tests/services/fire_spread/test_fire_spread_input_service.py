@@ -48,13 +48,34 @@ class FakeFireEventRepository:
 
 
 class FakeFireSeverityAssessmentRepository:
-    def __init__(self, stored_assessment: StoredFireSeverityAssessment | None) -> None:
-        self.stored_assessment = stored_assessment
-        self.calls: list[int] = []
+    """Mirrors FireSeverityAssessmentRepository.get_latest_for_event_as_of's SQL
+    semantics: same fire_event_id, assessed_at <= as_of, newest assessed_at
+    first, ties broken by highest assessment_id.
 
-    def get_latest_for_event(self, fire_event_id: int):
-        self.calls.append(fire_event_id)
-        return self.stored_assessment
+    Accepts a single StoredFireSeverityAssessment (the common case), None, or
+    an iterable of several (for as_of/historical-selection tests).
+    """
+
+    def __init__(self, stored_assessment) -> None:
+        if stored_assessment is None:
+            self.stored_assessments: tuple[StoredFireSeverityAssessment, ...] = ()
+        elif isinstance(stored_assessment, StoredFireSeverityAssessment):
+            self.stored_assessments = (stored_assessment,)
+        else:
+            self.stored_assessments = tuple(stored_assessment)
+        self.calls: list[tuple[int, datetime]] = []
+
+    def get_latest_for_event_as_of(self, fire_event_id: int, as_of: datetime):
+        self.calls.append((fire_event_id, as_of))
+        eligible = [
+            stored
+            for stored in self.stored_assessments
+            if stored.assessment.fire_event_id == fire_event_id and stored.assessment.assessed_at <= as_of
+        ]
+        if not eligible:
+            return None
+        eligible.sort(key=lambda stored: (stored.assessment.assessed_at, stored.assessment_id), reverse=True)
+        return eligible[0]
 
 
 class FakeWeatherRepository:
@@ -407,6 +428,104 @@ def test_unknown_vegetation_label_is_insufficient():
     service, *_ = build_service(stored_assessment=make_assessment(dominant_land_cover="Some New Category"))
 
     assert service.prepare_input(10, AS_OF, horizon_minutes=30).status is FireSpreadInputStatus.INSUFFICIENT_DATA
+
+
+# ---------------------------------------------------------------------------
+# Historical as_of selection (FND-08 regression)
+# ---------------------------------------------------------------------------
+
+
+def test_historical_as_of_selects_older_valid_severity_not_global_latest():
+    """Regression for FND-08 (Test A): S0 at T0, S1 at T2, request at T1 with
+    T0 < T1 < T2. S0 must be selected and used for weather/fuel traceability;
+    the service must not reject the request merely because a newer
+    assessment (S1) exists after the requested as_of."""
+    t0 = AS_OF - timedelta(minutes=30)
+    t1 = AS_OF
+    t2 = AS_OF + timedelta(minutes=30)
+    s0 = make_assessment(
+        assessment_id=500, assessed_at=t0, weather_observation_ids=(101,), dominant_land_cover="Shrub cover"
+    )
+    s1 = make_assessment(
+        assessment_id=501, assessed_at=t2, weather_observation_ids=(102,), dominant_land_cover="Grass cover"
+    )
+    service, _, assessment_repo, _ = build_service(
+        stored_assessment=(s0, s1),
+        weather_records=[make_weather(observation_id=101, minutes_old=5)],
+    )
+
+    result = service.prepare_input(10, t1, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.READY
+    assert result.severity_assessment_id == 500
+    assert result.weather_observation_id == 101
+    assert result.input_data.fuel_class is FireSpreadFuelClass.SHRUBS
+    assert assessment_repo.calls == [(10, t1)]
+
+
+def test_severity_assessed_exactly_at_as_of_is_eligible():
+    """Regression for FND-08 (Test B): assessed_at <= as_of, not strict <."""
+    assessment = make_assessment(assessment_id=500, assessed_at=AS_OF, weather_observation_ids=(101,))
+    service, *_ = build_service(
+        stored_assessment=assessment,
+        weather_records=[make_weather(observation_id=101, minutes_old=5)],
+    )
+
+    result = service.prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.READY
+    assert result.severity_assessment_id == 500
+
+
+def test_only_future_severity_assessments_yields_insufficient_data():
+    """Regression for FND-08 (Test C): every assessment postdates as_of, so
+    none is eligible. The service must not fabricate an older severity."""
+    s1 = make_assessment(assessment_id=501, assessed_at=AS_OF + timedelta(minutes=10))
+    s2 = make_assessment(assessment_id=502, assessed_at=AS_OF + timedelta(minutes=40))
+    service, *_ = build_service(stored_assessment=(s1, s2))
+
+    result = service.prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.INSUFFICIENT_DATA
+    assert result.severity_assessment_id is None
+
+
+def test_latest_of_several_historical_assessments_before_as_of_is_selected():
+    """Regression for FND-08 (Test D): S0 at T0, S1 at T1, S2 at T2 (T2 is
+    after the request). Requesting between T1 and T2 must select S1, the
+    newest assessment that is still at or before as_of -- not S0 and not
+    the globally-latest S2."""
+    t0 = AS_OF - timedelta(minutes=60)
+    t1 = AS_OF - timedelta(minutes=30)
+    t2 = AS_OF + timedelta(minutes=30)
+    request_time = AS_OF - timedelta(minutes=10)  # strictly between t1 and t2
+    s0 = make_assessment(assessment_id=500, assessed_at=t0, weather_observation_ids=(101,))
+    s1 = make_assessment(assessment_id=501, assessed_at=t1, weather_observation_ids=(102,))
+    s2 = make_assessment(assessment_id=502, assessed_at=t2, weather_observation_ids=(103,))
+    service, *_ = build_service(
+        stored_assessment=(s0, s1, s2),
+        weather_records=[make_weather(observation_id=102, minutes_old=15)],
+    )
+
+    result = service.prepare_input(10, request_time, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.READY
+    assert result.severity_assessment_id == 501
+    assert result.weather_observation_id == 102
+
+
+def test_assessment_for_a_different_fire_event_is_never_selected():
+    """A severity assessment that qualifies on assessed_at <= as_of but
+    belongs to a different FireEvent must never be treated as eligible."""
+    other_event_assessment = make_assessment(
+        assessment_id=999, fire_event_id=99, assessed_at=AS_OF - timedelta(minutes=5)
+    )
+    service, *_ = build_service(stored_assessment=other_event_assessment)
+
+    result = service.prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.INSUFFICIENT_DATA
+    assert result.severity_assessment_id is None
 
 
 # ---------------------------------------------------------------------------

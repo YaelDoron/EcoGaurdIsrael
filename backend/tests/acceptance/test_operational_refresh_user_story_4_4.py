@@ -56,6 +56,9 @@ from src.repositories.response_target_repository import ResponseTargetRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_spread import FireSpreadInputService
+from src.services.operational_planning_refresh.operational_planning_refresh_coordinator import (
+    OperationalPlanningRefreshCoordinator,
+)
 from src.services.operational_refresh import (
     FireSpreadRefreshOrchestrator,
     FireSpreadRefreshHorizonStatus,
@@ -63,6 +66,7 @@ from src.services.operational_refresh import (
     OperationalRefreshStatus,
     ResourceStatusUpdateService,
 )
+from src.services.response_planning import PlanningRefreshResult, PlanningRefreshStatus
 from src.services.response_target import ResponseTargetInputService
 from src.simulation import (
     SimulationEvent,
@@ -78,6 +82,39 @@ CARMEL_LATITUDE = 32.731
 CARMEL_LONGITUDE = 35.046
 GOLAN_LATITUDE = 33.127
 GOLAN_LONGITUDE = 35.781
+
+
+class NoOpPlanningRefresh:
+    """Stands in for US 5.4 in these US 4.4-focused acceptance tests.
+
+    These tests assert only on operational-refresh (severity/spread/target)
+    behavior, not on planning outcomes, so this returns a minimal, always-
+    legal PlanningRefreshResult rather than requiring real routing/GA/
+    baseline wiring (station, resources, road network) that US 4.4 has no
+    reason to set up here.
+    """
+
+    def refresh(self, *, fire_event_id, as_of):
+        return PlanningRefreshResult(
+            status=PlanningRefreshStatus.INSUFFICIENT_DATA,
+            fire_event_id=fire_event_id,
+            route_planning_run_id=None,
+            response_plan_id=None,
+            comparison_id=None,
+        )
+
+
+def make_simulation_refresh_coordinator(stack: "AcceptanceStack") -> SimulationRefreshCoordinator:
+    """Build a SimulationRefreshCoordinator wired through the real US4.4 -> US5.4
+    bridge, with a no-op planning collaborator (see NoOpPlanningRefresh)."""
+    return SimulationRefreshCoordinator(
+        operational_planning_refresh=OperationalPlanningRefreshCoordinator(
+            operational_refresh_orchestrator=stack.orchestrator,
+            planning_refresh=NoOpPlanningRefresh(),
+            fire_event_repository=stack.fire_events,
+        ),
+        fire_event_repository=stack.fire_events,
+    )
 
 
 @dataclass
@@ -356,10 +393,7 @@ def test_at3_severity_update_uses_new_trace_and_score_only_no_op_still_refreshes
 
 def test_at4_at5_resource_status_simulation_removes_and_restores_same_truck(stack, sqlite_session_factory):
     insert_station_resources(sqlite_session_factory, status=ResourceStatus.AVAILABLE)
-    coordinator = SimulationRefreshCoordinator(
-        operational_refresh_orchestrator=stack.orchestrator,
-        fire_event_repository=stack.fire_events,
-    )
+    coordinator = make_simulation_refresh_coordinator(stack)
     assert available_resource_ids(stack) == ["TRUCK-A", "TRUCK-B"]
 
     unavailable = resource_event("TRUCK-A", ResourceStatus.UNAVAILABLE)
@@ -685,10 +719,7 @@ def test_ac6_multi_incident_dedupe_keeps_histories_independent(stack, sqlite_ses
     weather_golan = persist_weather(stack, station_offset=81, latitude=GOLAN_LATITUDE, longitude=GOLAN_LONGITUDE)
     stack.severity_agent.configure(carmel_id, weather_observation_id=weather_carmel, satellite_hotspot_id=satellite_carmel)
     stack.severity_agent.configure(golan_id, weather_observation_id=weather_golan, satellite_hotspot_id=satellite_golan)
-    coordinator = SimulationRefreshCoordinator(
-        operational_refresh_orchestrator=stack.orchestrator,
-        fire_event_repository=stack.fire_events,
-    )
+    coordinator = make_simulation_refresh_coordinator(stack)
 
     result = coordinator.refresh_fire_events(
         fire_event_ids=(golan_id, carmel_id, golan_id),

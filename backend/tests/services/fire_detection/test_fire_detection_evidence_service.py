@@ -9,6 +9,7 @@ import pytest
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
 from src.calculators.fire_detection.fire_detection_config import MAX_EVIDENCE_TIME_DIFFERENCE_MINUTES
 from src.models.fire_detection_candidate import FireDetectionCandidate
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
@@ -272,6 +273,77 @@ def test_transitive_connected_component_becomes_one_candidate():
             (FireEvidenceType.SATELLITE, 3),
         ]
     ]
+
+
+def test_transitive_candidate_from_service_is_accepted_by_calculator():
+    """Regression for FND-01 (Service -> Calculator contract mismatch).
+
+    FireDetectionEvidenceService groups evidence 1, 2, 3 into one connected
+    candidate: 1-2 and 2-3 correlate directly, but 1-3 does not. Feeding
+    that exact candidate into FireDetectionCalculator must not raise a
+    ValueError solely because 1 and 3 are not directly correlated - the two
+    layers must share one "valid candidate" definition.
+    """
+    service, _, _ = make_service(
+        satellite=[
+            make_hotspot(evidence_id=1, latitude=BASE_LATITUDE),
+            make_hotspot(evidence_id=2, latitude=BASE_LATITUDE + 0.035),
+            make_hotspot(evidence_id=3, latitude=BASE_LATITUDE + 0.070),
+        ],
+    )
+
+    candidates = service.build_candidates(AS_OF)
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert evidence_keys([candidate]) == [
+        [
+            (FireEvidenceType.SATELLITE, 1),
+            (FireEvidenceType.SATELLITE, 2),
+            (FireEvidenceType.SATELLITE, 3),
+        ]
+    ]
+
+    calculator = FireDetectionCalculator()
+    decision = calculator.evaluate(candidate.evidence)
+
+    assert decision.status is not FireDetectionStatus.NO_EVENT
+    assert decision == calculator.evaluate(candidate.evidence)
+    assert decision.supporting_evidence == (
+        FireEvidenceRef(FireEvidenceType.SATELLITE, 1),
+        FireEvidenceRef(FireEvidenceType.SATELLITE, 2),
+        FireEvidenceRef(FireEvidenceType.SATELLITE, 3),
+    )
+
+
+def test_disconnected_evidence_is_never_treated_as_one_candidate():
+    """Guards against over-relaxing the FND-01 fix into accepting anything.
+
+    Evidence 3 is not reachable through any correlation path from 1 or 2, so
+    the service must keep it as a separate candidate, and neither
+    FireDetectionCandidate nor FireDetectionCalculator may treat the union
+    as one valid candidate if it is ever assembled directly.
+    """
+    service, _, _ = make_service(
+        satellite=[
+            make_hotspot(evidence_id=1, latitude=BASE_LATITUDE),
+            make_hotspot(evidence_id=2, latitude=BASE_LATITUDE + 0.035),
+            make_hotspot(evidence_id=3, latitude=BASE_LATITUDE + 5.0),
+        ],
+    )
+
+    candidates = service.build_candidates(AS_OF)
+
+    assert len(candidates) == 2
+    assert evidence_keys(candidates) == [
+        [(FireEvidenceType.SATELLITE, 1), (FireEvidenceType.SATELLITE, 2)],
+        [(FireEvidenceType.SATELLITE, 3)],
+    ]
+
+    disconnected_evidence = candidates[0].evidence + candidates[1].evidence
+    with pytest.raises(ValueError):
+        FireDetectionCandidate(disconnected_evidence)
+    with pytest.raises(ValueError):
+        FireDetectionCalculator().evaluate(disconnected_evidence)
 
 
 def test_multiple_incidents_are_grouped_separately():

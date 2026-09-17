@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy import select
 
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.database.models.fire_event_db import FireEventDB
 from src.database.models.response_action_db import ResponseActionDB
 from src.database.models.response_plan_db import ResponsePlanDB
@@ -159,6 +160,93 @@ def test_scores_methodology_seed_and_uncovered_targets_round_trip(repository, pe
     assert found.plan.average_eta_seconds == pytest.approx(123.5)
     assert found.plan.uncovered_target_ids == (20, 30)
     assert found.plan.actions[0].resource_id == "7"
+
+
+# ---------------------------------------------------------------------------
+# FND-04: optimization_config persistence and legacy-row semantics
+# ---------------------------------------------------------------------------
+
+
+def test_full_optimization_config_round_trips_exactly(repository, persisted_context):
+    config = ResponseOptimizationConfig(
+        population_size=20,
+        generation_count=15,
+        mutation_rate=0.19,
+        crossover_rate=0.61,
+        random_seed=55,
+        eta_reference_seconds=444.0,
+        initial_assignment_probability=0.5,
+        tournament_size=3,
+        elitism_count=2,
+    )
+    plan = make_plan(persisted_context, random_seed=55, optimization_config=config)
+
+    found = repository.get_by_id(repository.save(plan).id)
+
+    assert found.plan.optimization_config == config
+
+
+def test_missing_optimization_config_round_trips_as_none(repository, persisted_context):
+    plan = make_plan(persisted_context, optimization_config=None)
+
+    found = repository.get_by_id(repository.save(plan).id)
+
+    assert found.plan.optimization_config is None
+
+
+def test_optimization_config_columns_persisted_all_or_none_at_the_db_row_level(
+    repository, persisted_context, sqlite_session_factory
+):
+    config = ResponseOptimizationConfig(population_size=12, generation_count=8, random_seed=9)
+    plan = make_plan(persisted_context, random_seed=9, optimization_config=config)
+    stored_id = repository.save(plan).id
+
+    session = sqlite_session_factory()
+    db_row = session.get(ResponsePlanDB, stored_id)
+    session.close()
+
+    assert db_row.population_size == 12
+    assert db_row.generation_count == 8
+    assert db_row.mutation_rate == pytest.approx(config.mutation_rate)
+    assert db_row.crossover_rate == pytest.approx(config.crossover_rate)
+    assert db_row.eta_reference_seconds == pytest.approx(config.eta_reference_seconds)
+    assert db_row.initial_assignment_probability == pytest.approx(config.initial_assignment_probability)
+    assert db_row.tournament_size == config.tournament_size
+    assert db_row.elitism_count == config.elitism_count
+
+
+def test_genuinely_legacy_db_row_with_all_null_config_columns_loads_successfully(
+    repository, persisted_context, sqlite_session_factory
+):
+    """Simulates a row persisted before FND-04 existed: inserted directly via
+    the ORM model with every optimization-config column left NULL, bypassing
+    ResponsePlanRepository.save/ResponsePlan entirely - exactly the shape a
+    genuinely historical Neon row has."""
+    session = sqlite_session_factory()
+    legacy_row = ResponsePlanDB(
+        fire_event_id=persisted_context["fire_event_id"],
+        response_target_set_id=persisted_context["response_target_set_id"],
+        route_planning_run_id=77,
+        generated_at=GENERATED_AT,
+        status="complete",
+        methodology="GENETIC_RESOURCE_ALLOCATION",
+        methodology_version="1.0",
+        random_seed=1,
+        plan_score=10.0,
+        coverage_score=100.0,
+        average_eta_seconds=120.0,
+        # population_size, generation_count, ... all omitted -> NULL.
+    )
+    session.add(legacy_row)
+    session.commit()
+    legacy_id = legacy_row.id
+    session.close()
+
+    found = repository.get_by_id(legacy_id)
+
+    assert found is not None
+    assert found.plan.optimization_config is None
+    assert found.plan.random_seed == 1  # random_seed itself predates this feature and is untouched
 
 
 def test_history_excludes_other_fire_events_and_is_append_only(repository, persisted_context, sqlite_session_factory):

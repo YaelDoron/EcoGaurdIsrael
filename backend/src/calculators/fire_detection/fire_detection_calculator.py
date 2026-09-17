@@ -6,19 +6,18 @@ and news are direct evidence sources. Fire danger/FFWI is intentionally not an
 input: high fire danger alone must not create an active wildfire detection.
 
 This first version does not cluster a broad evidence stream into multiple
-incidents. If supplied evidence is not mutually compatible by location and
-time, evaluation fails clearly instead of fusing unrelated signals.
+incidents. If supplied evidence does not form one connected component by
+location and time (the same definition FireDetectionCandidate enforces),
+evaluation fails clearly instead of fusing unrelated signals. Evaluate() may
+be called with a raw evidence tuple rather than a constructed
+FireDetectionCandidate, so it independently validates connectivity using
+FireDetectionCandidate.is_connected rather than duplicating the definition.
 """
 from __future__ import annotations
-
-from datetime import timedelta
-import math
 
 from src.calculators.fire_detection.fire_detection_config import (
     CONFIRMED_THRESHOLD,
     MAX_CONFIDENCE,
-    MAX_EVIDENCE_DISTANCE_KM,
-    MAX_EVIDENCE_TIME_DIFFERENCE_MINUTES,
     MIN_CONFIDENCE,
     NEWS_CONFIDENCE,
     SATELLITE_HIGH_CONFIDENCE,
@@ -26,14 +25,12 @@ from src.calculators.fire_detection.fire_detection_config import (
     SATELLITE_NOMINAL_CONFIDENCE,
     SUSPECTED_THRESHOLD,
 )
+from src.models.fire_detection_candidate import FireDetectionCandidate
 from src.models.fire_detection_decision import FireDetectionDecision
 from src.models.fire_detection_evidence import FireDetectionEvidence
 from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
-
-_EARTH_RADIUS_KM = 6371.0088
-_DISTANCE_COMPARISON_TOLERANCE_KM = 1e-9
 
 _SATELLITE_CONFIDENCE_WEIGHTS = {
     "low": SATELLITE_LOW_CONFIDENCE,
@@ -64,7 +61,7 @@ class FireDetectionCalculator:
                 supporting_evidence=(),
             )
 
-        self._validate_mutually_correlated(evidence_items)
+        self._validate_connected_candidate(evidence_items)
         confidence = _combine_source_family_confidence(evidence_items)
         status = _classify_confidence(confidence)
         latitude, longitude = _estimate_location(evidence_items, status)
@@ -88,23 +85,12 @@ class FireDetectionCalculator:
             evidence_refs.add(evidence_ref)
 
     @staticmethod
-    def _validate_mutually_correlated(evidence_items: tuple[FireDetectionEvidence, ...]) -> None:
-        for index, first in enumerate(evidence_items):
-            for second in evidence_items[index + 1 :]:
-                if not _evidence_correlates(first, second):
-                    raise ValueError(
-                        "Evidence does not form one correlated candidate by location and time: "
-                        f"{first.evidence_id!r}, {second.evidence_id!r}."
-                    )
-
-
-def _evidence_correlates(first: FireDetectionEvidence, second: FireDetectionEvidence) -> bool:
-    return (
-        _haversine_distance_km(first.latitude, first.longitude, second.latitude, second.longitude)
-        <= MAX_EVIDENCE_DISTANCE_KM + _DISTANCE_COMPARISON_TOLERANCE_KM
-        and abs(first.observed_at - second.observed_at)
-        <= timedelta(minutes=MAX_EVIDENCE_TIME_DIFFERENCE_MINUTES)
-    )
+    def _validate_connected_candidate(evidence_items: tuple[FireDetectionEvidence, ...]) -> None:
+        if not FireDetectionCandidate.is_connected(evidence_items):
+            raise ValueError(
+                "Evidence does not form one connected fire-detection candidate by location and time: "
+                f"{_supporting_evidence_refs(evidence_items)!r}."
+            )
 
 
 def _combine_source_family_confidence(evidence_items: tuple[FireDetectionEvidence, ...]) -> float:
@@ -165,23 +151,3 @@ def _centroid(evidence_items: tuple[FireDetectionEvidence, ...]) -> tuple[float,
         sum(item.latitude for item in evidence_items) / len(evidence_items),
         sum(item.longitude for item in evidence_items) / len(evidence_items),
     )
-
-
-def _haversine_distance_km(
-    first_latitude: float,
-    first_longitude: float,
-    second_latitude: float,
-    second_longitude: float,
-) -> float:
-    first_latitude_rad = math.radians(first_latitude)
-    second_latitude_rad = math.radians(second_latitude)
-    latitude_delta = math.radians(second_latitude - first_latitude)
-    longitude_delta = math.radians(second_longitude - first_longitude)
-    a = (
-        math.sin(latitude_delta / 2) ** 2
-        + math.cos(first_latitude_rad)
-        * math.cos(second_latitude_rad)
-        * math.sin(longitude_delta / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return _EARTH_RADIUS_KM * c

@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.database.connection import get_session_factory
 from src.database.models.response_action_db import ResponseActionDB
 from src.database.models.response_plan_db import ResponsePlanDB
@@ -118,8 +119,9 @@ class ResponsePlanRepository:
             )
             return self._to_stored_plan(db_plan) if db_plan is not None else None
 
-    @staticmethod
-    def _to_db_plan(plan: ResponsePlan) -> ResponsePlanDB:
+    @classmethod
+    def _to_db_plan(cls, plan: ResponsePlan) -> ResponsePlanDB:
+        config = plan.optimization_config
         return ResponsePlanDB(
             fire_event_id=plan.fire_event_id,
             response_target_set_id=plan.response_target_set_id,
@@ -132,6 +134,14 @@ class ResponsePlanRepository:
             plan_score=plan.plan_score,
             coverage_score=plan.coverage_score,
             average_eta_seconds=plan.average_eta_seconds,
+            population_size=config.population_size if config is not None else None,
+            generation_count=config.generation_count if config is not None else None,
+            mutation_rate=config.mutation_rate if config is not None else None,
+            crossover_rate=config.crossover_rate if config is not None else None,
+            eta_reference_seconds=config.eta_reference_seconds if config is not None else None,
+            initial_assignment_probability=config.initial_assignment_probability if config is not None else None,
+            tournament_size=config.tournament_size if config is not None else None,
+            elitism_count=config.elitism_count if config is not None else None,
         )
 
     @staticmethod
@@ -201,7 +211,31 @@ class ResponsePlanRepository:
                 plan_score=db_plan.plan_score,
                 coverage_score=db_plan.coverage_score,
                 average_eta_seconds=db_plan.average_eta_seconds,
+                optimization_config=cls._to_optimization_config(db_plan),
             ),
+        )
+
+    @staticmethod
+    def _to_optimization_config(db_plan: ResponsePlanDB) -> ResponseOptimizationConfig | None:
+        """Reconstruct the exact persisted GA config, or None for a legacy plan.
+
+        All 8 columns are NULL together or present together (enforced by
+        ck_response_plans_optimization_config_all_or_none), so checking one
+        is sufficient. Never fabricates values from current source-code
+        defaults for a legacy (all-NULL) row.
+        """
+        if db_plan.population_size is None:
+            return None
+        return ResponseOptimizationConfig(
+            population_size=db_plan.population_size,
+            generation_count=db_plan.generation_count,
+            mutation_rate=db_plan.mutation_rate,
+            crossover_rate=db_plan.crossover_rate,
+            random_seed=db_plan.random_seed,
+            eta_reference_seconds=db_plan.eta_reference_seconds,
+            initial_assignment_probability=db_plan.initial_assignment_probability,
+            tournament_size=db_plan.tournament_size,
+            elitism_count=db_plan.elitism_count,
         )
 
     @staticmethod

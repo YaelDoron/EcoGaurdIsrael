@@ -51,7 +51,9 @@ from src.services.operational_refresh import (
     ResourceStatusUpdateResult,
     ResourceStatusUpdateStatus,
 )
+from src.models.response_plan_details import ResponsePlanDetails
 from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
+from src.services.response_planning.planning_refresh_result import PlanningRefreshResult, PlanningRefreshStatus
 from src.simulation.analysis.simulation_refresh_result import SimulationRefreshResult
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
@@ -103,6 +105,22 @@ def _stub_response_target_coordinator(monkeypatch):
     monkeypatch.setattr(
         "scripts.run_demo_simulation.get_response_target_coordinator",
         lambda: _NoOpResponseTargetCoordinator(),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_response_plan_details_service(monkeypatch):
+    """Prevent the real (Neon-backed) US 5.5 read service from running during
+    these fake-based unit tests; test_print_planning_refresh_result_*
+    override this with a specific fake to test the enrichment output."""
+
+    class _NoOpResponsePlanDetailsService:
+        def get_plan_details_by_id(self, plan_id):
+            return None
+
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_response_plan_details_service",
+        lambda: _NoOpResponsePlanDetailsService(),
     )
 
 
@@ -308,6 +326,19 @@ class FakeSimulationRefreshCoordinator:
                     ),
                     response_target_result=make_response_target_generation(77),
                 ),
+            ),
+            planning_results=(
+                (
+                    PlanningRefreshResult(
+                        status=PlanningRefreshStatus.REFRESHED,
+                        fire_event_id=77,
+                        route_planning_run_id=501,
+                        response_plan_id=601,
+                        comparison_id=701,
+                    ),
+                )
+                if self.mode == "planning"
+                else ()
             ),
             fire_event_ids=(77,),
         )
@@ -1232,3 +1263,106 @@ def test_multi_incident_output_associates_assessments_with_correct_event_areas()
     assert "incident-carmel-01 | Carmel Demo Area" in text
     assert "incident-golan-01 | Golan Heights Demo Area" in text
     assert [call[1] for call in coordinator.calls] == list(scenario.events)
+
+
+# ---------------------------------------------------------------------------
+# Task 8: planning-refresh output (US 5.4 reaching the demo console)
+# ---------------------------------------------------------------------------
+
+
+def test_planning_refresh_result_is_printed_with_core_fields():
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator(mode="planning")
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        simulation_refresh_coordinator=refresh,
+    )
+
+    text = output.getvalue()
+    assert "RESPONSE PLANNING REFRESH" in text
+    assert "fire_event_id=77" in text
+    assert "status=REFRESHED" in text
+    assert "route_planning_run_id=501" in text
+    assert "response_plan_id=601" in text
+    assert "comparison_id=701" in text
+
+
+def test_planning_refresh_result_is_not_printed_when_no_planning_occurred():
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator(mode="environmental")
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        simulation_refresh_coordinator=refresh,
+    )
+
+    assert "RESPONSE PLANNING REFRESH" not in output.getvalue()
+
+
+def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_without_recomputation(monkeypatch):
+    scenario = build_active_fire_scenario(seed=42)
+    event = scenario.events[0]
+    output = StringIO()
+    refresh = FakeSimulationRefreshCoordinator(mode="planning")
+
+    class _FakePlanDetailsService:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_plan_details_by_id(self, plan_id):
+            self.calls.append(plan_id)
+            return ResponsePlanDetails(
+                plan_id=plan_id,
+                fire_event_id=77,
+                response_target_set_id=901,
+                route_planning_run_id=501,
+                generated_at=STARTED_AT,
+                methodology="GENETIC_RESOURCE_ALLOCATION",
+                methodology_version="1.0",
+                is_current=True,
+                plan_score=87.5,
+                coverage_score=0.75,
+                average_eta_seconds=642.0,
+                actions=(),
+                uncovered_target_ids=(11, 12),
+                baseline_comparison=None,
+            )
+
+    fake_service = _FakePlanDetailsService()
+    monkeypatch.setattr(
+        "scripts.run_demo_simulation.get_response_plan_details_service",
+        lambda: fake_service,
+    )
+
+    execute_and_report_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=STARTED_AT,
+        executor=FakeExecutor(),
+        output=output,
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        simulation_refresh_coordinator=refresh,
+    )
+
+    assert fake_service.calls == [601]
+    text = output.getvalue()
+    assert "plan_score=87.50" in text
+    assert "coverage_score=0.75" in text
+    assert "average_eta_seconds=642.0" in text
+    assert "response_actions=0" in text
+    assert "uncovered_targets=2" in text

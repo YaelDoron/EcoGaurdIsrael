@@ -62,9 +62,10 @@ class FireSpreadInputService:
     """Gather mandatory inputs for FireSpreadCalculator from already-persisted data.
 
     Reuses, rather than recalculates: the active FireEvent, the latest VALID
-    FireSeverityAssessment, the exact weather observations that assessment
-    already traced, and its persisted vegetation snapshot. See
-    backend/docs/fire_spread_prediction.md for the full sourcing.
+    FireSeverityAssessment available at or before the requested `as_of`, the
+    exact weather observations that assessment already traced, and its
+    persisted vegetation snapshot. See backend/docs/fire_spread_prediction.md
+    for the full sourcing.
     """
 
     def __init__(
@@ -102,14 +103,15 @@ class FireSpreadInputService:
         if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
             return _insufficient_result(fire_event_id)
 
-        latest_assessment = self._fire_severity_assessment_repository.get_latest_for_event(fire_event_id)
+        latest_assessment = self._fire_severity_assessment_repository.get_latest_for_event_as_of(
+            fire_event_id,
+            as_of,
+        )
         if latest_assessment is None:
             return _insufficient_result(fire_event_id)
         if latest_assessment.assessment.fire_event_id != fire_event_id:
             return _insufficient_result(fire_event_id)
         if latest_assessment.assessment.status is not FireSeverityAssessmentStatus.VALID:
-            return _insufficient_result(fire_event_id, severity_assessment_id=latest_assessment.assessment_id)
-        if _ensure_aware(latest_assessment.assessment.assessed_at) > as_of:
             return _insufficient_result(fire_event_id, severity_assessment_id=latest_assessment.assessment_id)
 
         selected_weather = self._select_weather(stored_event, latest_assessment, as_of)

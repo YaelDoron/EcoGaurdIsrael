@@ -442,6 +442,41 @@ def test_get_active_events_near_rejects_invalid_radius(repository, invalid_radiu
         )
 
 
+def test_get_active_fire_event_ids_returns_active_events_regardless_of_location(repository, satellite_repository):
+    nearby = create_event_with_satellite(repository, satellite_repository, latitude=32.732)
+    distant = create_event_with_satellite(repository, satellite_repository, latitude=33.5, longitude=35.5)
+
+    found = repository.get_active_fire_event_ids()
+
+    assert set(found) == {nearby.id, distant.id}
+
+
+@pytest.mark.parametrize("inactive_status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_get_active_fire_event_ids_excludes_inactive_events(repository, satellite_repository, inactive_status):
+    active = create_event_with_satellite(repository, satellite_repository)
+    inactive = create_event_with_satellite(repository, satellite_repository, latitude=33.5, longitude=35.5)
+    repository.update_event(
+        inactive.id, make_event(status=inactive_status, latitude=33.5, longitude=35.5, updated_at=UPDATED_AT)
+    )
+
+    found = repository.get_active_fire_event_ids()
+
+    assert found == (active.id,)
+
+
+def test_get_active_fire_event_ids_returns_empty_tuple_when_none_active(repository):
+    assert repository.get_active_fire_event_ids() == ()
+
+
+def test_get_active_fire_event_ids_is_ordered_by_id(repository, satellite_repository):
+    first = create_event_with_satellite(repository, satellite_repository, latitude=32.732)
+    second = create_event_with_satellite(repository, satellite_repository, latitude=33.5, longitude=35.5)
+
+    found = repository.get_active_fire_event_ids()
+
+    assert found == tuple(sorted((first.id, second.id)))
+
+
 def test_multiple_matching_events_choose_closest(repository, satellite_repository):
     farther = create_event_with_satellite(repository, satellite_repository, latitude=32.740, detected_at=DETECTED_AT)
     closer = create_event_with_satellite(
