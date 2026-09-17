@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import type { LatLngPoint } from "../components/map/mapTypes";
+import { MapView } from "../components/map/MapView";
 import { BaselineComparisonSection } from "../components/response-plan/BaselineComparison";
 import { OptimizationDetails } from "../components/response-plan/OptimizationDetails";
 import { PlanMetrics } from "../components/response-plan/PlanMetrics";
 import { PlanStateNotices } from "../components/response-plan/PlanStateNotices";
 import { ResponseActions } from "../components/response-plan/ResponseActions";
+import { ResponsePlanMapLayer } from "../components/response-plan/ResponsePlanMapLayer";
+import { ResponseRouteLayer } from "../components/response-plan/ResponseRouteLayer";
 import { UncoveredTargets } from "../components/response-plan/UncoveredTargets";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ErrorState } from "../components/feedback/ErrorState";
@@ -12,9 +16,10 @@ import { LoadingState } from "../components/feedback/LoadingState";
 import { PageHeader } from "../components/layout/PageHeader";
 import { TimestampDisplay } from "../components/data/TimestampDisplay";
 import "../components/status/badges.css";
+import "../components/response-plan/ResponsePlanSummary.css";
 import { useResponsePlan } from "../hooks/useResponsePlan";
 import type { ResponsePlanSource } from "../hooks/useResponsePlan";
-import type { ResponsePlanStatus } from "../types/responsePlan";
+import type { ResponsePlan, ResponsePlanStatus } from "../types/responsePlan";
 import "./ResponsePlanPage.css";
 
 const PAGE_TITLE = "Response Plan";
@@ -84,6 +89,25 @@ function parsePositiveIntParam(value: string): number | null {
   return parsed > 0 ? parsed : null;
 }
 
+/**
+ * Every persisted origin/target coordinate across this plan's actions - the
+ * only input to the shared map's auto-fit viewport (see
+ * `FitBoundsToPoints`), so the map always frames this plan's real data and
+ * never a hardcoded region.
+ */
+function buildBoundsPoints(plan: ResponsePlan): LatLngPoint[] {
+  const points: LatLngPoint[] = [];
+  for (const action of plan.actions) {
+    if (action.resource.origin !== null) {
+      points.push({ lat: action.resource.origin.latitude, lng: action.resource.origin.longitude });
+    }
+    if (action.target.latitude !== null && action.target.longitude !== null) {
+      points.push({ lat: action.target.latitude, lng: action.target.longitude });
+    }
+  }
+  return points;
+}
+
 function ResponsePlanContent({ source }: { source: ResponsePlanSource }) {
   const { plan, isLoading, error, retry } = useResponsePlan(source);
   // UI-only highlight state (Task 11): selecting an action never reorders
@@ -94,6 +118,7 @@ function ResponsePlanContent({ source }: { source: ResponsePlanSource }) {
   const handleSelectAction = (actionKey: string) => {
     setSelectedActionKey((current) => (current === actionKey ? null : actionKey));
   };
+  const boundsPoints = useMemo(() => (plan ? buildBoundsPoints(plan) : []), [plan]);
 
   if (isLoading) {
     return (
@@ -184,16 +209,16 @@ function ResponsePlanContent({ source }: { source: ResponsePlanSource }) {
         onSelectAction={handleSelectAction}
       />
 
-      {/*
-        US 6.2 map integration point: once the shared map surface (e.g. a
-        `MapView`) exists, mount it here and feed it
-        `buildResponseRouteLayer(plan.actions, selectedActionKey)` (or wrap
-        it in `<ResponseRouteLayer actions={plan.actions}
-        selectedActionKey={selectedActionKey}>{(layer) => ...}</ResponseRouteLayer>`)
-        to draw persisted routes/origin/target markers, with the selected
-        action's route/markers visually emphasized via each feature's
-        `isSelected` flag. See src/components/response-plan/responseRouteLayer.ts.
-      */}
+      <section aria-labelledby="response-plan-map-heading" className="response-plan-summary__section">
+        <h2 id="response-plan-map-heading" className="response-plan-summary__section-title">
+          Map
+        </h2>
+        <MapView boundsPoints={boundsPoints} ariaLabel={`Map of Response Plan #${plan.plan_id}`}>
+          <ResponseRouteLayer actions={plan.actions} selectedActionKey={selectedActionKey}>
+            {(layer) => <ResponsePlanMapLayer layer={layer} />}
+          </ResponseRouteLayer>
+        </MapView>
+      </section>
 
       <UncoveredTargets targets={plan.uncovered_targets} />
 

@@ -94,3 +94,21 @@ export function CircleMarker({ center, pathOptions, children }: CircleMarkerProp
 export function Popup({ children }: ChildrenProps) {
   return <div data-testid="popup">{children}</div>;
 }
+
+export interface PolylineProps extends ChildrenProps {
+  positions: [number, number][];
+  pathOptions?: { color?: string; weight?: number };
+}
+
+export function Polyline({ positions, pathOptions, children }: PolylineProps) {
+  return (
+    <div
+      data-testid="polyline"
+      data-positions={JSON.stringify(positions)}
+      data-color={pathOptions?.color}
+      data-weight={pathOptions?.weight}
+    >
+      {children}
+    </div>
+  );
+}

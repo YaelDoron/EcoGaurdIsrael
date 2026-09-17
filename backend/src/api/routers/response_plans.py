@@ -15,15 +15,15 @@ returns a generic 500 without leaking internals (no stack trace, no SQL, no
 DATABASE_URL) as long as the app is not run in debug mode - see
 src.api.app, which never sets debug=True.
 
-This router is deliberately not wired into `src.api.routers.v1_router` yet
-(see that module's docstring/`__init__.py`) - registering it there is a
-one-line follow-up left for whoever owns that shared file, so tests below
-mount it onto a throwaway FastAPI app instead. `response_plans_router`
-carries no router-level prefix (each route below spells out its own full
-path) so that a single `v1_router.include_router(response_plans_router)`
-produces both `/api/v1/fire-events/{fire_event_id}/response-plan` (Task 2)
-and `/api/v1/response-plans/{plan_id}` (Task 3) without a nested prefix
-mismatch.
+This router is registered onto `src.api.routers.v1_router` in that
+package's `__init__.py`. `response_plans_router` carries no router-level
+prefix (each route below spells out its own full path) so that
+`v1_router.include_router(response_plans_router)` produces both
+`/api/v1/fire-events/{fire_event_id}/response-plan` (Task 2) and
+`/api/v1/response-plans/{plan_id}` (Task 3) without a nested prefix
+mismatch. The tests below still mount `response_plans_router` onto their
+own throwaway FastAPI app rather than importing the full `v1_router`, to
+keep this module's tests independent of `fire_events_router`.
 
 `get_response_plan_details_service` and `get_response_plan_presenter` are
 this module's own small dependency factories - mirroring

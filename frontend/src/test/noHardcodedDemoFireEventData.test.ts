@@ -22,6 +22,8 @@ const PRODUCTION_FILES = [
   "src/components/map/ResponseTargetLayer.tsx",
   "src/components/map/StationLayer.tsx",
   "src/components/map/OperationalLayer.tsx",
+  "src/pages/ResponsePlanPage.tsx",
+  "src/components/response-plan/ResponsePlanMapLayer.tsx",
 ];
 
 const FORBIDDEN_LITERALS = ["Carmel", "Golan", "Jerusalem Forest", "Event #12", "32.731", "35.046"];
