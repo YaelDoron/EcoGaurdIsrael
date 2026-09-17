@@ -1,0 +1,111 @@
+.response-action-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.response-action-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.response-action-card--selected {
+  border-color: var(--color-text);
+  box-shadow: 0 0 0 1px var(--color-text);
+}
+
+.response-action-card__select {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.response-action-card__select[aria-pressed="true"] {
+  background: var(--color-text);
+  color: var(--color-surface);
+  border-color: var(--color-text);
+}
+
+.response-action-card__flow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.response-action-card__party {
+  flex: 1;
+  min-width: 0;
+}
+
+.response-action-card__party-title {
+  margin: 0 0 var(--space-2);
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.response-action-card__arrow {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+  font-size: 1.25rem;
+}
+
+.response-action-card__details,
+.response-action-card__route {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.response-action-card__route {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-3);
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.response-action-card__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.response-action-card__row dt {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.response-action-card__row dd {
+  margin: 0;
+}
+
+.response-action-card__muted {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+@media (max-width: 640px) {
+  .response-action-card__flow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .response-action-card__arrow {
+    align-self: center;
+    transform: rotate(90deg);
+  }
+}
