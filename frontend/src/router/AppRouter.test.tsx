@@ -24,12 +24,11 @@ describe("AppRouter", () => {
     expect(screen.getByRole("heading", { name: "Active Wildfires" })).toBeInTheDocument();
   });
 
-  it("renders the Event Details placeholder at /events/:fireEventId", () => {
+  it("renders the Event Details page at /events/:fireEventId", () => {
     renderAt("/events/123");
 
-    expect(screen.getByRole("heading", { name: "Event Details" })).toBeInTheDocument();
-    expect(screen.getByText(/not implemented yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/123/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Event #123" })).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/loading/i);
   });
 
   it("renders the Response Plan placeholder at /events/:fireEventId/plan", () => {

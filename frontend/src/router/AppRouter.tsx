@@ -1,7 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "../components/layout/AppShell";
 import { ActiveWildfiresPage } from "../pages/ActiveWildfiresPage";
-import { EventDetailsPlaceholderPage } from "../pages/EventDetailsPlaceholderPage";
+import { EventDetailsPage } from "../pages/EventDetailsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ResponsePlanPlaceholderPage } from "../pages/ResponsePlanPlaceholderPage";
 
@@ -20,7 +20,7 @@ export function AppRouter() {
       <Route element={<AppShell />}>
         <Route path="/" element={<Navigate to="/events" replace />} />
         <Route path="/events" element={<ActiveWildfiresPage />} />
-        <Route path="/events/:fireEventId" element={<EventDetailsPlaceholderPage />} />
+        <Route path="/events/:fireEventId" element={<EventDetailsPage />} />
         <Route path="/events/:fireEventId/plan" element={<ResponsePlanPlaceholderPage />} />
         <Route path="/plans/:planId" element={<ResponsePlanPlaceholderPage />} />
         <Route path="*" element={<NotFoundPage />} />

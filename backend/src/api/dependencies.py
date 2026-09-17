@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from src.database.connection import get_session_factory
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
+from src.services.fire_event_read.event_details_service import EventDetailsService
 
 
 def get_db_session() -> Iterator[Session]:
@@ -49,3 +50,16 @@ def get_active_fire_events_service() -> ActiveFireEventsService:
     call sites (e.g. build_response_planning_refresh_orchestrator).
     """
     return ActiveFireEventsService()
+
+
+def get_event_details_service() -> EventDetailsService:
+    """FastAPI dependency providing a fully-wired EventDetailsService.
+
+    Same sessionmaker-per-call rationale as get_active_fire_events_service
+    above: every repository EventDetailsService uses (directly, or via the
+    composed ResponsePlanDetailsService) defaults to the process-wide
+    session factory when constructed with no arguments, so this dependency
+    does not need - and does not compose with - get_db_session's single
+    request-scoped Session.
+    """
+    return EventDetailsService()
