@@ -15,8 +15,12 @@ from src.calculators.response_optimization import (
 from src.database.models.fire_event_db import FireEventDB
 from src.database.models.fire_station_db import FireStationDB
 from src.database.models.firefighting_resource_db import FirefightingResourceDB
+from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
+from src.database.models.route_result_db import RouteResultDB
 from src.models import (
+    GraphNode,
     OptimizationResource,
     OptimizationRouteOption,
     OptimizationTarget,
@@ -26,8 +30,17 @@ from src.models import (
 )
 from src.models.resource_status import ResourceStatus
 from src.repositories.response_plan_repository import ResponsePlanRepository
+from src.repositories.road_network_repository import RoadNetworkRepository
 
 AS_OF = datetime(2026, 9, 16, 13, 0, tzinfo=timezone.utc)
+
+# FND-05: response_plans.route_planning_run_id and response_actions.resource_id/
+# response_target_id/route_result_id are now real FKs. optimization_input()
+# persists a minimal real row for every id it references (idempotently).
+ROUTE_PLANNING_RUN_ID = 77
+FIXTURE_STATION_ID = "FIXTURE-STATION"
+FIXTURE_SOURCE_NODE_ID = 9001
+FIXTURE_TARGET_NODE_ID = 9002
 
 
 @pytest.fixture
@@ -57,8 +70,34 @@ def persisted_context(sqlite_session_factory):
         methodology_version="1.0",
     )
     session.add(target_set)
+    session.flush()
+    RoadNetworkRepository().save_network(
+        session,
+        nodes=[
+            GraphNode(id=FIXTURE_SOURCE_NODE_ID, latitude=32.700, longitude=35.000),
+            GraphNode(id=FIXTURE_TARGET_NODE_ID, latitude=32.700, longitude=35.010),
+        ],
+        edges=[],
+    )
+    session.add(
+        RoutePlanningRunDB(
+            id=ROUTE_PLANNING_RUN_ID,
+            fire_event_id=event.id,
+            response_target_set_id=target_set.id,
+            planned_at=AS_OF - timedelta(minutes=1),
+            methodology="TEST_ROUTING",
+            methodology_version="1.0",
+            resource_ids=[],
+        )
+    )
+    session.add(FireStationDB(id=FIXTURE_STATION_ID, name="Fixture Station", latitude=32.7, longitude=35.0))
     session.commit()
-    context = {"fire_event_id": event.id, "response_target_set_id": target_set.id}
+    context = {
+        "fire_event_id": event.id,
+        "response_target_set_id": target_set.id,
+        "route_planning_run_id": ROUTE_PLANNING_RUN_ID,
+        "session_factory": sqlite_session_factory,
+    }
     session.close()
     return context
 
@@ -82,17 +121,72 @@ def route(route_id: int, resource_id: str, target_id: int, eta: float | None, re
     )
 
 
+def _persist_fk_prerequisites(context, targets, resources, routes) -> None:
+    """Persist a real row for every target/resource/route-result id these
+    inputs reference (FND-05 FK prerequisites). Idempotent."""
+    session = context["session_factory"]()
+    try:
+        for target_input in targets:
+            if session.get(ResponseTargetDB, target_input.response_target_id) is None:
+                session.add(
+                    ResponseTargetDB(
+                        id=target_input.response_target_id,
+                        response_target_set_id=context["response_target_set_id"],
+                        fire_event_id=context["fire_event_id"],
+                        target_order=target_input.target_order,
+                        target_type=target_input.target_type.value,
+                        latitude=32.731,
+                        longitude=35.046,
+                        priority_score=target_input.priority_score,
+                    )
+                )
+        for resource_input in resources:
+            if session.get(FirefightingResourceDB, resource_input.resource_id) is None:
+                session.add(
+                    FirefightingResourceDB(
+                        id=resource_input.resource_id,
+                        station_id=FIXTURE_STATION_ID,
+                        status=ResourceStatus.AVAILABLE,
+                    )
+                )
+        session.flush()
+        for route_input in routes:
+            if session.get(RouteResultDB, route_input.route_result_id) is None:
+                session.add(
+                    RouteResultDB(
+                        id=route_input.route_result_id,
+                        route_planning_run_id=context["route_planning_run_id"],
+                        resource_id=route_input.resource_id,
+                        response_target_id=route_input.response_target_id,
+                        status="reachable" if route_input.is_reachable else "unreachable",
+                        source_node_id=FIXTURE_SOURCE_NODE_ID,
+                        target_node_id=FIXTURE_TARGET_NODE_ID,
+                        node_path=[FIXTURE_SOURCE_NODE_ID, FIXTURE_TARGET_NODE_ID]
+                        if route_input.is_reachable
+                        else [],
+                        distance_meters=route_input.distance_meters if route_input.is_reachable else None,
+                        travel_time_seconds=route_input.travel_time_seconds if route_input.is_reachable else None,
+                    )
+                )
+        session.commit()
+    finally:
+        session.close()
+
+
 def optimization_input(context, *, partial: bool = False, unreachable: bool = False) -> ResponseOptimizationInput:
+    targets = (target(10, 0, 100.0), target(20, 1, 50.0))
+    resources = (resource("TRUCK-A"), resource("TRUCK-B"))
     routes = (
         route(100, "TRUCK-A", 10, 100.0, reachable=not unreachable),
         route(200, "TRUCK-B", 20, 200.0, reachable=not unreachable and not partial),
     )
+    _persist_fk_prerequisites(context, targets, resources, routes)
     return ResponseOptimizationInput(
         fire_event_id=context["fire_event_id"],
         response_target_set_id=context["response_target_set_id"],
-        route_planning_run_id=77,
-        targets=(target(10, 0, 100.0), target(20, 1, 50.0)),
-        resources=(resource("TRUCK-A"), resource("TRUCK-B")),
+        route_planning_run_id=context["route_planning_run_id"],
+        targets=targets,
+        resources=resources,
         route_options=routes,
     )
 

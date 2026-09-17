@@ -8,15 +8,30 @@ from sqlalchemy import select
 
 from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_station_db import FireStationDB
+from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.response_action_db import ResponseActionDB
 from src.database.models.response_plan_db import ResponsePlanDB
 from src.database.models.response_plan_uncovered_target_db import ResponsePlanUncoveredTargetDB
+from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
-from src.models import ResponseAction, ResponsePlan, ResponsePlanStatus
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
+from src.database.models.route_result_db import RouteResultDB
+from src.models import GraphNode, ResponseAction, ResponsePlan, ResponsePlanStatus
+from src.models.resource_status import ResourceStatus
 from src.repositories.exceptions import ResponsePlanRepositoryError
 from src.repositories.response_plan_repository import ResponsePlanRepository, StoredResponsePlan
+from src.repositories.road_network_repository import RoadNetworkRepository
 
 GENERATED_AT = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+
+# FND-05: response_plans.route_planning_run_id and response_actions.resource_id/
+# response_target_id/route_result_id, plus response_plan_uncovered_targets.
+# response_target_id, are now real FKs.
+ROUTE_PLANNING_RUN_ID = 77
+FIXTURE_STATION_ID = "FIXTURE-STATION"
+FIXTURE_SOURCE_NODE_ID = 9001
+FIXTURE_TARGET_NODE_ID = 9002
 
 
 @pytest.fixture
@@ -46,17 +61,95 @@ def persisted_context(sqlite_session_factory):
         methodology_version="1.0",
     )
     session.add(target_set)
+    session.flush()
+    RoadNetworkRepository().save_network(
+        session,
+        nodes=[
+            GraphNode(id=FIXTURE_SOURCE_NODE_ID, latitude=32.700, longitude=35.000),
+            GraphNode(id=FIXTURE_TARGET_NODE_ID, latitude=32.700, longitude=35.010),
+        ],
+        edges=[],
+    )
+    session.add(
+        RoutePlanningRunDB(
+            id=ROUTE_PLANNING_RUN_ID,
+            fire_event_id=event.id,
+            response_target_set_id=target_set.id,
+            planned_at=GENERATED_AT - timedelta(minutes=1),
+            methodology="TEST_ROUTING",
+            methodology_version="1.0",
+            resource_ids=[],
+        )
+    )
+    session.add(FireStationDB(id=FIXTURE_STATION_ID, name="Fixture Station", latitude=32.7, longitude=35.0))
     session.commit()
-    context = {"fire_event_id": event.id, "response_target_set_id": target_set.id}
+    context = {
+        "fire_event_id": event.id,
+        "response_target_set_id": target_set.id,
+        "route_planning_run_id": ROUTE_PLANNING_RUN_ID,
+        "session_factory": sqlite_session_factory,
+    }
     session.close()
     return context
+
+
+def _persist_fk_prerequisites(context, actions, uncovered_target_ids) -> None:
+    """Persist a real row for every resource/response-target/route-result id
+    these actions (and uncovered targets) reference (FND-05 FK prerequisites).
+    Idempotent - an id may recur across `make_plan()` calls within one test."""
+    session = context["session_factory"]()
+    try:
+        target_ids = {action.response_target_id for action in actions} | set(uncovered_target_ids)
+        for target_id in target_ids:
+            if session.get(ResponseTargetDB, target_id) is None:
+                session.add(
+                    ResponseTargetDB(
+                        id=target_id,
+                        response_target_set_id=context["response_target_set_id"],
+                        fire_event_id=context["fire_event_id"],
+                        target_order=target_id,
+                        target_type="active_fire",
+                        latitude=32.731,
+                        longitude=35.046,
+                        priority_score=100.0,
+                    )
+                )
+        for action in actions:
+            if session.get(FirefightingResourceDB, action.resource_id) is None:
+                session.add(
+                    FirefightingResourceDB(
+                        id=action.resource_id,
+                        station_id=FIXTURE_STATION_ID,
+                        status=ResourceStatus.AVAILABLE,
+                    )
+                )
+        session.flush()
+        for action in actions:
+            if session.get(RouteResultDB, action.route_result_id) is None:
+                session.add(
+                    RouteResultDB(
+                        id=action.route_result_id,
+                        route_planning_run_id=context["route_planning_run_id"],
+                        resource_id=action.resource_id,
+                        response_target_id=action.response_target_id,
+                        status="reachable",
+                        source_node_id=FIXTURE_SOURCE_NODE_ID,
+                        target_node_id=FIXTURE_TARGET_NODE_ID,
+                        node_path=[FIXTURE_SOURCE_NODE_ID, FIXTURE_TARGET_NODE_ID],
+                        distance_meters=1000.0,
+                        travel_time_seconds=100.0,
+                    )
+                )
+        session.commit()
+    finally:
+        session.close()
 
 
 def make_plan(context, **overrides) -> ResponsePlan:
     values = {
         "fire_event_id": context["fire_event_id"],
         "response_target_set_id": context["response_target_set_id"],
-        "route_planning_run_id": 77,
+        "route_planning_run_id": context["route_planning_run_id"],
         "generated_at": GENERATED_AT,
         "status": ResponsePlanStatus.COMPLETE,
         "methodology": "GENETIC_RESOURCE_ALLOCATION",
@@ -72,6 +165,7 @@ def make_plan(context, **overrides) -> ResponsePlan:
         "average_eta_seconds": 250.0,
     }
     values.update(overrides)
+    _persist_fk_prerequisites(context, values["actions"], values["uncovered_target_ids"])
     return ResponsePlan(**values)
 
 

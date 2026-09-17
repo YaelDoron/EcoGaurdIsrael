@@ -49,7 +49,12 @@ class RouteResultDB(Base):
         nullable=False,
         index=True,
     )
-    resource_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    resource_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("firefighting_resources.id"),
+        nullable=False,
+        index=True,
+    )
     response_target_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("response_targets.id"),

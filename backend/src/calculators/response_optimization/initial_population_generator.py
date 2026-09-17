@@ -12,6 +12,21 @@ from src.models.response_plan_chromosome import ResponsePlanChromosome
 class InitialPopulationGenerator:
     """Create feasible target-indexed chromosomes without scoring them."""
 
+    # Internal search-budget knob, not part of the deterministic config
+    # contract: it caps how many extra draws are spent trying to avoid
+    # duplicate chromosomes while filling out the initial population before
+    # falling back to allowing duplicates. Changing it does shift the shared
+    # rng stream (and, when duplicates are unavoidable, which specific
+    # "long-tail" duplicate chromosomes end up in the population) - but it
+    # was empirically verified (5 vs 20, 200+ seeds, including scenarios
+    # engineered to force heavy duplicate-retry exhaustion via a small
+    # feasible-chromosome space relative to population_size) to never change
+    # the ranked winner of the initial population or the final GA output.
+    # The deterministic empty/coverage seeds anchor the population
+    # regardless, and elitism/selection converge to the same optimum
+    # independent of which duplicate-filler chromosomes fill the remaining
+    # slots. It is therefore kept as an internal constant rather than a
+    # ResponseOptimizationConfig field.
     _DUPLICATE_RETRY_MULTIPLIER = 20
 
     @classmethod

@@ -8,23 +8,139 @@ tests/repositories/test_fire_spread_prediction_repository.py).
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.calculators.baseline_plan.baseline_plan_comparison_calculator import PlanComparison
+from src.database.models.fire_event_db import FireEventDB
 from src.database.models.plan_comparison_db import PlanComparisonDB
+from src.database.models.response_plan_db import ResponsePlanDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.repositories.plan_comparison_repository import (
     PlanComparisonRepository,
     PlanComparisonRepositoryError,
     StoredPlanComparison,
 )
 
+GENERATED_AT = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
+
+
+def persist_fk_prerequisites(session_factory, comparison: PlanComparison) -> None:
+    """Persist a real row for each of the 4 traceability ids a PlanComparison
+    carries (FND-05 gave plan_comparisons all four real FKs). These 4 ids are
+    independent snapshot identities, not a validated chain, so each parent
+    row is created standalone - only real enough to satisfy its own table's
+    FKs (ResponsePlanDB needs fire_event_id/response_target_set_id/
+    route_planning_run_id in turn, so those are reused rather than faked
+    again). Idempotent and a no-op (no flush/commit) when every id already
+    exists, so tests that monkeypatch Session.flush to simulate a write
+    failure can pre-warm the chain beforehand without tripping the patch."""
+    session = session_factory()
+    added = False
+    try:
+        # Existence checks must not autoflush: a test may deliberately break
+        # Session.flush to simulate a write failure, and a plain read should
+        # never trigger that patched method when nothing is actually dirty.
+        with session.no_autoflush:
+            needs_fire_event = session.get(FireEventDB, comparison.fire_event_id) is None
+            needs_target_set = session.get(ResponseTargetSetDB, comparison.response_target_set_id) is None
+            needs_route_run = session.get(RoutePlanningRunDB, comparison.route_planning_run_id) is None
+            needs_response_plan = session.get(ResponsePlanDB, comparison.optimized_plan_id) is None
+
+        if needs_fire_event:
+            session.add(
+                FireEventDB(
+                    id=comparison.fire_event_id,
+                    latitude=32.731,
+                    longitude=35.046,
+                    detected_at=GENERATED_AT,
+                    updated_at=GENERATED_AT,
+                    status="confirmed",
+                    detection_confidence=0.9,
+                    methodology="TEST_DETECTION",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_target_set:
+            session.add(
+                ResponseTargetSetDB(
+                    id=comparison.response_target_set_id,
+                    fire_event_id=comparison.fire_event_id,
+                    generated_at=GENERATED_AT,
+                    methodology="TEST_TARGETS",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_fire_event or needs_target_set:
+            session.flush()
+        if needs_route_run:
+            session.add(
+                RoutePlanningRunDB(
+                    id=comparison.route_planning_run_id,
+                    fire_event_id=comparison.fire_event_id,
+                    response_target_set_id=comparison.response_target_set_id,
+                    planned_at=GENERATED_AT,
+                    methodology="TEST_ROUTING",
+                    methodology_version="1.0",
+                    resource_ids=[],
+                )
+            )
+            added = True
+            session.flush()
+        if needs_response_plan:
+            session.add(
+                ResponsePlanDB(
+                    id=comparison.optimized_plan_id,
+                    fire_event_id=comparison.fire_event_id,
+                    response_target_set_id=comparison.response_target_set_id,
+                    route_planning_run_id=comparison.route_planning_run_id,
+                    generated_at=GENERATED_AT,
+                    status="complete",
+                    methodology="GENETIC_RESOURCE_ALLOCATION",
+                    methodology_version="1.0",
+                    random_seed=42,
+                )
+            )
+            added = True
+        if added:
+            session.commit()
+    finally:
+        session.close()
+
+
+class _FKProvisioningRepository:
+    """Wraps PlanComparisonRepository so existing tests can keep using
+    arbitrary hand-picked traceability ids without each one separately
+    pre-creating the FK chain plan_comparisons now requires (FND-05)."""
+
+    def __init__(self, inner: PlanComparisonRepository, session_factory) -> None:
+        self._inner = inner
+        self._session_factory = session_factory
+
+    def save(self, comparison):
+        if isinstance(comparison, PlanComparison):
+            persist_fk_prerequisites(self._session_factory, comparison)
+        return self._inner.save(comparison)
+
+    def get_by_id(self, comparison_id):
+        return self._inner.get_by_id(comparison_id)
+
+    def list_for_fire_event(self, fire_event_id):
+        return self._inner.list_for_fire_event(fire_event_id)
+
 
 @pytest.fixture
 def repository(sqlite_session_factory) -> PlanComparisonRepository:
-    return PlanComparisonRepository(session_factory=sqlite_session_factory)
+    return _FKProvisioningRepository(
+        PlanComparisonRepository(session_factory=sqlite_session_factory), sqlite_session_factory
+    )
 
 
 def make_comparison(**overrides) -> PlanComparison:
@@ -243,13 +359,19 @@ def test_missing_id_returns_none_matching_existing_repository_convention(reposit
 
 
 def test_failed_save_does_not_leave_a_partial_comparison(repository, sqlite_session_factory, monkeypatch):
+    comparison = make_comparison()
+    # Pre-warm the FK chain (FND-05) before patching flush, so the failure
+    # below is caused only by the real repository's own save, not by the
+    # unrelated FK-prerequisite provisioning also needing a flush.
+    persist_fk_prerequisites(sqlite_session_factory, comparison)
+
     def raise_integrity_error(self, *args, **kwargs):
         raise IntegrityError("forced failure", params=None, orig=Exception("forced"))
 
     monkeypatch.setattr(Session, "flush", raise_integrity_error)
 
     with pytest.raises(PlanComparisonRepositoryError):
-        repository.save(make_comparison())
+        repository.save(comparison)
 
     monkeypatch.undo()
 

@@ -6,7 +6,10 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_station_db import FireStationDB
+from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.graph_node_db import GraphNodeDB
+from src.database.models.response_target_db import ResponseTargetDB
 from src.models import (
     ResponseAction,
     ResponsePlan,
@@ -15,6 +18,7 @@ from src.models import (
     ResponseTargetSet,
     ResponseTargetType,
 )
+from src.models.resource_status import ResourceStatus
 from src.models.routing import RoutePlanningRun, RouteResult, RouteStatus
 from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
@@ -41,8 +45,20 @@ def persisted_context(sqlite_session_factory):
         methodology_version="1.0",
     )
     session.add(event)
-    session.commit()
+    session.flush()
     fire_event_id = event.id
+    # route_results.resource_id / response_actions.resource_id are now real
+    # FKs (FND-05): every resource_id literal used below ("truck-1", "truck-2")
+    # needs a matching FirefightingResourceDB row.
+    session.add(FireStationDB(id="FIXTURE-STATION", name="Fixture Station", latitude=32.7, longitude=35.0))
+    session.flush()
+    session.add_all(
+        [
+            FirefightingResourceDB(id="truck-1", station_id="FIXTURE-STATION", status=ResourceStatus.AVAILABLE),
+            FirefightingResourceDB(id="truck-2", station_id="FIXTURE-STATION", status=ResourceStatus.AVAILABLE),
+        ]
+    )
+    session.commit()
     session.close()
 
     stored_target_set = ResponseTargetRepository(sqlite_session_factory).save_target_set(
@@ -62,10 +78,35 @@ def persisted_context(sqlite_session_factory):
             ),
         )
     )
+
+    # response_plan_uncovered_targets.response_target_id is now a real FK too
+    # (FND-05), so "uncovered" tests need real target ids, not literal (20,
+    # 30). ResponseTargetSet only allows exactly one ACTIVE_FIRE target, so
+    # these extra rows are inserted directly rather than through another
+    # domain-validated ResponseTargetSet.
+    session = sqlite_session_factory()
+    other_targets = [
+        ResponseTargetDB(
+            response_target_set_id=stored_target_set.id,
+            fire_event_id=fire_event_id,
+            target_order=order,
+            target_type="active_fire",
+            latitude=32.731,
+            longitude=35.046,
+            priority_score=100.0,
+        )
+        for order in (1, 2)
+    ]
+    session.add_all(other_targets)
+    session.commit()
+    other_target_ids = tuple(target.id for target in other_targets)
+    session.close()
+
     return {
         "fire_event_id": fire_event_id,
         "response_target_set_id": stored_target_set.id,
         "response_target_id": stored_target_set.targets[0].id,
+        "other_target_ids": other_target_ids,
     }
 
 
@@ -92,7 +133,7 @@ def make_route_planning_run(context, resource_ids=("truck-1",)) -> RoutePlanning
     )
 
 
-def make_response_plan(context, route_planning_run_id, **overrides) -> ResponsePlan:
+def make_response_plan(context, route_planning_run_id, route_result_id, **overrides) -> ResponsePlan:
     defaults = dict(
         fire_event_id=context["fire_event_id"],
         response_target_set_id=context["response_target_set_id"],
@@ -102,7 +143,7 @@ def make_response_plan(context, route_planning_run_id, **overrides) -> ResponseP
         methodology="GENETIC_RESOURCE_ALLOCATION",
         methodology_version="1.0",
         random_seed=42,
-        actions=(ResponseAction("truck-1", 10, 100),),
+        actions=(ResponseAction("truck-1", context["response_target_id"], route_result_id),),
         uncovered_target_ids=(),
         plan_score=90.0,
         coverage_score=100.0,
@@ -192,7 +233,9 @@ def test_optimized_plan_reader_returns_correct_shape(persisted_context, sqlite_s
         make_route_planning_run(persisted_context)
     )
     stored_plan = ResponsePlanRepository(sqlite_session_factory).save(
-        make_response_plan(persisted_context, stored_run.id, plan_score=91.5, coverage_score=100.0)
+        make_response_plan(
+            persisted_context, stored_run.id, stored_run.routes[0].id, plan_score=91.5, coverage_score=100.0
+        )
     )
     reader = ResponsePlanOptimizedPlanReaderAdapter(ResponsePlanRepository(sqlite_session_factory))
 
@@ -219,9 +262,9 @@ def test_optimized_plan_reader_computes_target_counts_from_actions_and_uncovered
         make_response_plan(
             persisted_context,
             stored_run.id,
+            stored_run.routes[0].id,
             status=ResponsePlanStatus.PARTIAL,
-            actions=(ResponseAction("truck-1", 10, 100),),
-            uncovered_target_ids=(20, 30),
+            uncovered_target_ids=persisted_context["other_target_ids"],
         )
     )
     reader = ResponsePlanOptimizedPlanReaderAdapter(ResponsePlanRepository(sqlite_session_factory))
@@ -230,7 +273,7 @@ def test_optimized_plan_reader_computes_target_counts_from_actions_and_uncovered
 
     assert view.score.covered_target_count == 1
     assert view.score.total_target_count == 3
-    assert view.score.uncovered_target_ids == (20, 30)
+    assert view.score.uncovered_target_ids == tuple(sorted(persisted_context["other_target_ids"]))
 
 
 def test_optimized_plan_reader_returns_none_for_missing_plan(sqlite_session_factory):

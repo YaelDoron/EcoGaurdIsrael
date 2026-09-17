@@ -54,6 +54,37 @@ class ResponseActionDetails:
 
 
 @dataclass(frozen=True)
+class OptimizationConfigDetails:
+    """Presentation view of the exact GA configuration snapshot for one response plan (FND-06).
+
+    A field-for-field display shape of the persisted `ResponseOptimizationConfig`
+    (US 5.2/FND-04) - never the calculator type itself, so this module stays
+    free of any dependency on `src.calculators`.
+    """
+
+    population_size: int
+    generation_count: int
+    mutation_rate: float
+    crossover_rate: float
+    eta_reference_seconds: float
+    initial_assignment_probability: float
+    tournament_size: int
+    elitism_count: int
+
+    def __post_init__(self) -> None:
+        validate_positive_int("population_size", self.population_size)
+        validate_positive_int("generation_count", self.generation_count)
+        _validate_finite_number("mutation_rate", self.mutation_rate)
+        _validate_finite_number("crossover_rate", self.crossover_rate)
+        _validate_finite_number("eta_reference_seconds", self.eta_reference_seconds)
+        _validate_finite_number("initial_assignment_probability", self.initial_assignment_probability)
+        validate_positive_int("tournament_size", self.tournament_size)
+        _validate_int("elitism_count", self.elitism_count)
+        if self.elitism_count < 0:
+            raise ValueError(f"elitism_count must be >= 0, got {self.elitism_count!r}")
+
+
+@dataclass(frozen=True)
 class BaselineComparisonDetails:
     """Presentation view of a persisted US 5.3 optimized-vs-baseline comparison."""
 
@@ -85,6 +116,7 @@ class ResponsePlanDetails:
     generated_at: datetime
     methodology: str
     methodology_version: str
+    random_seed: int
     is_current: bool
     plan_score: float
     coverage_score: float
@@ -92,6 +124,7 @@ class ResponsePlanDetails:
     actions: tuple[ResponseActionDetails, ...]
     uncovered_target_ids: tuple[int, ...]
     baseline_comparison: BaselineComparisonDetails | None
+    optimization_config: OptimizationConfigDetails | None
 
     def __post_init__(self) -> None:
         validate_positive_int("plan_id", self.plan_id)
@@ -103,6 +136,7 @@ class ResponsePlanDetails:
             raise ValueError(f"generated_at must be a timezone-aware datetime, got {self.generated_at!r}")
         validate_non_empty_string("methodology", self.methodology)
         validate_non_empty_string("methodology_version", self.methodology_version)
+        _validate_int("random_seed", self.random_seed)
         if not isinstance(self.is_current, bool):
             raise ValueError(f"is_current must be a bool, got {self.is_current!r}")
 
@@ -128,6 +162,14 @@ class ResponsePlanDetails:
                 f"baseline_comparison must be a BaselineComparisonDetails or None, got {self.baseline_comparison!r}"
             )
 
+        if self.optimization_config is not None and not isinstance(
+            self.optimization_config, OptimizationConfigDetails
+        ):
+            raise ValueError(
+                "optimization_config must be an OptimizationConfigDetails or None, "
+                f"got {self.optimization_config!r}"
+            )
+
 
 def _coerce_tuple(field_name: str, value: object) -> tuple:
     try:
@@ -139,6 +181,11 @@ def _coerce_tuple(field_name: str, value: object) -> tuple:
 def _validate_finite_number(field_name: str, value: object) -> None:
     if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value):
         raise ValueError(f"{field_name} must be a finite number, got {value!r}")
+
+
+def _validate_int(field_name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer, got {value!r}")
 
 
 def _validate_target_type(value: object) -> None:

@@ -30,8 +30,23 @@ class ResponseActionDB(Base):
         index=True,
     )
     action_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    resource_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    response_target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    route_result_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    resource_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("firefighting_resources.id"),
+        nullable=False,
+        index=True,
+    )
+    response_target_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("response_targets.id"),
+        nullable=False,
+        index=True,
+    )
+    route_result_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("route_results.id"),
+        nullable=False,
+        index=True,
+    )
 
     response_plan: Mapped["ResponsePlanDB"] = relationship(back_populates="actions")
