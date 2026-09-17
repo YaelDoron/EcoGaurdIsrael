@@ -1334,6 +1334,7 @@ def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_withou
                 generated_at=STARTED_AT,
                 methodology="GENETIC_RESOURCE_ALLOCATION",
                 methodology_version="1.0",
+                random_seed=42,
                 is_current=True,
                 plan_score=87.5,
                 coverage_score=0.75,
@@ -1341,6 +1342,7 @@ def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_withou
                 actions=(),
                 uncovered_target_ids=(11, 12),
                 baseline_comparison=None,
+                optimization_config=None,
             )
 
     fake_service = _FakePlanDetailsService()

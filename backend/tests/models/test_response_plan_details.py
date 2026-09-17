@@ -15,6 +15,7 @@ import pytest
 
 from src.models import (
     BaselineComparisonDetails,
+    OptimizationConfigDetails,
     ResponseActionDetails,
     ResponsePlanDetails,
     ResponseTargetType,
@@ -50,6 +51,21 @@ def baseline_comparison(**overrides) -> BaselineComparisonDetails:
     return BaselineComparisonDetails(**values)
 
 
+def optimization_config(**overrides) -> OptimizationConfigDetails:
+    values = {
+        "population_size": 24,
+        "generation_count": 40,
+        "mutation_rate": 0.08,
+        "crossover_rate": 0.75,
+        "eta_reference_seconds": 900.0,
+        "initial_assignment_probability": 0.75,
+        "tournament_size": 2,
+        "elitism_count": 1,
+    }
+    values.update(overrides)
+    return OptimizationConfigDetails(**values)
+
+
 def plan(**overrides) -> ResponsePlanDetails:
     values = {
         "plan_id": 1,
@@ -59,6 +75,7 @@ def plan(**overrides) -> ResponsePlanDetails:
         "generated_at": AS_OF,
         "methodology": "GENETIC_RESOURCE_ALLOCATION",
         "methodology_version": "1.0",
+        "random_seed": 42,
         "is_current": True,
         "plan_score": 10.0,
         "coverage_score": 1.0,
@@ -66,6 +83,7 @@ def plan(**overrides) -> ResponsePlanDetails:
         "actions": (action(),),
         "uncovered_target_ids": (),
         "baseline_comparison": baseline_comparison(),
+        "optimization_config": optimization_config(),
     }
     values.update(overrides)
     return ResponsePlanDetails(**values)
@@ -125,6 +143,49 @@ def test_response_action_details_rejects_invalid_values(overrides):
         action(**overrides)
 
 
+# --- OptimizationConfigDetails ----------------------------------------------
+
+
+def test_optimization_config_details_valid_construction():
+    config = optimization_config()
+
+    assert config.population_size == 24
+    assert config.elitism_count == 1
+
+
+def test_optimization_config_details_is_immutable():
+    config = optimization_config()
+
+    with pytest.raises(FrozenInstanceError):
+        config.population_size = 1
+
+
+def test_optimization_config_details_allows_zero_elitism_count():
+    config = optimization_config(elitism_count=0)
+
+    assert config.elitism_count == 0
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"population_size": 0},
+        {"population_size": -1},
+        {"generation_count": 0},
+        {"mutation_rate": float("nan")},
+        {"crossover_rate": float("inf")},
+        {"eta_reference_seconds": float("nan")},
+        {"initial_assignment_probability": float("nan")},
+        {"tournament_size": 0},
+        {"elitism_count": -1},
+        {"elitism_count": True},
+    ],
+)
+def test_optimization_config_details_rejects_invalid_values(overrides):
+    with pytest.raises(ValueError):
+        optimization_config(**overrides)
+
+
 # --- BaselineComparisonDetails ----------------------------------------------
 
 
@@ -174,12 +235,22 @@ def test_response_plan_details_valid_construction():
     assert result.is_current is True
     assert result.actions == (action(),)
     assert result.baseline_comparison is not None
+    assert result.random_seed == 42
+    assert result.optimization_config is not None
+    assert result.optimization_config.population_size == 24
 
 
 def test_response_plan_details_allows_missing_baseline_comparison():
     result = plan(baseline_comparison=None)
 
     assert result.baseline_comparison is None
+
+
+def test_response_plan_details_allows_none_optimization_config_for_legacy_rows():
+    result = plan(optimization_config=None)
+
+    assert result.optimization_config is None
+    assert result.random_seed == 42
 
 
 def test_response_plan_details_allows_empty_actions_and_uncovered_targets():
@@ -219,6 +290,8 @@ def test_response_plan_details_is_immutable():
         {"generated_at": datetime(2026, 9, 16, 10, 0)},
         {"methodology": ""},
         {"methodology_version": ""},
+        {"random_seed": "42"},
+        {"random_seed": True},
         {"is_current": "true"},
         {"plan_score": float("nan")},
         {"coverage_score": float("inf")},
@@ -226,6 +299,7 @@ def test_response_plan_details_is_immutable():
         {"actions": (object(),)},
         {"uncovered_target_ids": (0,)},
         {"baseline_comparison": object()},
+        {"optimization_config": object()},
     ],
 )
 def test_response_plan_details_rejects_invalid_values(overrides):

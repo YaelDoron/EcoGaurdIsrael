@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import pytest
 
 from src.calculators.baseline_plan.baseline_plan_comparison_calculator import PlanComparison
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.models import (
     FirefightingResource,
     ResourceStatus,
@@ -183,6 +184,22 @@ def make_resource(resource_id: str = "TRUCK-A", station_id: str = "STATION-1") -
     return FirefightingResource(id=resource_id, station_id=station_id, status=ResourceStatus.ASSIGNED)
 
 
+def make_optimization_config(**overrides) -> ResponseOptimizationConfig:
+    values = {
+        "population_size": 24,
+        "generation_count": 40,
+        "mutation_rate": 0.08,
+        "crossover_rate": 0.75,
+        "random_seed": 42,
+        "eta_reference_seconds": 900.0,
+        "initial_assignment_probability": 0.75,
+        "tournament_size": 2,
+        "elitism_count": 1,
+    }
+    values.update(overrides)
+    return ResponseOptimizationConfig(**values)
+
+
 def make_plan(
     plan_id: int = 1,
     *,
@@ -190,6 +207,8 @@ def make_plan(
     uncovered_target_ids: tuple[int, ...] = (),
     response_target_set_id: int = 200,
     route_planning_run_id: int = 300,
+    random_seed: int = 42,
+    optimization_config: ResponseOptimizationConfig | None = None,
 ) -> StoredResponsePlan:
     if not uncovered_target_ids:
         status = ResponsePlanStatus.COMPLETE
@@ -205,12 +224,13 @@ def make_plan(
         status=status,
         methodology="GENETIC_RESOURCE_ALLOCATION",
         methodology_version="1.0",
-        random_seed=42,
+        random_seed=random_seed,
         actions=actions,
         uncovered_target_ids=uncovered_target_ids,
         plan_score=90.0,
         coverage_score=1.0,
         average_eta_seconds=300.0 if actions else None,
+        optimization_config=optimization_config,
     )
     return StoredResponsePlan(id=plan_id, plan=plan)
 
@@ -292,6 +312,83 @@ def test_get_current_plan_details_returns_full_assembled_details():
     assert details.baseline_comparison is not None
     assert details.baseline_comparison.baseline_score == 70.0
     assert details.baseline_comparison.improvement_percentage == 28.5
+
+    assert details.random_seed == 42
+    assert details.optimization_config is None
+
+
+# ---------------------------------------------------------------------------
+# 1b. GA-configuration provenance (FND-06)
+# ---------------------------------------------------------------------------
+
+
+def test_random_seed_is_carried_through_for_every_plan_legacy_or_not():
+    plan = make_plan(random_seed=7)
+    service = make_service(
+        current_plan=plan,
+        plans=(plan,),
+        target_sets=(make_target_set(),),
+        route_runs=(make_route_run(routes=(make_reachable_route(),)),),
+        resources=(make_resource(),),
+    )
+
+    details = service.get_current_plan_details(FIRE_EVENT_ID)
+
+    assert details is not None
+    assert details.random_seed == 7
+
+
+def test_optimization_config_is_none_for_legacy_plans_without_recalculation():
+    plan = make_plan(optimization_config=None)
+    service = make_service(
+        current_plan=plan,
+        plans=(plan,),
+        target_sets=(make_target_set(),),
+        route_runs=(make_route_run(routes=(make_reachable_route(),)),),
+        resources=(make_resource(),),
+    )
+
+    details = service.get_current_plan_details(FIRE_EVENT_ID)
+
+    assert details is not None
+    assert details.optimization_config is None
+
+
+def test_optimization_config_is_mapped_field_for_field_from_the_persisted_config():
+    config = make_optimization_config(
+        population_size=30,
+        generation_count=50,
+        mutation_rate=0.1,
+        crossover_rate=0.8,
+        random_seed=7,
+        eta_reference_seconds=250.0,
+        initial_assignment_probability=0.6,
+        tournament_size=3,
+        elitism_count=2,
+    )
+    plan = make_plan(random_seed=7, optimization_config=config)
+    service = make_service(
+        current_plan=plan,
+        plans=(plan,),
+        target_sets=(make_target_set(),),
+        route_runs=(make_route_run(routes=(make_reachable_route(),)),),
+        resources=(make_resource(),),
+    )
+
+    details = service.get_current_plan_details(FIRE_EVENT_ID)
+
+    assert details is not None
+    assert details.random_seed == 7
+    mapped = details.optimization_config
+    assert mapped is not None
+    assert mapped.population_size == config.population_size
+    assert mapped.generation_count == config.generation_count
+    assert mapped.mutation_rate == config.mutation_rate
+    assert mapped.crossover_rate == config.crossover_rate
+    assert mapped.eta_reference_seconds == config.eta_reference_seconds
+    assert mapped.initial_assignment_probability == config.initial_assignment_probability
+    assert mapped.tournament_size == config.tournament_size
+    assert mapped.elitism_count == config.elitism_count
 
 
 # ---------------------------------------------------------------------------

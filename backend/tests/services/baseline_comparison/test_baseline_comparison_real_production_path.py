@@ -13,6 +13,8 @@ import pytest
 
 from src.calculators.response_optimization.response_plan_scorer import ResponsePlanScorer, eta_factor
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_station_db import FireStationDB
+from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.graph_node_db import GraphNodeDB
 from src.models import (
     ResponseAction,
@@ -22,6 +24,7 @@ from src.models import (
     ResponseTargetSet,
     ResponseTargetType,
 )
+from src.models.resource_status import ResourceStatus
 from src.models.routing import RoutePlanningRun, RouteResult, RouteStatus
 from src.repositories.plan_comparison_repository import PlanComparisonRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
@@ -53,6 +56,11 @@ def test_real_production_baseline_comparison_uses_shared_scorer(sqlite_session_f
     session.add_all(
         [GraphNodeDB(id=1, latitude=32.7, longitude=35.0), GraphNodeDB(id=2, latitude=32.71, longitude=35.01)]
     )
+    # route_results.resource_id / response_actions.resource_id are now real
+    # FKs (FND-05): "truck-1" needs a matching FirefightingResourceDB row.
+    session.add(FireStationDB(id="FIXTURE-STATION", name="Fixture Station", latitude=32.7, longitude=35.0))
+    session.flush()
+    session.add(FirefightingResourceDB(id="truck-1", station_id="FIXTURE-STATION", status=ResourceStatus.AVAILABLE))
     session.commit()
     fire_event_id = event.id
     session.close()

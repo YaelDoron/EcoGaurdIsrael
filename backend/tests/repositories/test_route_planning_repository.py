@@ -14,6 +14,8 @@ from src.calculators.response_target.response_target_config import (
     RESPONSE_TARGET_METHODOLOGY_NAME,
     RESPONSE_TARGET_METHODOLOGY_VERSION,
 )
+from src.database.models.fire_station_db import FireStationDB
+from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.response_target_db import ResponseTargetDB
 from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.database.models.route_result_db import RouteResultDB
@@ -31,6 +33,7 @@ from src.models import (
     RouteStatus,
     SatelliteHotspot,
 )
+from src.models.resource_status import ResourceStatus
 from src.repositories.exceptions import RoutePlanningRepositoryError
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
@@ -102,6 +105,24 @@ def graph_nodes(sqlite_session_factory) -> None:
         ],
         edges=[],
     )
+    session.close()
+
+
+@pytest.fixture(autouse=True)
+def firefighting_resources(sqlite_session_factory) -> None:
+    """route_results.resource_id is now a real FK (FND-05); every resource_id
+    literal ("truck-1", "truck-2") used across this file's routes needs a
+    matching FirefightingResourceDB row."""
+    session = sqlite_session_factory()
+    session.add(FireStationDB(id="FIXTURE-STATION", name="Fixture Station", latitude=32.7, longitude=35.0))
+    session.flush()
+    session.add_all(
+        [
+            FirefightingResourceDB(id="truck-1", station_id="FIXTURE-STATION", status=ResourceStatus.AVAILABLE),
+            FirefightingResourceDB(id="truck-2", station_id="FIXTURE-STATION", status=ResourceStatus.AVAILABLE),
+        ]
+    )
+    session.commit()
     session.close()
 
 

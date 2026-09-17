@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import logging
 
+from src.calculators.response_optimization.response_optimization_config import ResponseOptimizationConfig
 from src.models.response_plan_details import (
     BaselineComparisonDetails,
+    OptimizationConfigDetails,
     ResponseActionDetails,
     ResponsePlanDetails,
 )
@@ -104,6 +106,7 @@ class ResponsePlanDetailsService:
             generated_at=plan.generated_at,
             methodology=plan.methodology,
             methodology_version=plan.methodology_version,
+            random_seed=plan.random_seed,
             is_current=is_current,
             plan_score=plan.plan_score if plan.plan_score is not None else 0.0,
             coverage_score=plan.coverage_score if plan.coverage_score is not None else 0.0,
@@ -111,6 +114,7 @@ class ResponsePlanDetailsService:
             actions=actions,
             uncovered_target_ids=plan.uncovered_target_ids,
             baseline_comparison=self._resolve_baseline_comparison(plan.fire_event_id, stored_plan.id),
+            optimization_config=self._to_optimization_config_details(plan.optimization_config),
         )
 
     def _load_targets_by_id(self, response_target_set_id: int) -> dict[int, ResponseTarget]:
@@ -182,6 +186,28 @@ class ResponsePlanDetailsService:
             baseline_average_eta_seconds=comparison.baseline_average_eta_seconds,
             score_difference=comparison.score_difference,
             improvement_percentage=comparison.improvement_percentage,
+        )
+
+    @staticmethod
+    def _to_optimization_config_details(
+        optimization_config: ResponseOptimizationConfig | None,
+    ) -> OptimizationConfigDetails | None:
+        """Map the persisted GA config to its display shape, or None for a legacy plan.
+
+        Pure field copy - no recalculation, no defaults substituted for a
+        legacy (None) config.
+        """
+        if optimization_config is None:
+            return None
+        return OptimizationConfigDetails(
+            population_size=optimization_config.population_size,
+            generation_count=optimization_config.generation_count,
+            mutation_rate=optimization_config.mutation_rate,
+            crossover_rate=optimization_config.crossover_rate,
+            eta_reference_seconds=optimization_config.eta_reference_seconds,
+            initial_assignment_probability=optimization_config.initial_assignment_probability,
+            tournament_size=optimization_config.tournament_size,
+            elitism_count=optimization_config.elitism_count,
         )
 
     @staticmethod

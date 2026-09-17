@@ -19,6 +19,7 @@ from src.database.models.fire_event_db import FireEventDB
 from src.database.models.response_plan_db import ResponsePlanDB
 from src.database.models.response_plan_planning_state_db import ResponsePlanPlanningStateDB
 from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.repositories.response_plan_planning_state_repository import (
     ResponsePlanPlanningStateRepository,
     ResponsePlanPlanningStateRepositoryError,
@@ -64,11 +65,21 @@ def make_response_plan(session_factory, **overrides) -> int:
     )
     session.add(target_set)
     session.flush()
+    route_planning_run = RoutePlanningRunDB(
+        fire_event_id=event.id,
+        response_target_set_id=target_set.id,
+        planned_at=GENERATED_AT,
+        methodology="TEST_ROUTING",
+        methodology_version="1.0",
+        resource_ids=[],
+    )
+    session.add(route_planning_run)
+    session.flush()
 
     defaults = dict(
         fire_event_id=event.id,
         response_target_set_id=target_set.id,
-        route_planning_run_id=1,
+        route_planning_run_id=route_planning_run.id,
         generated_at=GENERATED_AT,
         status="complete",
         methodology="GENETIC_RESOURCE_ALLOCATION",

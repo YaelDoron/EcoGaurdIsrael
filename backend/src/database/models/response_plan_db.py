@@ -60,7 +60,12 @@ class ResponsePlanDB(Base):
         nullable=False,
         index=True,
     )
-    route_planning_run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    route_planning_run_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("route_planning_runs.id"),
+        nullable=False,
+        index=True,
+    )
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String, nullable=False, index=True)
     methodology: Mapped[str] = mapped_column(String, nullable=False)

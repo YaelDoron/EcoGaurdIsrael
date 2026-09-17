@@ -29,6 +29,11 @@ class ResponsePlanUncoveredTargetDB(Base):
         index=True,
     )
     target_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    response_target_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    response_target_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("response_targets.id"),
+        nullable=False,
+        index=True,
+    )
 
     response_plan: Mapped["ResponsePlanDB"] = relationship(back_populates="uncovered_targets")

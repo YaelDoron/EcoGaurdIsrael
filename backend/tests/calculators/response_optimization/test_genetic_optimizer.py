@@ -151,11 +151,34 @@ def test_tournament_selection_handles_identical_candidates():
 
 def test_candidate_evaluator_uses_decoder_and_scorer():
     input_data = planning_input()
-    candidate = CandidateEvaluator().evaluate(input_data, ResponsePlanChromosome(("R1", "R2", None)))
-    expected = ResponsePlanScorer().evaluate(input_data, candidate.actions)
+    config = ResponseOptimizationConfig()
+    candidate = CandidateEvaluator().evaluate(input_data, ResponsePlanChromosome(("R1", "R2", None)), config)
+    expected = ResponsePlanScorer(config).evaluate(input_data, candidate.actions)
 
     assert candidate.score == expected
     assert [(action.resource_id, action.response_target_id) for action in candidate.actions] == [("R1", 10), ("R2", 20)]
+
+
+def test_candidate_evaluator_applies_run_scoped_eta_reference_seconds():
+    """A CandidateEvaluator must score using the config passed to evaluate(),
+    not a config captured at construction time — this is what makes
+    eta_reference_seconds actually take effect during GA evaluation."""
+    input_data = planning_input()
+    chromosome = ResponsePlanChromosome(("R1", "R2", None))
+    evaluator = CandidateEvaluator()
+
+    low_reference = evaluator.evaluate(input_data, chromosome, ResponseOptimizationConfig(eta_reference_seconds=1.0))
+    high_reference = evaluator.evaluate(
+        input_data, chromosome, ResponseOptimizationConfig(eta_reference_seconds=100_000.0)
+    )
+
+    assert low_reference.score.total_score != high_reference.score.total_score
+    assert low_reference.score == ResponsePlanScorer(
+        ResponseOptimizationConfig(eta_reference_seconds=1.0)
+    ).evaluate(input_data, low_reference.actions)
+    assert high_reference.score == ResponsePlanScorer(
+        ResponseOptimizationConfig(eta_reference_seconds=100_000.0)
+    ).evaluate(input_data, high_reference.actions)
 
 
 def test_crossover_preserves_feasibility_and_inherits_only_parent_genes():
@@ -237,20 +260,79 @@ def test_mutation_preserves_feasibility_and_is_seeded():
 
 def test_full_optimizer_returns_valid_deterministic_result_and_non_degrading_history():
     input_data = planning_input()
-    config = ResponseOptimizationConfig(population_size=8, generation_count=5, random_seed=9, elitism_count=1)
+    config = ResponseOptimizationConfig(
+        population_size=8,
+        generation_count=5,
+        random_seed=9,
+        elitism_count=1,
+        eta_reference_seconds=250.0,
+    )
 
     first = GeneticResponsePlanOptimizer().optimize(input_data, config)
     second = GeneticResponsePlanOptimizer().optimize(input_data, config)
 
     assert first == second
     assert_decodable(input_data, first.best_chromosome)
+    # Non-default eta_reference_seconds: this only matches if the run-scoped
+    # config actually reaches the evaluator/scorer, rather than a default
+    # config captured when the optimizer/evaluator was constructed.
     assert first.score == ResponsePlanScorer(config).evaluate(input_data, first.actions)
+    assert first.score != ResponsePlanScorer(ResponseOptimizationConfig()).evaluate(input_data, first.actions)
     assert first.generations_executed == 5
     assert first.population_size == 8
     assert all(
         later + 1e-9 >= earlier
         for earlier, later in zip(first.generation_best_scores, first.generation_best_scores[1:])
     )
+
+
+def test_full_optimizer_different_eta_reference_seconds_produce_different_scores():
+    """Two runs that differ only in eta_reference_seconds must score
+    differently for the same input, proving the config actually reaches
+    evaluation instead of being ignored in favor of a default scorer."""
+    input_data = planning_input()
+    base_kwargs = dict(population_size=8, generation_count=5, random_seed=9, elitism_count=1)
+
+    short_reference = GeneticResponsePlanOptimizer().optimize(
+        input_data, ResponseOptimizationConfig(eta_reference_seconds=10.0, **base_kwargs)
+    )
+    long_reference = GeneticResponsePlanOptimizer().optimize(
+        input_data, ResponseOptimizationConfig(eta_reference_seconds=100_000.0, **base_kwargs)
+    )
+
+    assert short_reference.score.total_score != long_reference.score.total_score
+    assert short_reference.score.total_score == pytest.approx(
+        ResponsePlanScorer(ResponseOptimizationConfig(eta_reference_seconds=10.0, **base_kwargs))
+        .evaluate(input_data, short_reference.actions)
+        .total_score
+    )
+    assert long_reference.score.total_score == pytest.approx(
+        ResponsePlanScorer(ResponseOptimizationConfig(eta_reference_seconds=100_000.0, **base_kwargs))
+        .evaluate(input_data, long_reference.actions)
+        .total_score
+    )
+
+
+def test_full_optimizer_same_instance_has_no_state_contamination_across_configs():
+    """Sequential A/B/A isolation: reusing one optimizer instance across runs
+    with different configs must not leak state between runs. Result A1 must
+    equal result A2 even after an intervening run with a different config."""
+    input_data = planning_input()
+    config_a = ResponseOptimizationConfig(
+        population_size=8, generation_count=5, random_seed=9, elitism_count=1, eta_reference_seconds=120.0
+    )
+    config_b = ResponseOptimizationConfig(
+        population_size=8, generation_count=5, random_seed=9, elitism_count=1, eta_reference_seconds=5000.0
+    )
+
+    optimizer = GeneticResponsePlanOptimizer()
+
+    result_a1 = optimizer.optimize(input_data, config_a)
+    result_b = optimizer.optimize(input_data, config_b)
+    result_a2 = optimizer.optimize(input_data, config_a)
+
+    assert result_a1 == result_a2
+    assert result_a1.score.total_score != result_b.score.total_score
 
 
 def test_full_optimizer_finds_known_simple_optimum():

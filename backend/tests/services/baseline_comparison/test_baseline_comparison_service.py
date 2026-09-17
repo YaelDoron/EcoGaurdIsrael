@@ -30,6 +30,10 @@ from src.calculators.fire_detection.fire_detection_config import (
     FIRE_DETECTION_METHODOLOGY_NAME,
     FIRE_DETECTION_METHODOLOGY_VERSION,
 )
+from src.database.models.fire_event_db import FireEventDB
+from src.database.models.response_plan_db import ResponsePlanDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.models.fire_event import FireEvent
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
@@ -53,6 +57,122 @@ RESPONSE_PLAN_ID = 100
 ROUTE_PLANNING_RUN_ID = 10
 RESPONSE_TARGET_SET_ID = 20
 GENERATED_AT = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
+
+
+# ---------------------------------------------------------------------------
+# FND-05: plan_comparisons.fire_event_id/optimized_plan_id/
+# route_planning_run_id/response_target_set_id are now real FKs. This suite's
+# fake readers return hand-picked ids with no real backing rows, so wrap
+# PlanComparisonRepository to provision a minimal, independent row for each
+# of the 4 ids before delegating to the real save() (mirrors
+# tests/repositories/test_plan_comparison_repository.py).
+# ---------------------------------------------------------------------------
+
+
+def persist_fk_prerequisites(
+    session_factory, *, fire_event_id: int, response_target_set_id: int, route_planning_run_id: int, optimized_plan_id: int
+) -> None:
+    session = session_factory()
+    added = False
+    try:
+        with session.no_autoflush:
+            needs_fire_event = session.get(FireEventDB, fire_event_id) is None
+            needs_target_set = session.get(ResponseTargetSetDB, response_target_set_id) is None
+            needs_route_run = session.get(RoutePlanningRunDB, route_planning_run_id) is None
+            needs_response_plan = session.get(ResponsePlanDB, optimized_plan_id) is None
+
+        if needs_fire_event:
+            session.add(
+                FireEventDB(
+                    id=fire_event_id,
+                    latitude=32.731,
+                    longitude=35.046,
+                    detected_at=GENERATED_AT,
+                    updated_at=GENERATED_AT,
+                    status="confirmed",
+                    detection_confidence=0.9,
+                    methodology="TEST_DETECTION",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_target_set:
+            session.add(
+                ResponseTargetSetDB(
+                    id=response_target_set_id,
+                    fire_event_id=fire_event_id,
+                    generated_at=GENERATED_AT,
+                    methodology="TEST_TARGETS",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_fire_event or needs_target_set:
+            session.flush()
+        if needs_route_run:
+            session.add(
+                RoutePlanningRunDB(
+                    id=route_planning_run_id,
+                    fire_event_id=fire_event_id,
+                    response_target_set_id=response_target_set_id,
+                    planned_at=GENERATED_AT,
+                    methodology="TEST_ROUTING",
+                    methodology_version="1.0",
+                    resource_ids=[],
+                )
+            )
+            added = True
+            session.flush()
+        if needs_response_plan:
+            session.add(
+                ResponsePlanDB(
+                    id=optimized_plan_id,
+                    fire_event_id=fire_event_id,
+                    response_target_set_id=response_target_set_id,
+                    route_planning_run_id=route_planning_run_id,
+                    generated_at=GENERATED_AT,
+                    status="complete",
+                    methodology="GENETIC_RESOURCE_ALLOCATION",
+                    methodology_version="1.0",
+                    random_seed=42,
+                )
+            )
+            added = True
+        if added:
+            session.commit()
+    finally:
+        session.close()
+
+
+class _FKProvisioningRepository:
+    """Wraps PlanComparisonRepository so this suite's fake readers can keep
+    returning arbitrary ids without each test separately pre-creating the FK
+    chain plan_comparisons now requires (FND-05)."""
+
+    def __init__(self, inner: PlanComparisonRepository, session_factory) -> None:
+        self._inner = inner
+        self._session_factory = session_factory
+
+    def save(self, comparison):
+        if isinstance(comparison, PlanComparison):
+            persist_fk_prerequisites(
+                self._session_factory,
+                fire_event_id=comparison.fire_event_id,
+                response_target_set_id=comparison.response_target_set_id,
+                route_planning_run_id=comparison.route_planning_run_id,
+                optimized_plan_id=comparison.optimized_plan_id,
+            )
+        return self._inner.save(comparison)
+
+    def get_by_id(self, comparison_id):
+        return self._inner.get_by_id(comparison_id)
+
+    def list_for_fire_event(self, fire_event_id):
+        return self._inner.list_for_fire_event(fire_event_id)
+
+
+def fk_provisioning_repository(session_factory) -> PlanComparisonRepository:
+    return _FKProvisioningRepository(PlanComparisonRepository(session_factory=session_factory), session_factory)
 
 
 # ---------------------------------------------------------------------------
@@ -255,7 +375,7 @@ def make_service(
         route_planning_run_reader=run_reader,
         scorer=scorer,
         response_target_set_reader=target_set_reader,
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
     return service, plan_reader, run_reader, target_set_reader, scorer
 
@@ -427,7 +547,7 @@ def test_real_response_target_repository_end_to_end_through_the_service(sqlite_s
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=real_repository,
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     result = service.compare(response_plan_id=RESPONSE_PLAN_ID)
@@ -518,7 +638,7 @@ def test_routing_run_id_mismatch_is_rejected(sqlite_session_factory):
         route_planning_run_reader=run_reader,
         scorer=scorer,
         response_target_set_reader=target_set_reader,
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     with pytest.raises(BaselineComparisonServiceError):
@@ -539,7 +659,7 @@ def test_target_set_id_mismatch_is_rejected(sqlite_session_factory):
         route_planning_run_reader=run_reader,
         scorer=scorer,
         response_target_set_reader=target_set_reader,
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     with pytest.raises(BaselineComparisonServiceError):
@@ -620,7 +740,7 @@ def test_comparison_snapshot_mismatch_failure_prevents_persistence(sqlite_sessio
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=FakeResponseTargetSetReader({target_set.id: target_set}),
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
         comparison_calculator=RaisingComparisonCalculator(),
     )
 
@@ -632,6 +752,17 @@ def test_comparison_snapshot_mismatch_failure_prevents_persistence(sqlite_sessio
 
 def test_persistence_failure_propagates_without_fabricating_success(sqlite_session_factory, monkeypatch):
     from sqlalchemy.orm import Session
+
+    # Pre-warm the FK chain (FND-05) before patching flush, so the failure
+    # below is caused only by the real repository's own save, not by the
+    # unrelated FK-prerequisite provisioning also needing a flush.
+    persist_fk_prerequisites(
+        sqlite_session_factory,
+        fire_event_id=FIRE_EVENT_ID,
+        response_target_set_id=RESPONSE_TARGET_SET_ID,
+        route_planning_run_id=ROUTE_PLANNING_RUN_ID,
+        optimized_plan_id=RESPONSE_PLAN_ID,
+    )
 
     def raise_on_flush(self, *args, **kwargs):
         from sqlalchemy.exc import IntegrityError

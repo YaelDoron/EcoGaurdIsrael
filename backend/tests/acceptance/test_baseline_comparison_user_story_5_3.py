@@ -43,6 +43,10 @@ from src.calculators.fire_detection.fire_detection_config import (
     FIRE_DETECTION_METHODOLOGY_NAME,
     FIRE_DETECTION_METHODOLOGY_VERSION,
 )
+from src.database.models.fire_event_db import FireEventDB
+from src.database.models.response_plan_db import ResponsePlanDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.models.fire_event import FireEvent
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
@@ -236,6 +240,123 @@ def saved_rows_for_event(sqlite_session_factory, fire_event_id: int):
 
 
 # ---------------------------------------------------------------------------
+# FND-05: plan_comparisons.fire_event_id/optimized_plan_id/
+# route_planning_run_id/response_target_set_id are now real FKs. These
+# scenarios build FakeOptimizedPlan/FakeRoutePlanningRun with hand-picked
+# ids with no real backing rows, so wrap PlanComparisonRepository to
+# provision a minimal, independent row for each of the 4 ids before
+# delegating to the real save() (mirrors test_plan_comparison_repository.py
+# and test_baseline_comparison_service.py).
+# ---------------------------------------------------------------------------
+
+
+def persist_fk_prerequisites(
+    session_factory, *, fire_event_id: int, response_target_set_id: int, route_planning_run_id: int, optimized_plan_id: int
+) -> None:
+    session = session_factory()
+    added = False
+    try:
+        with session.no_autoflush:
+            needs_fire_event = session.get(FireEventDB, fire_event_id) is None
+            needs_target_set = session.get(ResponseTargetSetDB, response_target_set_id) is None
+            needs_route_run = session.get(RoutePlanningRunDB, route_planning_run_id) is None
+            needs_response_plan = session.get(ResponsePlanDB, optimized_plan_id) is None
+
+        if needs_fire_event:
+            session.add(
+                FireEventDB(
+                    id=fire_event_id,
+                    latitude=32.731,
+                    longitude=35.046,
+                    detected_at=GENERATED_AT,
+                    updated_at=GENERATED_AT,
+                    status="confirmed",
+                    detection_confidence=0.9,
+                    methodology="TEST_DETECTION",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_target_set:
+            session.add(
+                ResponseTargetSetDB(
+                    id=response_target_set_id,
+                    fire_event_id=fire_event_id,
+                    generated_at=GENERATED_AT,
+                    methodology="TEST_TARGETS",
+                    methodology_version="1.0",
+                )
+            )
+            added = True
+        if needs_fire_event or needs_target_set:
+            session.flush()
+        if needs_route_run:
+            session.add(
+                RoutePlanningRunDB(
+                    id=route_planning_run_id,
+                    fire_event_id=fire_event_id,
+                    response_target_set_id=response_target_set_id,
+                    planned_at=GENERATED_AT,
+                    methodology="TEST_ROUTING",
+                    methodology_version="1.0",
+                    resource_ids=[],
+                )
+            )
+            added = True
+            session.flush()
+        if needs_response_plan:
+            session.add(
+                ResponsePlanDB(
+                    id=optimized_plan_id,
+                    fire_event_id=fire_event_id,
+                    response_target_set_id=response_target_set_id,
+                    route_planning_run_id=route_planning_run_id,
+                    generated_at=GENERATED_AT,
+                    status="complete",
+                    methodology="GENETIC_RESOURCE_ALLOCATION",
+                    methodology_version="1.0",
+                    random_seed=42,
+                )
+            )
+            added = True
+        if added:
+            session.commit()
+    finally:
+        session.close()
+
+
+class _FKProvisioningRepository:
+    """Wraps PlanComparisonRepository so these scenarios can keep using
+    arbitrary hand-picked traceability ids without each one separately
+    pre-creating the FK chain plan_comparisons now requires (FND-05)."""
+
+    def __init__(self, inner: PlanComparisonRepository, session_factory) -> None:
+        self._inner = inner
+        self._session_factory = session_factory
+
+    def save(self, comparison):
+        if isinstance(comparison, PlanComparison):
+            persist_fk_prerequisites(
+                self._session_factory,
+                fire_event_id=comparison.fire_event_id,
+                response_target_set_id=comparison.response_target_set_id,
+                route_planning_run_id=comparison.route_planning_run_id,
+                optimized_plan_id=comparison.optimized_plan_id,
+            )
+        return self._inner.save(comparison)
+
+    def get_by_id(self, comparison_id):
+        return self._inner.get_by_id(comparison_id)
+
+    def list_for_fire_event(self, fire_event_id):
+        return self._inner.list_for_fire_event(fire_event_id)
+
+
+def fk_provisioning_repository(session_factory) -> PlanComparisonRepository:
+    return _FKProvisioningRepository(PlanComparisonRepository(session_factory=session_factory), session_factory)
+
+
+# ---------------------------------------------------------------------------
 # Scenario B -- fair same-snapshot comparison: never substitutes newer/latest data
 # ---------------------------------------------------------------------------
 
@@ -313,7 +434,7 @@ def test_scenario_b_uses_exact_referenced_snapshot_never_the_newer_decoy(sqlite_
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=real_targets,
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     result = service.compare(response_plan_id=plan.id)
@@ -369,7 +490,7 @@ def test_scenarios_c_to_g_full_pipeline_reuses_persisted_snapshot_correctly(sqli
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=FakeResponseTargetSetReader({target_set.id: target_set}),
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     result = service.compare(response_plan_id=plan.id)
@@ -422,7 +543,7 @@ def test_scenario_l_optimized_worse_than_baseline_is_preserved_without_clamping(
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=FakeResponseTargetSetReader({target_set.id: target_set}),
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     result = service.compare(response_plan_id=plan.id)
@@ -460,7 +581,7 @@ def test_scenario_m_baseline_score_zero_yields_none_improvement_and_round_trips(
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=scorer,
         response_target_set_reader=FakeResponseTargetSetReader({target_set.id: target_set}),
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     result = service.compare(response_plan_id=plan.id)
@@ -494,7 +615,7 @@ def test_scenario_p_comparing_the_same_plan_twice_appends_two_historical_rows(sq
         route_planning_run_reader=FakeRoutePlanningRunReader({run.id: run}),
         scorer=RecordingScorer(result=FakePlanScoreBreakdown(700.0, 80.0, 340.0, 1, 1, ())),
         response_target_set_reader=FakeResponseTargetSetReader({target_set.id: target_set}),
-        plan_comparison_repository=PlanComparisonRepository(session_factory=sqlite_session_factory),
+        plan_comparison_repository=fk_provisioning_repository(sqlite_session_factory),
     )
 
     first_result = service.compare(response_plan_id=plan.id)
@@ -534,7 +655,7 @@ def test_scenario_q_two_different_snapshots_do_not_cross_contaminate(sqlite_sess
     )
     scorer_a = RecordingScorer(result=FakePlanScoreBreakdown(700.0, 80.0, 340.0, 1, 1, ()))
     scorer_b = RecordingScorer(result=FakePlanScoreBreakdown(300.0, 40.0, 100.0, 1, 1, ()))
-    plan_comparison_repository = PlanComparisonRepository(session_factory=sqlite_session_factory)
+    plan_comparison_repository = fk_provisioning_repository(sqlite_session_factory)
 
     service_a = BaselineComparisonService(
         optimized_plan_reader=FakeOptimizedPlanReader({plan_a.id: plan_a}),

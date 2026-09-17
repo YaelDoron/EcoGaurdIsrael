@@ -41,18 +41,28 @@ class GeneticOptimizationResult:
 
 
 class CandidateEvaluator:
-    """Decode chromosomes through Task 3 and score them through Task 2."""
+    """Decode chromosomes through Task 3 and score them through Task 2.
+
+    `evaluate` takes the run-scoped `config` as an explicit argument rather
+    than caching a scorer at construction time, so a single evaluator
+    instance can be reused safely across optimizer runs with different
+    configs (e.g. different `eta_reference_seconds`) without stale state.
+    An explicit `scorer` override is accepted for tests that need to
+    control scoring directly; it takes precedence over `config`.
+    """
 
     def __init__(self, scorer: ResponsePlanScorer | None = None) -> None:
-        self._scorer = scorer or ResponsePlanScorer()
+        self._scorer = scorer
 
     def evaluate(
         self,
         optimization_input: ResponseOptimizationInput,
         chromosome: ResponsePlanChromosome,
+        config: ResponseOptimizationConfig,
     ) -> EvaluatedChromosome:
         actions = ResponsePlanChromosomeDecoder.decode(optimization_input, chromosome)
-        score = self._scorer.evaluate(optimization_input, actions)
+        scorer = self._scorer or ResponsePlanScorer(config)
+        score = scorer.evaluate(optimization_input, actions)
         return EvaluatedChromosome(chromosome=chromosome, actions=actions, score=score)
 
 
@@ -122,7 +132,7 @@ class GeneticResponsePlanOptimizer:
 
         rng = random.Random(config.random_seed)
         population = InitialPopulationGenerator.generate(optimization_input, config, rng=rng)
-        evaluated = self._evaluate_population(optimization_input, population)
+        evaluated = self._evaluate_population(optimization_input, population, config)
         ranked = rank_candidates(evaluated)
         generation_best_scores = [ranked[0].score.total_score]
         initial_best_score = ranked[0].score.total_score
@@ -143,7 +153,7 @@ class GeneticResponsePlanOptimizer:
                     next_population.append(child_b)
 
             population = tuple(next_population)
-            evaluated = self._evaluate_population(optimization_input, population)
+            evaluated = self._evaluate_population(optimization_input, population, config)
             generation_best_scores.append(rank_candidates(evaluated)[0].score.total_score)
 
         best = rank_candidates(evaluated)[0]
@@ -162,8 +172,11 @@ class GeneticResponsePlanOptimizer:
         self,
         optimization_input: ResponseOptimizationInput,
         population: tuple[ResponsePlanChromosome, ...],
+        config: ResponseOptimizationConfig,
     ) -> tuple[EvaluatedChromosome, ...]:
-        return tuple(self._evaluator.evaluate(optimization_input, chromosome) for chromosome in population)
+        return tuple(
+            self._evaluator.evaluate(optimization_input, chromosome, config) for chromosome in population
+        )
 
     @classmethod
     def _recombine(

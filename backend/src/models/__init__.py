@@ -56,6 +56,7 @@ from src.models.response_plan_chromosome import ResponsePlanChromosome
 from src.models.response_plan import ResponsePlan
 from src.models.response_plan_details import (
     BaselineComparisonDetails,
+    OptimizationConfigDetails,
     ResponseActionDetails,
     ResponsePlanDetails,
 )
@@ -146,6 +147,7 @@ __all__ = [
     "ResponsePlan",
     "ResponseActionDetails",
     "BaselineComparisonDetails",
+    "OptimizationConfigDetails",
     "ResponsePlanDetails",
     "PlanScoreBreakdown",
     "derive_response_plan_status",
