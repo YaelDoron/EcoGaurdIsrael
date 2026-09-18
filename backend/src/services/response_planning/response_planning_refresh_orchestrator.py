@@ -30,11 +30,14 @@ from src.models.fire_event_status import FireEventStatus
 from src.models.planning_effective_state_status import PlanningEffectiveStateStatus
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.plan_comparison_repository import PlanComparisonRepository, StoredPlanComparison
+from src.repositories.resource_commitment_repository import ResourceCommitmentRepository
 from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository, StoredResponsePlan
+from src.services.resource_reservation.resource_commitment_conflict import ResourceCommitmentConflict
 from src.services.response_planning.planning_effective_state_builder import PlanningEffectiveStateBuilder
 from src.services.response_planning.planning_refresh_result import PlanningRefreshResult, PlanningRefreshStatus
 from src.services.response_planning.response_planning_refresh_ports import (
+    ActivationCollaborator,
     BaselineComparisonCollaborator,
     OptimizationCollaborator,
     RoutingCollaborator,
@@ -43,6 +46,13 @@ from src.services.response_planning.response_planning_refresh_ports import (
 logger = logging.getLogger(__name__)
 
 _INACTIVE_EVENT_STATUSES = frozenset({FireEventStatus.RESOLVED, FireEventStatus.DISMISSED})
+
+# Stage 1 (Global Multi-Incident Optimizer refactor): how many times a full
+# routing -> optimization -> activation cycle is retried after losing an
+# activation concurrency race (ResourceCommitmentConflict) before giving up
+# and returning a safe FAILED result. 1 retry = 2 attempts total. Never
+# unbounded - see _run_full_planning_cycle.
+_MAX_COMMITMENT_CONFLICT_RETRIES = 1
 
 
 class ResponsePlanningRefreshOrchestrator:
@@ -55,9 +65,11 @@ class ResponsePlanningRefreshOrchestrator:
         routing_collaborator: RoutingCollaborator,
         optimization_collaborator: OptimizationCollaborator,
         baseline_collaborator: BaselineComparisonCollaborator,
+        activation_collaborator: ActivationCollaborator,
         fire_event_repository: FireEventRepository | None = None,
         response_plan_repository: ResponsePlanRepository | None = None,
         response_plan_planning_state_repository: ResponsePlanPlanningStateRepository | None = None,
+        resource_commitment_repository: ResourceCommitmentRepository | None = None,
         plan_comparison_repository: PlanComparisonRepository | None = None,
         optimization_seed: int = DEFAULT_RANDOM_SEED,
     ) -> None:
@@ -65,11 +77,13 @@ class ResponsePlanningRefreshOrchestrator:
         self._routing_collaborator = routing_collaborator
         self._optimization_collaborator = optimization_collaborator
         self._baseline_collaborator = baseline_collaborator
+        self._activation_collaborator = activation_collaborator
         self._fire_event_repository = fire_event_repository or FireEventRepository()
         self._response_plan_repository = response_plan_repository or ResponsePlanRepository()
         self._response_plan_planning_state_repository = (
             response_plan_planning_state_repository or ResponsePlanPlanningStateRepository()
         )
+        self._resource_commitment_repository = resource_commitment_repository or ResourceCommitmentRepository()
         self._plan_comparison_repository = plan_comparison_repository or PlanComparisonRepository()
         self._optimization_seed = optimization_seed
 
@@ -94,6 +108,17 @@ class ResponsePlanningRefreshOrchestrator:
         if stored_event is None:
             raise ValueError(f"FireEvent {fire_event_id!r} was not found.")
         if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
+            # Stage 1.1: FireEventLifecycleService.resolve_event/dismiss_event
+            # is now the canonical, immediate release path - it releases
+            # commitments atomically with the status transition itself, so
+            # this call is intentionally kept as defense-in-depth, not the
+            # primary mechanism: it protects against FireEvents that became
+            # inactive through some other/older path (direct repository
+            # writes, pre-Stage-1.1 data, test fixtures) that never went
+            # through the lifecycle service. Idempotent either way: a second
+            # release for an already-released event is a harmless no-op
+            # (release_for_fire_event returns 0).
+            self._resource_commitment_repository.release_for_fire_event(fire_event_id)
             return self._bare_result(PlanningRefreshStatus.INACTIVE_EVENT, fire_event_id)
 
         state_result = self._planning_state_builder.build(fire_event_id=fire_event_id, as_of=as_of)
@@ -161,68 +186,112 @@ class ResponsePlanningRefreshOrchestrator:
         as_of: datetime,
         current_fingerprint: str,
     ) -> PlanningRefreshResult:
-        routing_result = self._routing_collaborator.plan(fire_event_id=fire_event_id, as_of=as_of)
-        if not routing_result.success:
-            return PlanningRefreshResult(
-                status=PlanningRefreshStatus.FAILED,
-                fire_event_id=fire_event_id,
-                route_planning_run_id=routing_result.run_id,
-                response_plan_id=None,
-                comparison_id=None,
-                error=routing_result.error_message or "Routing failed.",
-            )
-        route_planning_run_id = routing_result.run_id
+        """Route, optimize, and atomically activate - retrying the whole cycle
+        (bounded, Stage 1 Task 16) if activation loses a concurrency race.
 
-        optimization_result = self._optimization_collaborator.optimize(
-            route_planning_run_id=route_planning_run_id,
-            as_of=as_of,
-            seed=self._optimization_seed,
-        )
-        if not optimization_result.success:
+        A ResourceCommitmentConflict means the candidate plan just optimized
+        is no longer valid (one of its resources was claimed by another
+        FireEvent, or stopped being operationally eligible, between
+        planning and activation) - not that this FireEvent's request itself
+        is invalid. Retrying re-runs routing/optimization from fresh DB
+        state (a fresh OperationalContext naturally excludes whatever was
+        just lost) rather than re-attempting activation of the same, now
+        stale, candidate plan. Every attempt is atomic on its own: a failed
+        activation never writes anything, so the previous current plan (if
+        any) is left exactly as it was through every failed attempt.
+        """
+        last_route_planning_run_id: int | None = None
+        last_response_plan_id: int | None = None
+        last_conflict: ResourceCommitmentConflict | None = None
+
+        for attempt in range(_MAX_COMMITMENT_CONFLICT_RETRIES + 1):
+            routing_result = self._routing_collaborator.plan(fire_event_id=fire_event_id, as_of=as_of)
+            if not routing_result.success:
+                return PlanningRefreshResult(
+                    status=PlanningRefreshStatus.FAILED,
+                    fire_event_id=fire_event_id,
+                    route_planning_run_id=routing_result.run_id,
+                    response_plan_id=None,
+                    comparison_id=None,
+                    error=routing_result.error_message or "Routing failed.",
+                )
+            route_planning_run_id = routing_result.run_id
+            last_route_planning_run_id = route_planning_run_id
+
+            optimization_result = self._optimization_collaborator.optimize(
+                route_planning_run_id=route_planning_run_id,
+                as_of=as_of,
+                seed=self._optimization_seed,
+            )
+            if not optimization_result.success:
+                return PlanningRefreshResult(
+                    status=PlanningRefreshStatus.FAILED,
+                    fire_event_id=fire_event_id,
+                    route_planning_run_id=route_planning_run_id,
+                    response_plan_id=optimization_result.response_plan_id,
+                    comparison_id=None,
+                    error=optimization_result.error_message or "Optimization failed.",
+                )
+            response_plan_id = optimization_result.response_plan_id
+            last_response_plan_id = response_plan_id
+
+            try:
+                self._activation_collaborator.activate(
+                    response_plan_id=response_plan_id,
+                    planning_effective_state_fingerprint=current_fingerprint,
+                    as_of=as_of,
+                )
+            except ResourceCommitmentConflict as exc:
+                last_conflict = exc
+                logger.warning(
+                    "Plan activation lost a concurrency race for FireEvent %s (attempt %s/%s): %s",
+                    fire_event_id,
+                    attempt + 1,
+                    _MAX_COMMITMENT_CONFLICT_RETRIES + 1,
+                    exc,
+                )
+                continue
+            except Exception as exc:  # noqa: BLE001 - activation's documented failure mode.
+                return PlanningRefreshResult(
+                    status=PlanningRefreshStatus.FAILED,
+                    fire_event_id=fire_event_id,
+                    route_planning_run_id=route_planning_run_id,
+                    response_plan_id=response_plan_id,
+                    comparison_id=None,
+                    error=str(exc) or "Plan activation failed.",
+                )
+
+            try:
+                stored_comparison = self._baseline_collaborator.compare(response_plan_id=response_plan_id)
+            except Exception as exc:  # noqa: BLE001 - injected collaborator's documented failure mode.
+                return PlanningRefreshResult(
+                    status=PlanningRefreshStatus.FAILED,
+                    fire_event_id=fire_event_id,
+                    route_planning_run_id=route_planning_run_id,
+                    response_plan_id=response_plan_id,
+                    comparison_id=None,
+                    error=str(exc) or "Baseline comparison failed.",
+                )
+
             return PlanningRefreshResult(
-                status=PlanningRefreshStatus.FAILED,
+                status=PlanningRefreshStatus.REFRESHED,
                 fire_event_id=fire_event_id,
                 route_planning_run_id=route_planning_run_id,
-                response_plan_id=optimization_result.response_plan_id,
-                comparison_id=None,
-                error=optimization_result.error_message or "Optimization failed.",
-            )
-        response_plan_id = optimization_result.response_plan_id
-
-        try:
-            self._response_plan_planning_state_repository.save(
                 response_plan_id=response_plan_id,
-                planning_effective_state_fingerprint=current_fingerprint,
-            )
-        except Exception as exc:  # noqa: BLE001 - sidecar persistence's documented failure mode.
-            return PlanningRefreshResult(
-                status=PlanningRefreshStatus.FAILED,
-                fire_event_id=fire_event_id,
-                route_planning_run_id=route_planning_run_id,
-                response_plan_id=response_plan_id,
-                comparison_id=None,
-                error=str(exc) or "Planning-state sidecar persistence failed.",
+                comparison_id=stored_comparison.id,
+                error=None,
             )
 
-        try:
-            stored_comparison = self._baseline_collaborator.compare(response_plan_id=response_plan_id)
-        except Exception as exc:  # noqa: BLE001 - injected collaborator's documented failure mode.
-            return PlanningRefreshResult(
-                status=PlanningRefreshStatus.FAILED,
-                fire_event_id=fire_event_id,
-                route_planning_run_id=route_planning_run_id,
-                response_plan_id=response_plan_id,
-                comparison_id=None,
-                error=str(exc) or "Baseline comparison failed.",
-            )
-
+        # Every attempt lost the activation race - do not fabricate success.
+        # The previous current plan (if any) was never touched by any of
+        # the failed attempts above.
         return PlanningRefreshResult(
-            status=PlanningRefreshStatus.REFRESHED,
+            status=PlanningRefreshStatus.FAILED,
             fire_event_id=fire_event_id,
-            route_planning_run_id=route_planning_run_id,
-            response_plan_id=response_plan_id,
-            comparison_id=stored_comparison.id,
-            error=None,
+            route_planning_run_id=last_route_planning_run_id,
+            response_plan_id=last_response_plan_id,
+            comparison_id=None,
+            error=str(last_conflict) if last_conflict is not None else "Plan activation lost a concurrency race.",
         )
 
     def _find_comparison_for_plan(self, fire_event_id: int, response_plan_id: int) -> StoredPlanComparison | None:

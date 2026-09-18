@@ -79,40 +79,47 @@ class SimulationRefreshCoordinator:
         trigger_type: OperationalRefreshTriggerType,
         as_of: datetime,
     ) -> SimulationRefreshResult:
-        """Refresh each unique FireEvent once, in deterministic id order, then trigger planning refresh."""
+        """Refresh each unique FireEvent's operational state once, in
+        deterministic id order, then trigger exactly ONE global planning
+        refresh for the whole batch (Stage 6, Task 34: several FireEvents
+        sharing one logical upstream update - e.g. one weather update
+        affecting several nearby active fires - must never each trigger
+        their own separate global replan)."""
         self._validate_timestamp(as_of)
         normalized_ids = self._normalize_fire_event_ids(fire_event_ids)
         if not normalized_ids:
             return SimulationRefreshResult(triggered=False, reason=NO_AFFECTED_FIRE_EVENTS_REASON)
 
-        operational_results = []
-        planning_results = []
-        for fire_event_id in normalized_ids:
-            try:
-                combined_result = self._operational_planning_refresh.refresh_fire_event(
-                    fire_event_id=fire_event_id,
+        try:
+            batch_result = self._operational_planning_refresh.refresh_fire_events_batch(
+                fire_event_ids=normalized_ids,
+                trigger_type=trigger_type,
+                as_of=as_of,
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate batch refresh failure.
+            logger.exception("Simulation operational refresh failed for FireEvents %s", normalized_ids)
+            failed_results = tuple(
+                OperationalRefreshResult(
                     trigger_type=trigger_type,
+                    status=OperationalRefreshStatus.FAILED,
+                    success=False,
+                    fire_event_id=fire_event_id,
                     as_of=as_of,
+                    error_message=str(exc) or "Operational refresh failed.",
                 )
-            except Exception as exc:  # noqa: BLE001 - isolate one incident refresh failure.
-                logger.exception("Simulation operational refresh failed for FireEvent %s", fire_event_id)
-                operational_results.append(
-                    OperationalRefreshResult(
-                        trigger_type=trigger_type,
-                        status=OperationalRefreshStatus.FAILED,
-                        success=False,
-                        fire_event_id=fire_event_id,
-                        as_of=as_of,
-                        error_message=str(exc) or "Operational refresh failed.",
-                    )
-                )
-                continue
-            operational_results.append(combined_result.operational_result)
-            planning_results.extend(combined_result.planning_results)
+                for fire_event_id in normalized_ids
+            )
+            return SimulationRefreshResult(
+                triggered=True,
+                refresh_results=failed_results,
+                global_planning_result=None,
+                fire_event_ids=normalized_ids,
+            )
+
         return SimulationRefreshResult(
             triggered=True,
-            refresh_results=tuple(operational_results),
-            planning_results=tuple(planning_results),
+            refresh_results=batch_result.operational_results,
+            global_planning_result=batch_result.global_planning_result,
             fire_event_ids=normalized_ids,
         )
 
@@ -123,7 +130,7 @@ class SimulationRefreshCoordinator:
         event,
         as_of: datetime,
     ) -> SimulationRefreshResult:
-        """Refresh one resource, then trigger planning refresh for every active FireEvent."""
+        """Refresh one resource, then trigger ONE global planning refresh."""
         combined_result = self._operational_planning_refresh.refresh_resource(
             resource_id=resource_id,
             new_status=event.resource_status_change.new_status,
@@ -132,7 +139,7 @@ class SimulationRefreshCoordinator:
         return SimulationRefreshResult(
             triggered=True,
             refresh_results=(combined_result.operational_result,),
-            planning_results=combined_result.planning_results,
+            global_planning_result=combined_result.global_planning_result,
         )
 
     def _handle_weather_event(

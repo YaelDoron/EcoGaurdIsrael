@@ -1,14 +1,22 @@
-"""End-to-end proof that the simulation path reaches Epic 5 through the real
-production US4.4 -> US5.4 bridge (OperationalPlanningRefreshCoordinator).
+"""End-to-end proof that the simulation path reaches the Stage 6 Global GA
+through the real production US4.4 -> global-planning bridge
+(OperationalPlanningRefreshCoordinator -> GlobalPlanningRefreshCoordinator).
 
 Everything here is real production code driven through SimulationEventExecutor
 / SimulationFireDetectionCoordinator / SimulationRefreshCoordinator, exactly
 as scripts/run_demo_simulation.py drives it - real FireDetectionAgent, real
 FireSeverityAssessmentAgent, real FireSpreadRefreshOrchestrator, real
 ResponseTargetGenerationAgent, real OperationalRefreshOrchestrator, real
-ResponsePlanningRefreshOrchestrator (via build_response_planning_refresh_orchestrator,
-so real Dijkstra + real GeneticResponsePlanOptimizer + real
-BaselineComparisonService), all against one SQLite in-memory database.
+GlobalPlanningRefreshCoordinator (via build_global_planning_refresh_coordinator,
+so real GlobalPlanningInputBuilder + real Global GA + real
+GlobalResponsePlanActivationService - no Dijkstra rerun during activation,
+no legacy per-event optimizer, no baseline comparison fabricated), all
+against one SQLite in-memory database.
+
+Stage 6 Task 48 (simulation cutover): this replaces the pre-Stage-6 wiring
+that drove the legacy per-event ResponsePlanningRefreshOrchestrator - the
+simulation now exercises the exact same GlobalPlanningRefreshCoordinator
+production path as every other trigger, never a separate demo planner.
 
 No live network call is made:
 - Weather/Satellite/News data comes from the same deterministic, seeded
@@ -59,16 +67,16 @@ from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_detection import FireDetectionEvidenceService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
+from src.services.global_planning.global_planning_refresh_coordinator import GlobalPlanningRefreshStatus
+from src.services.global_planning.global_planning_refresh_production_factory import (
+    build_global_planning_refresh_coordinator,
+)
 from src.services.operational import OperationalContextService
 from src.services.operational_planning_refresh.operational_planning_refresh_coordinator import (
     OperationalPlanningRefreshCoordinator,
 )
 from src.services.operational_refresh import FireSpreadRefreshOrchestrator, OperationalRefreshOrchestrator
 from src.services.operational_refresh.resource_status_update_service import ResourceStatusUpdateService
-from src.services.response_planning import PlanningRefreshStatus
-from src.services.response_planning.response_planning_production_factory import (
-    build_response_planning_refresh_orchestrator,
-)
 from src.services.response_target import ResponseTargetInputService
 from src.simulation import (
     CARMEL_LOCATION,
@@ -236,14 +244,13 @@ class RealSimulationStack:
             fire_event_repository=self.fire_event_repository,
         )
 
-        self.planning_refresh_orchestrator = build_response_planning_refresh_orchestrator(
+        self.global_planning_refresh_coordinator = build_global_planning_refresh_coordinator(
             session_factory=session_factory
         )
 
         operational_planning_refresh = OperationalPlanningRefreshCoordinator(
             operational_refresh_orchestrator=operational_refresh_orchestrator,
-            planning_refresh=self.planning_refresh_orchestrator,
-            fire_event_repository=self.fire_event_repository,
+            global_planning_refresh=self.global_planning_refresh_coordinator,
         )
 
         operational_context_service = OperationalContextService(
@@ -340,36 +347,33 @@ def test_active_fire_simulation_reaches_a_persisted_response_plan(sqlite_session
     target_history = stack.response_target_repository.get_history_for_event(fire_event_id)
     assert target_history, "real ResponseTargetGenerationAgent must have run through the bridge"
 
-    # Planning was reached: at least one PlanningRefreshResult exists for this event.
-    all_planning_results = [
-        planning_result
-        for refresh_result in refresh_results
-        for planning_result in refresh_result.planning_results
-        if planning_result.fire_event_id == fire_event_id
-    ]
-    assert all_planning_results, "US5.4 planning refresh must have been invoked for the detected FireEvent"
+    # Planning was reached: at least one GlobalPlanningRefreshResult exists.
+    global_results = [r.global_planning_result for r in refresh_results if r.global_planning_result is not None]
+    assert global_results, "the Global GA planning refresh must have been invoked for the detected FireEvent"
 
     # With a real, available resource and a pre-cached road network, planning
-    # must have actually produced a full cycle, not just been attempted.
-    refreshed_results = [r for r in all_planning_results if r.status is PlanningRefreshStatus.REFRESHED]
-    assert refreshed_results, (
-        f"expected at least one REFRESHED planning result with prerequisites present, got statuses: "
-        f"{[r.status for r in all_planning_results]}"
+    # must have actually produced a full cycle (ACTIVATED), not just been attempted.
+    activated_results = [r for r in global_results if r.status is GlobalPlanningRefreshStatus.ACTIVATED]
+    assert activated_results, (
+        f"expected at least one ACTIVATED global planning result with prerequisites present, got statuses: "
+        f"{[r.status for r in global_results]}"
     )
-    last_refreshed = refreshed_results[-1]
-    assert last_refreshed.route_planning_run_id is not None
-    assert last_refreshed.response_plan_id is not None
-    assert last_refreshed.comparison_id is not None
+    last_activated = activated_results[-1]
+    response_plan_id = last_activated.response_plan_ids_by_event.get(fire_event_id)
+    assert response_plan_id is not None
 
     counts = stack.plan_counts(fire_event_id)
     assert counts["runs"] >= 1
     assert counts["plans"] >= 1
-    assert counts["comparisons"] >= 1
+    # Baseline comparison is never fabricated for a Global-GA-produced plan
+    # (Task 46) - genuinely absent, not merely unchecked.
+    assert counts["comparisons"] == 0
 
-    stored_plan = stack.response_plan_repository.get_by_id(last_refreshed.response_plan_id)
+    stored_plan = stack.response_plan_repository.get_by_id(response_plan_id)
     assert stored_plan.plan.fire_event_id == fire_event_id
+    assert stored_plan.plan.methodology == "global_genetic_resource_allocation"
     assert CARMEL_RESOURCE_ID in stack.route_planning_repository.get_by_id(
-        last_refreshed.route_planning_run_id
+        stored_plan.plan.route_planning_run_id
     ).run.resource_ids
 
 
@@ -404,20 +408,27 @@ def test_semantically_unchanged_followup_event_is_a_planning_no_op(sqlite_sessio
         as_of=followup_as_of,
     )
 
-    assert followup_result.planning_results, "the followup refresh must still reach planning"
-    no_op_results = [r for r in followup_result.planning_results if r.status is PlanningRefreshStatus.NO_OP]
-    assert no_op_results, f"expected a NO_OP, got statuses: {[r.status for r in followup_result.planning_results]}"
+    assert followup_result.global_planning_result is not None, "the followup refresh must still reach global planning"
+    assert followup_result.global_planning_result.status is GlobalPlanningRefreshStatus.NO_OP, (
+        f"expected NO_OP, got status: {followup_result.global_planning_result.status}"
+    )
 
     counts_after_followup = stack.plan_counts(fire_event_id)
     assert counts_after_followup == counts_after_scenario, "NO_OP must not create a new run/plan/comparison"
 
 
 # ---------------------------------------------------------------------------
-# E2E C: multi-incident isolation
+# E2E C: multi-incident - distinct per-event plans, correct resource assignment
 # ---------------------------------------------------------------------------
 
 
-def test_two_incident_scenario_keeps_fire_event_planning_fully_isolated(sqlite_session_factory):
+def test_two_incident_scenario_produces_distinct_plans_with_geographically_correct_assignments(sqlite_session_factory):
+    """Stage 6: this is no longer "resource pool isolation" (there is ONE
+    global candidate-resource universe, considered together for both
+    events - Task 1) - it is "each event still gets its OWN distinct
+    ResponsePlan/RoutePlanningRun/ResponseTargetSet, and its ACTUALLY
+    ASSIGNED resource is the geographically correct, nearby one," which the
+    Global GA's own cross-event competition (Stage 4) already guarantees."""
     seed_station_and_road_network(
         sqlite_session_factory,
         station_id=CARMEL_STATION_ID,
@@ -452,9 +463,17 @@ def test_two_incident_scenario_keeps_fire_event_planning_fully_isolated(sqlite_s
     run_b = stack.route_planning_repository.get_by_id(plan_b.plan.route_planning_run_id)
     assert run_a.run.fire_event_id == event_a
     assert run_b.run.fire_event_id == event_b
-    # Each event's route run only used resources from its own, nearby station.
-    assert set(run_a.run.resource_ids) <= {CARMEL_RESOURCE_ID}
-    assert set(run_b.run.resource_ids) <= {GOLAN_RESOURCE_ID}
+
+    # Each event's ACTUALLY ASSIGNED resource (the one with a real
+    # ResponseAction on its plan) is its own nearby station's resource -
+    # the Global GA's cross-event competition still resolves to the
+    # geographically sensible outcome, even though the candidate universe
+    # itself was considered together (Task 1).
+    assigned_a = {action.resource_id for action in plan_a.plan.actions}
+    assigned_b = {action.resource_id for action in plan_b.plan.actions}
+    assert assigned_a <= {CARMEL_RESOURCE_ID}
+    assert assigned_b <= {GOLAN_RESOURCE_ID}
+    assert not (assigned_a & assigned_b)  # no resource double-booked across events
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +518,7 @@ def test_resource_becoming_unavailable_then_available_triggers_replanning_withou
 
     # Planning was reevaluated for both resource transitions.
     for resource_result in resource_refresh_results:
-        assert resource_result.planning_results, "resource change must reach planning refresh"
+        assert resource_result.global_planning_result is not None, "resource change must reach global planning refresh"
 
     resource = stack.resource_repository.get_by_id(CARMEL_RESOURCE_ID)
     assert resource.status is ResourceStatus.AVAILABLE  # back to AVAILABLE after the second event

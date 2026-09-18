@@ -62,7 +62,7 @@ class PlanningEffectiveStateBuilder:
 
         fire_target = _find_active_fire_target(stored_target_set)
         stations, available_resources = self._operational_context_service.get_available_operational_context(
-            fire_target.latitude, fire_target.longitude
+            fire_target.latitude, fire_target.longitude, excluded_fire_event_id=fire_event_id
         )
 
         state = PlanningEffectiveState(

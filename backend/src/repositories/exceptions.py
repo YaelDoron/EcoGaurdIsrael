@@ -47,3 +47,11 @@ class RoutePlanningRepositoryError(Exception):
 
 class ResponsePlanRepositoryError(Exception):
     """Base exception for response-plan repository errors."""
+
+
+class ResourceCommitmentRepositoryError(Exception):
+    """Base exception for resource-commitment repository errors."""
+
+
+class GlobalPlanningRunRepositoryError(Exception):
+    """Base exception for global-planning-run repository errors."""

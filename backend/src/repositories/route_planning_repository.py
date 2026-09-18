@@ -52,37 +52,46 @@ class RoutePlanningRepository:
 
     def save_run(self, run: RoutePlanningRun) -> StoredRoutePlanningRun:
         """Atomically persist a complete routing run and every RouteResult it contains."""
+        with self._session_scope() as session:
+            return self.save_run_in_session(session, run)
+
+    def save_run_in_session(self, session: Session, run: RoutePlanningRun) -> StoredRoutePlanningRun:
+        """Same persistence as save_run, composed into a CALLER-OWNED
+        session/transaction (Stage 6: GlobalResponsePlanActivationService
+        uses this to make several FireEvents' route runs, ResponsePlans, and
+        commitments commit or roll back together). Does NOT commit or close
+        the session - mirrors ResourceCommitmentRepository's own
+        caller-owned-session convention (see that module's docstring)."""
         if not isinstance(run, RoutePlanningRun):
             raise RoutePlanningRepositoryError(f"run must be a RoutePlanningRun, got {run!r}")
 
-        with self._session_scope() as session:
-            self._validate_response_target_set(session, run)
-            self._validate_response_targets(session, run)
+        self._validate_response_target_set(session, run)
+        self._validate_response_targets(session, run)
 
-            db_run = RoutePlanningRunDB(
-                fire_event_id=run.fire_event_id,
-                response_target_set_id=run.response_target_set_id,
-                planned_at=run.planned_at,
-                methodology=run.methodology,
-                methodology_version=run.methodology_version,
-                resource_ids=list(run.resource_ids),
-            )
-            session.add(db_run)
-            try:
-                session.flush()
-                for route in run.routes:
-                    session.add(self._to_db_route(db_run.id, route))
-                session.flush()
-            except (IntegrityError, SQLAlchemyError) as exc:
-                raise RoutePlanningRepositoryError("Routing run persistence failed.") from exc
+        db_run = RoutePlanningRunDB(
+            fire_event_id=run.fire_event_id,
+            response_target_set_id=run.response_target_set_id,
+            planned_at=run.planned_at,
+            methodology=run.methodology,
+            methodology_version=run.methodology_version,
+            resource_ids=list(run.resource_ids),
+        )
+        session.add(db_run)
+        try:
+            session.flush()
+            for route in run.routes:
+                session.add(self._to_db_route(db_run.id, route))
+            session.flush()
+        except (IntegrityError, SQLAlchemyError) as exc:
+            raise RoutePlanningRepositoryError("Routing run persistence failed.") from exc
 
-            logger.info(
-                "Stored routing run %s for FireEvent %s with %s route result(s)",
-                db_run.id,
-                run.fire_event_id,
-                len(run.routes),
-            )
-            return self._to_stored_run(db_run)
+        logger.info(
+            "Stored routing run %s for FireEvent %s with %s route result(s)",
+            db_run.id,
+            run.fire_event_id,
+            len(run.routes),
+        )
+        return self._to_stored_run(db_run)
 
     def get_by_id(self, run_id: int) -> StoredRoutePlanningRun | None:
         """Return a persisted routing run by database id, or None if absent."""

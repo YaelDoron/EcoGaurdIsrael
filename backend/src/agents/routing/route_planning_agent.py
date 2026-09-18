@@ -72,7 +72,9 @@ class RoutePlanningAgent:
             fire_target = _find_active_fire_target(stored_target_set)
             routing_targets = _to_routing_targets(stored_target_set)
 
-            context = self._build_operational_context(fire_target.target.latitude, fire_target.target.longitude)
+            context = self._build_operational_context(
+                fire_target.target.latitude, fire_target.target.longitude, fire_event_id
+            )
             routing_resources = _to_routing_resources(context)
 
             if not routing_resources:
@@ -153,10 +155,17 @@ class RoutePlanningAgent:
                 error_message="Route planning failed.",
             )
 
-    def _build_operational_context(self, fire_latitude: float, fire_longitude: float) -> OperationalContext:
+    def _build_operational_context(
+        self, fire_latitude: float, fire_longitude: float, fire_event_id: int
+    ) -> OperationalContext:
+        """Build this fire's operational context, excluding resources reserved by
+        another active FireEvent's current plan (Stage 0 - see
+        OperationalContextService's module docstring)."""
         session = self._session_factory()
         try:
-            return self._operational_context_service.build_context(session, fire_latitude, fire_longitude)
+            return self._operational_context_service.build_context(
+                session, fire_latitude, fire_longitude, excluded_fire_event_id=fire_event_id
+            )
         finally:
             session.close()
 

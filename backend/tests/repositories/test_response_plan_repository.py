@@ -20,6 +20,7 @@ from src.database.models.route_result_db import RouteResultDB
 from src.models import GraphNode, ResponseAction, ResponsePlan, ResponsePlanStatus
 from src.models.resource_status import ResourceStatus
 from src.repositories.exceptions import ResponsePlanRepositoryError
+from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository, StoredResponsePlan
 from src.repositories.road_network_repository import RoadNetworkRepository
 
@@ -174,6 +175,58 @@ def rows(sqlite_session_factory, model):
     values = session.execute(select(model)).scalars().all()
     session.close()
     return values
+
+
+def make_context_for_new_fire_event(sqlite_session_factory, **event_overrides) -> dict:
+    """Create an independent FireEvent + ResponseTargetSet + RoutePlanningRun context
+    (mirrors `persisted_context`, for tests needing a second/third FireEvent)."""
+    session = sqlite_session_factory()
+    defaults = dict(
+        latitude=32.0,
+        longitude=35.0,
+        detected_at=GENERATED_AT,
+        updated_at=GENERATED_AT,
+        status="confirmed",
+        detection_confidence=0.8,
+        methodology="TEST_DETECTION",
+        methodology_version="1.0",
+    )
+    defaults.update(event_overrides)
+    event = FireEventDB(**defaults)
+    session.add(event)
+    session.flush()
+    target_set = ResponseTargetSetDB(
+        fire_event_id=event.id,
+        generated_at=GENERATED_AT,
+        methodology="TEST_TARGETS",
+        methodology_version="1.0",
+    )
+    session.add(target_set)
+    session.flush()
+    route_run = RoutePlanningRunDB(
+        fire_event_id=event.id,
+        response_target_set_id=target_set.id,
+        planned_at=GENERATED_AT,
+        methodology="TEST_ROUTING",
+        methodology_version="1.0",
+        resource_ids=[],
+    )
+    session.add(route_run)
+    session.commit()
+    context = {
+        "fire_event_id": event.id,
+        "response_target_set_id": target_set.id,
+        "route_planning_run_id": route_run.id,
+        "session_factory": sqlite_session_factory,
+    }
+    session.close()
+    return context
+
+
+def add_sidecar(sqlite_session_factory, response_plan_id: int, fingerprint: str = "a" * 64) -> None:
+    ResponsePlanPlanningStateRepository(sqlite_session_factory).save(
+        response_plan_id=response_plan_id, planning_effective_state_fingerprint=fingerprint
+    )
 
 
 def test_save_complete_response_plan_round_trips(repository, persisted_context, sqlite_session_factory):
@@ -420,3 +473,161 @@ def test_invalid_repository_arguments_rejected(repository):
         repository.get_for_fire_event(True)
     with pytest.raises(ResponsePlanRepositoryError):
         repository.get_latest_for_fire_event(-1)
+
+
+# ---------------------------------------------------------------------------
+# Stage 0 (Global Multi-Incident Optimizer refactor): get_current_plan_resource_ids_for_fire_events
+# ---------------------------------------------------------------------------
+
+
+def test_current_plan_resource_ids_returns_sidecar_backed_plans_resources(
+    repository, persisted_context, sqlite_session_factory
+):
+    stored = repository.save(make_plan(persisted_context))
+    add_sidecar(sqlite_session_factory, stored.id)
+
+    found = repository.get_current_plan_resource_ids_for_fire_events([persisted_context["fire_event_id"]])
+
+    assert found == frozenset({"TRUCK-A", "TRUCK-B"})
+
+
+def test_current_plan_resource_ids_ignores_plan_without_a_sidecar(repository, persisted_context):
+    """A plan that never became current (no sidecar) must never reserve its
+    resources, even though it is the newest persisted plan for the event."""
+    repository.save(make_plan(persisted_context))
+
+    found = repository.get_current_plan_resource_ids_for_fire_events([persisted_context["fire_event_id"]])
+
+    assert found == frozenset()
+
+
+def test_current_plan_resource_ids_ignores_superseded_sidecar_backed_plan(
+    repository, persisted_context, sqlite_session_factory
+):
+    """Task 6: an older sidecar-backed plan's resources must not remain
+    reserved once a newer sidecar-backed plan supersedes it."""
+    older = repository.save(
+        make_plan(
+            persisted_context,
+            generated_at=GENERATED_AT,
+            actions=(ResponseAction("TRUCK-OLD", 10, 100),),
+        )
+    )
+    add_sidecar(sqlite_session_factory, older.id, fingerprint="a" * 64)
+    newer = repository.save(
+        make_plan(
+            persisted_context,
+            generated_at=GENERATED_AT + timedelta(minutes=5),
+            actions=(ResponseAction("TRUCK-NEW", 10, 101),),
+        )
+    )
+    add_sidecar(sqlite_session_factory, newer.id, fingerprint="b" * 64)
+
+    found = repository.get_current_plan_resource_ids_for_fire_events([persisted_context["fire_event_id"]])
+
+    assert found == frozenset({"TRUCK-NEW"})
+
+
+def test_current_plan_resource_ids_aggregates_across_multiple_fire_events(
+    repository, persisted_context, sqlite_session_factory
+):
+    stored_a = repository.save(make_plan(persisted_context))
+    add_sidecar(sqlite_session_factory, stored_a.id)
+
+    context_b = make_context_for_new_fire_event(sqlite_session_factory)
+    stored_b = repository.save(make_plan(context_b, actions=(ResponseAction("TRUCK-C", 10, 100),)))
+    add_sidecar(sqlite_session_factory, stored_b.id)
+
+    found = repository.get_current_plan_resource_ids_for_fire_events(
+        [persisted_context["fire_event_id"], context_b["fire_event_id"]]
+    )
+
+    assert found == frozenset({"TRUCK-A", "TRUCK-B", "TRUCK-C"})
+
+
+def test_current_plan_resource_ids_ignores_plan_with_zero_actions(
+    repository, persisted_context, sqlite_session_factory
+):
+    stored = repository.save(
+        make_plan(
+            persisted_context,
+            status=ResponsePlanStatus.NO_FEASIBLE_ASSIGNMENTS,
+            actions=(),
+            uncovered_target_ids=(10, 20),
+            plan_score=0.0,
+            coverage_score=0.0,
+            average_eta_seconds=None,
+        )
+    )
+    add_sidecar(sqlite_session_factory, stored.id)
+
+    found = repository.get_current_plan_resource_ids_for_fire_events([persisted_context["fire_event_id"]])
+
+    assert found == frozenset()
+
+
+def test_current_plan_resource_ids_returns_empty_for_empty_input(repository):
+    assert repository.get_current_plan_resource_ids_for_fire_events([]) == frozenset()
+
+
+def test_current_plan_resource_ids_returns_empty_when_fire_event_has_no_plan_at_all(
+    repository, persisted_context
+):
+    found = repository.get_current_plan_resource_ids_for_fire_events([persisted_context["fire_event_id"]])
+
+    assert found == frozenset()
+
+
+def test_current_plan_resource_ids_rejects_invalid_fire_event_ids(repository):
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.get_current_plan_resource_ids_for_fire_events([0])
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.get_current_plan_resource_ids_for_fire_events([True])
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 (Global Multi-Incident Optimizer refactor): global_planning_run_id
+# ---------------------------------------------------------------------------
+
+
+def test_global_planning_run_id_defaults_to_none(repository, persisted_context):
+    stored = repository.save(make_plan(persisted_context))
+
+    assert repository.get_global_planning_run_id(stored.id) is None
+
+
+def test_set_global_planning_run_id_stamps_the_plan(repository, persisted_context, sqlite_session_factory):
+    from src.repositories.global_planning_run_repository import GlobalPlanningRunRepository
+
+    stored = repository.save(make_plan(persisted_context))
+    global_run = GlobalPlanningRunRepository(sqlite_session_factory).create_run(
+        started_at=GENERATED_AT,
+        trigger="manual",
+        methodology="legacy_per_event_orchestration",
+        methodology_version="1.0",
+        input_fingerprint=None,
+        fire_event_ids=(),
+    )
+
+    repository.set_global_planning_run_id(stored.id, global_run.id)
+
+    assert repository.get_global_planning_run_id(stored.id) == global_run.id
+
+
+def test_set_global_planning_run_id_raises_for_unknown_plan(repository):
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.set_global_planning_run_id(999999, 1)
+
+
+def test_get_global_planning_run_id_raises_for_unknown_plan(repository):
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.get_global_planning_run_id(999999)
+
+
+def test_global_planning_run_id_methods_reject_invalid_arguments(repository):
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.set_global_planning_run_id(0, 1)
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.set_global_planning_run_id(1, 0)
+    with pytest.raises(ResponsePlanRepositoryError):
+        repository.get_global_planning_run_id(-1)

@@ -75,8 +75,21 @@ class FakeOperationalContextService:
         self.exc = exc
         self.calls = []
 
-    def build_context(self, db, fire_latitude, fire_longitude, min_resources: int = 1):
-        self.calls.append({"fire_latitude": fire_latitude, "fire_longitude": fire_longitude})
+    def build_context(
+        self,
+        db,
+        fire_latitude,
+        fire_longitude,
+        min_resources: int = 1,
+        excluded_fire_event_id: int | None = None,
+    ):
+        self.calls.append(
+            {
+                "fire_latitude": fire_latitude,
+                "fire_longitude": fire_longitude,
+                "excluded_fire_event_id": excluded_fire_event_id,
+            }
+        )
         if self.exc is not None:
             raise self.exc
         return self.context
@@ -253,7 +266,11 @@ def test_operational_context_is_built_from_active_fire_target_coordinates():
     ).plan(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
     assert operational_context_service.calls == [
-        {"fire_latitude": ACTIVE_TARGET.latitude, "fire_longitude": ACTIVE_TARGET.longitude}
+        {
+            "fire_latitude": ACTIVE_TARGET.latitude,
+            "fire_longitude": ACTIVE_TARGET.longitude,
+            "excluded_fire_event_id": FIRE_EVENT_ID,
+        }
     ]
 
 

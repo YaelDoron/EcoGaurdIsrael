@@ -75,8 +75,21 @@ class FakeOperationalContextService:
         self.exc = exc
         self.calls = []
 
-    def get_available_operational_context(self, latitude, longitude, min_resources: int = 1):
-        self.calls.append({"latitude": latitude, "longitude": longitude, "min_resources": min_resources})
+    def get_available_operational_context(
+        self,
+        latitude,
+        longitude,
+        min_resources: int = 1,
+        excluded_fire_event_id: int | None = None,
+    ):
+        self.calls.append(
+            {
+                "latitude": latitude,
+                "longitude": longitude,
+                "min_resources": min_resources,
+                "excluded_fire_event_id": excluded_fire_event_id,
+            }
+        )
         if self.exc is not None:
             raise self.exc
         return self.stations, self.resources
@@ -238,7 +251,12 @@ def test_available_operational_context_is_queried_with_active_fire_target_coordi
     ).build(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
     assert operational_context_service.calls == [
-        {"latitude": ACTIVE_TARGET.latitude, "longitude": ACTIVE_TARGET.longitude, "min_resources": 1}
+        {
+            "latitude": ACTIVE_TARGET.latitude,
+            "longitude": ACTIVE_TARGET.longitude,
+            "min_resources": 1,
+            "excluded_fire_event_id": FIRE_EVENT_ID,
+        }
     ]
 
 

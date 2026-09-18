@@ -38,6 +38,7 @@ from src.repositories.plan_comparison_repository import PlanComparisonRepository
 from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
+from src.repositories.resource_commitment_repository import ResourceCommitmentRepository
 from src.repositories.route_planning_repository import RoutePlanningRepository
 from src.services.baseline_comparison.baseline_comparison_production_readers import (
     ResponsePlanOptimizedPlanReaderAdapter,
@@ -57,6 +58,7 @@ from src.services.response_planning.response_optimization_collaborator_adapter i
 from src.services.response_planning.response_planning_refresh_orchestrator import (
     ResponsePlanningRefreshOrchestrator,
 )
+from src.services.resource_reservation import ResponsePlanActivationService
 
 AS_OF = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
 LATER = AS_OF + timedelta(hours=1)
@@ -201,6 +203,12 @@ class Wiring:
         self.plan_comparison_repository = PlanComparisonRepository(session_factory)
         self.sidecar_repository = ResponsePlanPlanningStateRepository(session_factory)
         self.fire_event_repository = FireEventRepository(session_factory)
+        self.resource_commitment_repository = ResourceCommitmentRepository(session_factory)
+        self.activation_service = ResponsePlanActivationService(
+            response_plan_repository=self.response_plan_repository,
+            resource_commitment_repository=self.resource_commitment_repository,
+            session_factory=session_factory,
+        )
 
         self.routing_collaborator = PersistingFakeRoutingCollaborator(
             self.response_target_repository, self.route_planning_repository, resource_ids
@@ -235,6 +243,8 @@ class Wiring:
             response_plan_planning_state_repository=self.sidecar_repository,
             plan_comparison_repository=self.plan_comparison_repository,
             optimization_seed=DEFAULT_RANDOM_SEED,
+            activation_collaborator=self.activation_service,
+            resource_commitment_repository=self.resource_commitment_repository,
         )
 
 
@@ -428,6 +438,8 @@ def test_baseline_only_recovery_skips_routing_and_optimization(sqlite_session_fa
         response_plan_planning_state_repository=wiring.sidecar_repository,
         plan_comparison_repository=wiring.plan_comparison_repository,
         optimization_seed=DEFAULT_RANDOM_SEED,
+        activation_collaborator=wiring.activation_service,
+        resource_commitment_repository=wiring.resource_commitment_repository,
     )
 
     result = recovery_orchestrator.refresh(fire_event_id=fire_event_id, as_of=LATER)
