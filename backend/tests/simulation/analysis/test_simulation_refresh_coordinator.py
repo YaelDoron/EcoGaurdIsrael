@@ -1,4 +1,11 @@
-"""Tests for simulation integration with the production US4.4 -> US5.4 bridge."""
+"""Tests for simulation integration with the production US4.4 -> Stage 6
+global planning bridge.
+
+Stage 6 Task 48 (simulation cutover): SimulationRefreshCoordinator now
+triggers exactly ONE global planning refresh per logical batch (never one
+per FireEvent), via OperationalPlanningRefreshCoordinator.refresh_fire_events_batch/
+refresh_resource - the exact same production path every other trigger uses.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,10 +20,10 @@ from src.models.operational_refresh_trigger_type import OperationalRefreshTrigge
 from src.models.resource_status import ResourceStatus
 from src.repositories.fire_event_repository import StoredFireEvent
 from src.services.operational_planning_refresh.operational_planning_refresh_result import (
+    OperationalPlanningRefreshBatchResult,
     OperationalPlanningRefreshResult,
 )
 from src.services.operational_refresh import OperationalRefreshResult, OperationalRefreshStatus
-from src.services.response_planning import PlanningRefreshResult, PlanningRefreshStatus
 from src.simulation import (
     CARMEL_LOCATION,
     ScenarioType,
@@ -32,41 +39,58 @@ from src.simulation import (
 AS_OF = datetime(2026, 9, 15, 12, 0, tzinfo=timezone.utc)
 
 
+@dataclass(frozen=True)
+class FakeGlobalPlanningRefreshResult:
+    """Stand-in for GlobalPlanningRefreshResult."""
+
+    status: str
+    trigger: str
+
+
 class FakeOperationalPlanningRefreshCoordinator:
     """Fake OperationalPlanningRefreshCoordinator: records calls, returns/raises as configured.
 
-    Returns a real PlanningRefreshResult for successful fire-event refreshes
-    (SimulationRefreshResult validates planning_results against that exact
-    class), standing in for what ResponsePlanningRefreshOrchestrator would
-    produce in production.
+    Implements refresh_fire_events_batch (one call per logical batch) and
+    refresh_resource, matching the real coordinator's Stage 6 interface -
+    never a per-FireEvent refresh_fire_event fan-out.
     """
 
     def __init__(self, fail_ids=()) -> None:
-        self.fire_calls = []
+        self.batch_calls = []
         self.resource_calls = []
         self.fail_ids = set(fail_ids)
 
-    def refresh_fire_event(self, *, fire_event_id, trigger_type, as_of):
-        self.fire_calls.append({"fire_event_id": fire_event_id, "trigger_type": trigger_type, "as_of": as_of})
-        if fire_event_id in self.fail_ids:
-            raise RuntimeError(f"refresh failed for {fire_event_id}")
-        operational_result = OperationalRefreshResult(
-            trigger_type=trigger_type,
-            status=OperationalRefreshStatus.REFRESHED,
-            success=True,
-            fire_event_id=fire_event_id,
-            as_of=as_of,
+    def refresh_fire_events_batch(self, *, fire_event_ids, trigger_type, as_of):
+        self.batch_calls.append({"fire_event_ids": fire_event_ids, "trigger_type": trigger_type, "as_of": as_of})
+        operational_results = []
+        for fire_event_id in fire_event_ids:
+            if fire_event_id in self.fail_ids:
+                operational_results.append(
+                    OperationalRefreshResult(
+                        trigger_type=trigger_type,
+                        status=OperationalRefreshStatus.FAILED,
+                        success=False,
+                        fire_event_id=fire_event_id,
+                        as_of=as_of,
+                        error_message=f"refresh failed for {fire_event_id}",
+                    )
+                )
+            else:
+                operational_results.append(
+                    OperationalRefreshResult(
+                        trigger_type=trigger_type,
+                        status=OperationalRefreshStatus.REFRESHED,
+                        success=True,
+                        fire_event_id=fire_event_id,
+                        as_of=as_of,
+                    )
+                )
+        any_success = any(result.success for result in operational_results)
+        global_planning_result = (
+            FakeGlobalPlanningRefreshResult(status="activated", trigger=trigger_type.value) if any_success else None
         )
-        planning_result = PlanningRefreshResult(
-            status=PlanningRefreshStatus.REFRESHED,
-            fire_event_id=fire_event_id,
-            route_planning_run_id=100 + fire_event_id,
-            response_plan_id=200 + fire_event_id,
-            comparison_id=300 + fire_event_id,
-        )
-        return OperationalPlanningRefreshResult(
-            operational_result=operational_result,
-            planning_results=(planning_result,),
+        return OperationalPlanningRefreshBatchResult(
+            operational_results=tuple(operational_results), global_planning_result=global_planning_result
         )
 
     def refresh_resource(self, *, resource_id, new_status, as_of):
@@ -76,7 +100,12 @@ class FakeOperationalPlanningRefreshCoordinator:
             status=OperationalRefreshStatus.RESOURCE_UPDATED,
             success=True,
         )
-        return OperationalPlanningRefreshResult(operational_result=operational_result, planning_results=())
+        global_planning_result = FakeGlobalPlanningRefreshResult(
+            status="activated", trigger=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE.value
+        )
+        return OperationalPlanningRefreshResult(
+            operational_result=operational_result, global_planning_result=global_planning_result
+        )
 
 
 class FakeFireEventRepository:
@@ -188,8 +217,8 @@ def test_weather_source_event_maps_to_weather_update_with_exact_timestamp():
 
     assert result.triggered is True
     assert result.fire_event_ids == (5,)
-    assert bridge.fire_calls == [
-        {"fire_event_id": 5, "trigger_type": OperationalRefreshTriggerType.WEATHER_UPDATE, "as_of": AS_OF}
+    assert bridge.batch_calls == [
+        {"fire_event_ids": (5,), "trigger_type": OperationalRefreshTriggerType.WEATHER_UPDATE, "as_of": AS_OF}
     ]
 
 
@@ -209,12 +238,12 @@ def test_detection_events_map_to_fire_event_update(event_type):
     )
 
     assert result.fire_event_ids == (12,)
-    assert bridge.fire_calls == [
-        {"fire_event_id": 12, "trigger_type": OperationalRefreshTriggerType.FIRE_EVENT_UPDATE, "as_of": AS_OF}
+    assert bridge.batch_calls == [
+        {"fire_event_ids": (12,), "trigger_type": OperationalRefreshTriggerType.FIRE_EVENT_UPDATE, "as_of": AS_OF}
     ]
 
 
-def test_fire_event_ids_are_deduped_and_processed_in_ascending_order():
+def test_fire_event_ids_are_deduped_and_processed_in_ascending_order_within_one_batch():
     bridge = FakeOperationalPlanningRefreshCoordinator()
     coordinator = make_coordinator(operational_planning_refresh=bridge)
 
@@ -225,10 +254,30 @@ def test_fire_event_ids_are_deduped_and_processed_in_ascending_order():
     )
 
     assert result.fire_event_ids == (3, 4, 9)
-    assert [call["fire_event_id"] for call in bridge.fire_calls] == [3, 4, 9]
+    # Exactly ONE batch call, never a per-FireEvent fan-out.
+    assert len(bridge.batch_calls) == 1
+    assert bridge.batch_calls[0]["fire_event_ids"] == (3, 4, 9)
 
 
-def test_one_fire_event_failure_does_not_prevent_other_refreshes():
+def test_several_fire_events_sharing_one_update_trigger_exactly_one_global_refresh():
+    """Task 34: several FireEvents sharing one logical upstream update must
+    never each trigger their own separate global replan."""
+    bridge = FakeOperationalPlanningRefreshCoordinator()
+    coordinator = make_coordinator(operational_planning_refresh=bridge)
+
+    result = coordinator.refresh_fire_events(
+        fire_event_ids=(3, 4, 9),
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert len(bridge.batch_calls) == 1
+    assert result.global_planning_result == FakeGlobalPlanningRefreshResult(
+        status="activated", trigger=OperationalRefreshTriggerType.WEATHER_UPDATE.value
+    )
+
+
+def test_one_fire_event_failure_does_not_prevent_the_batch_global_refresh():
     bridge = FakeOperationalPlanningRefreshCoordinator(fail_ids={4})
     coordinator = make_coordinator(operational_planning_refresh=bridge)
 
@@ -238,30 +287,29 @@ def test_one_fire_event_failure_does_not_prevent_other_refreshes():
         as_of=AS_OF,
     )
 
-    assert [call["fire_event_id"] for call in bridge.fire_calls] == [3, 4, 9]
+    assert len(bridge.batch_calls) == 1
     assert result.failures == 1
     assert [item.status for item in result.refresh_results] == [
         OperationalRefreshStatus.REFRESHED,
         OperationalRefreshStatus.FAILED,
         OperationalRefreshStatus.REFRESHED,
     ]
-    # The failed FireEvent produced no planning result; the other two did.
-    assert [item.fire_event_id for item in result.planning_results] == [3, 9]
+    # At least one success in the batch -> the single global refresh still ran.
+    assert result.global_planning_result is not None
 
 
-def test_successful_fire_event_refresh_surfaces_its_planning_result():
-    bridge = FakeOperationalPlanningRefreshCoordinator()
+def test_all_fire_events_failing_produces_no_global_planning_result():
+    bridge = FakeOperationalPlanningRefreshCoordinator(fail_ids={3, 4, 9})
     coordinator = make_coordinator(operational_planning_refresh=bridge)
 
     result = coordinator.refresh_fire_events(
-        fire_event_ids=(3,),
+        fire_event_ids=(3, 4, 9),
         trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
         as_of=AS_OF,
     )
 
-    assert len(result.planning_results) == 1
-    assert result.planning_results[0].status is PlanningRefreshStatus.REFRESHED
-    assert result.planning_results[0].fire_event_id == 3
+    assert result.failures == 3
+    assert result.global_planning_result is None
 
 
 def test_resource_event_maps_to_resource_refresh_not_fire_refresh():
@@ -285,7 +333,7 @@ def test_resource_event_maps_to_resource_refresh_not_fire_refresh():
 
     assert result.triggered is True
     assert bridge.resource_calls == [{"resource_id": "TRUCK-A", "new_status": ResourceStatus.UNAVAILABLE, "as_of": AS_OF}]
-    assert bridge.fire_calls == []
+    assert bridge.batch_calls == []
 
 
 def test_resource_event_passes_the_event_timestamp_as_of_to_the_bridge():
@@ -386,4 +434,4 @@ def test_resource_event_does_not_use_detection_result_or_fire_refresh():
     )
 
     assert bridge.resource_calls == [{"resource_id": "TRUCK-A", "new_status": ResourceStatus.ASSIGNED, "as_of": AS_OF}]
-    assert bridge.fire_calls == []
+    assert bridge.batch_calls == []

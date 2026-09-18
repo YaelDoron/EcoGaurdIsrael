@@ -4,6 +4,22 @@ OperationalContextService only resolves *which* stored fire stations (and
 their available firefighting resources) are geographically relevant to an
 incident location. It does not allocate or dispatch resources, and it does
 not persist anything.
+
+Stage 0 of the Global Multi-Incident Optimizer refactor (see the
+architecture audit) added an optional `excluded_fire_event_id` parameter to
+the resource-selection methods below: when given, resources already used by
+another active FireEvent's CURRENT ResponsePlan are excluded from the
+candidate pool (via CrossEventReservedResourceResolver), on top of the
+existing `status == AVAILABLE` filter - never instead of it. The excluded
+FireEvent's OWN current plan is never filtered out, so a FireEvent
+replanning itself keeps its own already-assigned resources eligible.
+Passing `None` (the default) preserves the exact prior behavior with no
+cross-event exclusion at all - every call site not yet updated to pass a
+fire_event_id is unaffected. This is a READ-side conflict-prevention
+mechanism only: no FirefightingResource.status write, no new database
+state, no transaction spanning two FireEvents' planning cycles - see
+CrossEventReservedResourceResolver's own docstring for the remaining race
+condition this does not close.
 """
 from __future__ import annotations
 
@@ -22,6 +38,7 @@ from src.repositories.firefighting_resource_repository import FirefightingResour
 from src.repositories.road_network_repository import RoadNetworkRepository
 from src.services.fire_danger import haversine_distance_km
 from src.services.operational.road_network_fetcher import RoadNetworkFetcher
+from src.services.resource_reservation import CrossEventReservedResourceResolver
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +87,7 @@ class OperationalContextService:
         firefighting_resource_repository: FirefightingResourceRepository | None = None,
         road_network_repository: RoadNetworkRepository | None = None,
         road_network_fetcher: RoadNetworkFetcher | None = None,
+        cross_event_reserved_resource_resolver: CrossEventReservedResourceResolver | None = None,
     ) -> None:
         self._fire_station_repository = fire_station_repository or FireStationRepository()
         self._firefighting_resource_repository = (
@@ -77,6 +95,9 @@ class OperationalContextService:
         )
         self._road_network_repository = road_network_repository or RoadNetworkRepository()
         self._road_network_fetcher = road_network_fetcher or RoadNetworkFetcher()
+        self._cross_event_reserved_resource_resolver = (
+            cross_event_reserved_resource_resolver or CrossEventReservedResourceResolver()
+        )
 
     def get_stations_in_operational_area(
         self,
@@ -110,23 +131,44 @@ class OperationalContextService:
 
         return self._closest_station_fallback(stations_with_distance)
 
-    def get_available_resources(self, stations: list[FireStationDB]) -> list[FirefightingResourceDB]:
+    def get_available_resources(
+        self,
+        stations: list[FireStationDB],
+        excluded_fire_event_id: int | None = None,
+    ) -> list[FirefightingResourceDB]:
         """Return AVAILABLE firefighting resources attached to the given stations.
 
         Returns an empty list immediately, without querying the database, if
         `stations` is empty.
+
+        `excluded_fire_event_id`: see the module docstring - when given,
+        resources already used by another active FireEvent's current plan
+        are removed from the result. `None` (the default) applies no such
+        filter.
         """
         if not stations:
             return []
 
         station_ids = [station.id for station in stations]
-        return self._firefighting_resource_repository.get_available_resources(station_ids)
+        resources = self._firefighting_resource_repository.get_available_resources(station_ids)
+        if excluded_fire_event_id is None:
+            return resources
+
+        reserved_resource_ids = (
+            self._cross_event_reserved_resource_resolver.get_resource_ids_reserved_by_other_active_plans(
+                excluded_fire_event_id=excluded_fire_event_id
+            )
+        )
+        if not reserved_resource_ids:
+            return resources
+        return [resource for resource in resources if resource.id not in reserved_resource_ids]
 
     def get_available_operational_context(
         self,
         latitude: float,
         longitude: float,
         min_resources: int = 1,
+        excluded_fire_event_id: int | None = None,
     ) -> tuple[list[FireStationDB], list[FirefightingResourceDB]]:
         """Return (stations, available_resources) with at least `min_resources` trucks.
 
@@ -145,6 +187,10 @@ class OperationalContextService:
         rather than an empty or insufficient one.
 
         Both returned lists are ordered nearest-station-first.
+
+        `excluded_fire_event_id`: see the module docstring - forwarded to
+        every `get_available_resources` call this method makes, including
+        during the closest-stations fallback.
         """
         self._validate_area(latitude, longitude, DEFAULT_OPERATIONAL_RADIUS_KM)
         self._validate_min_resources(min_resources)
@@ -153,11 +199,13 @@ class OperationalContextService:
 
         for candidate_radius_km in self._radius_search_sequence(DEFAULT_OPERATIONAL_RADIUS_KM):
             stations = self._within_radius(stations_with_distance, candidate_radius_km)
-            available_resources = self.get_available_resources(stations)
+            available_resources = self.get_available_resources(stations, excluded_fire_event_id)
             if len(available_resources) >= min_resources:
                 return stations, available_resources
 
-        return self._closest_stations_until_enough_resources(stations_with_distance, min_resources)
+        return self._closest_stations_until_enough_resources(
+            stations_with_distance, min_resources, excluded_fire_event_id
+        )
 
     def build_context(
         self,
@@ -165,6 +213,7 @@ class OperationalContextService:
         fire_latitude: float,
         fire_longitude: float,
         min_resources: int = 1,
+        excluded_fire_event_id: int | None = None,
     ) -> OperationalContext:
         """Build the full operational context for an active wildfire.
 
@@ -184,9 +233,11 @@ class OperationalContextService:
         `Depends(get_db)` session) - RoadNetworkRepository takes it per call
         rather than owning its own session factory, unlike the other two
         repositories injected into this service.
+
+        `excluded_fire_event_id`: see the module docstring.
         """
         stations, available_resources = self.get_available_operational_context(
-            fire_latitude, fire_longitude, min_resources
+            fire_latitude, fire_longitude, min_resources, excluded_fire_event_id
         )
 
         min_lat, max_lat, min_lon, max_lon = self._calculate_bounding_box(
@@ -276,6 +327,7 @@ class OperationalContextService:
         self,
         stations_with_distance: list[tuple[FireStationDB, float]],
         min_resources: int,
+        excluded_fire_event_id: int | None = None,
     ) -> tuple[list[FireStationDB], list[FirefightingResourceDB]]:
         ordered_stations = [
             station for station, _distance in sorted(stations_with_distance, key=lambda pair: pair[1])
@@ -285,7 +337,7 @@ class OperationalContextService:
         available_resources: list[FirefightingResourceDB] = []
         for station in ordered_stations:
             accumulated_stations.append(station)
-            available_resources = self.get_available_resources(accumulated_stations)
+            available_resources = self.get_available_resources(accumulated_stations, excluded_fire_event_id)
             if len(available_resources) >= min_resources:
                 break
 

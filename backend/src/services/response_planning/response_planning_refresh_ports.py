@@ -18,6 +18,14 @@ actual failure behavior (raises on failure) but returns StoredPlanComparison
 (already present in our own US 5.3 code) instead of the unwrapped
 PlanComparison compare() currently returns, since the orchestrator needs the
 persisted comparison id for PlanningRefreshResult.comparison_id.
+
+ActivationCollaborator (Stage 1 of the Global Multi-Incident Optimizer
+refactor) is the port for ResponsePlanActivationService.activate() - it
+mirrors that service's own contract exactly: raises
+ResourceCommitmentConflict on a lost concurrency race/ineligible resource
+(the orchestrator's bounded retry - see
+response_planning_refresh_orchestrator.py's _MAX_COMMITMENT_CONFLICT_RETRIES -
+catches this specifically), or any other exception on a genuine failure.
 """
 from __future__ import annotations
 
@@ -27,6 +35,7 @@ from typing import Protocol
 from src.agents.analysis.response_optimization_result import ResponseOptimizationResult
 from src.agents.routing.route_planning_result import RoutePlanningResult
 from src.repositories.plan_comparison_repository import StoredPlanComparison
+from src.repositories.response_plan_planning_state_repository import StoredResponsePlanPlanningState
 
 
 class RoutingCollaborator(Protocol):
@@ -51,3 +60,15 @@ class BaselineComparisonCollaborator(Protocol):
     """Port for US 5.3's baseline comparison step, as Task 5 needs to call it."""
 
     def compare(self, *, response_plan_id: int) -> StoredPlanComparison: ...
+
+
+class ActivationCollaborator(Protocol):
+    """Port for Stage 1's atomic plan-activation step, as the orchestrator needs to call it."""
+
+    def activate(
+        self,
+        *,
+        response_plan_id: int,
+        planning_effective_state_fingerprint: str,
+        as_of: datetime,
+    ) -> StoredResponsePlanPlanningState: ...

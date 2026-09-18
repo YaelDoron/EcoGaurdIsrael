@@ -33,6 +33,7 @@ from src.repositories.firefighting_resource_repository import FirefightingResour
 from src.repositories.plan_comparison_repository import PlanComparisonRepository
 from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
+from src.repositories.resource_commitment_repository import ResourceCommitmentRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
 from src.repositories.route_planning_repository import RoutePlanningRepository
 from src.services.baseline_comparison.baseline_comparison_production_readers import (
@@ -54,6 +55,7 @@ from src.services.response_planning.response_optimization_collaborator_adapter i
 from src.services.response_planning.response_planning_refresh_orchestrator import (
     ResponsePlanningRefreshOrchestrator,
 )
+from src.services.resource_reservation import CrossEventReservedResourceResolver, ResponsePlanActivationService
 from src.services.routing.node_mapping_service import NodeMappingService
 
 
@@ -80,9 +82,15 @@ def build_response_planning_refresh_orchestrator(
     route_planning_repository = RoutePlanningRepository(session_factory)
     response_plan_repository = ResponsePlanRepository(session_factory)
     plan_comparison_repository = PlanComparisonRepository(session_factory)
+    resource_commitment_repository = ResourceCommitmentRepository(session_factory)
     operational_context_service = OperationalContextService(
         fire_station_repository=FireStationRepository(session_factory),
         firefighting_resource_repository=FirefightingResourceRepository(session_factory),
+        cross_event_reserved_resource_resolver=CrossEventReservedResourceResolver(
+            fire_event_repository=FireEventRepository(session_factory),
+            response_plan_repository=response_plan_repository,
+            resource_commitment_repository=resource_commitment_repository,
+        ),
     )
 
     routing_agent = RoutePlanningAgent(
@@ -112,6 +120,12 @@ def build_response_planning_refresh_orchestrator(
         plan_comparison_repository=plan_comparison_repository,
     )
 
+    activation_service = ResponsePlanActivationService(
+        response_plan_repository=response_plan_repository,
+        resource_commitment_repository=resource_commitment_repository,
+        session_factory=session_factory,
+    )
+
     return ResponsePlanningRefreshOrchestrator(
         planning_state_builder=PlanningEffectiveStateBuilder(
             response_target_repository=response_target_repository,
@@ -120,9 +134,11 @@ def build_response_planning_refresh_orchestrator(
         routing_collaborator=routing_agent,
         optimization_collaborator=optimization_adapter,
         baseline_collaborator=baseline_adapter,
+        activation_collaborator=activation_service,
         fire_event_repository=FireEventRepository(session_factory),
         response_plan_repository=response_plan_repository,
         response_plan_planning_state_repository=ResponsePlanPlanningStateRepository(session_factory),
+        resource_commitment_repository=resource_commitment_repository,
         plan_comparison_repository=plan_comparison_repository,
         optimization_seed=optimization_seed,
     )

@@ -51,9 +51,19 @@ from src.services.operational_refresh import (
     ResourceStatusUpdateResult,
     ResourceStatusUpdateStatus,
 )
+from src.calculators.global_response_optimization.global_assignment_change_calculator import (
+    AssignmentChangeType,
+    GlobalAssignmentChange,
+)
+from src.models.global_event_resource_demand_result import GlobalEventResourceDemandResult
+from src.models.global_event_optimization_result import GlobalEventOptimizationResult
+from src.models.global_resource_shortage import GlobalResourceShortage
 from src.models.response_plan_details import ResponsePlanDetails
 from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
-from src.services.response_planning.planning_refresh_result import PlanningRefreshResult, PlanningRefreshStatus
+from src.services.global_planning.global_planning_refresh_coordinator import (
+    GlobalPlanningRefreshResult,
+    GlobalPlanningRefreshStatus,
+)
 from src.simulation.analysis.simulation_refresh_result import SimulationRefreshResult
 from src.simulation.analysis.simulation_fire_danger_result import SimulationFireDangerResult
 from src.simulation.analysis.simulation_fire_detection_result import SimulationFireDetectionResult
@@ -327,18 +337,50 @@ class FakeSimulationRefreshCoordinator:
                     response_target_result=make_response_target_generation(77),
                 ),
             ),
-            planning_results=(
-                (
-                    PlanningRefreshResult(
-                        status=PlanningRefreshStatus.REFRESHED,
-                        fire_event_id=77,
-                        route_planning_run_id=501,
-                        response_plan_id=601,
-                        comparison_id=701,
+            global_planning_result=(
+                GlobalPlanningRefreshResult(
+                    status=GlobalPlanningRefreshStatus.ACTIVATED,
+                    trigger="weather_update",
+                    as_of=event_timestamp,
+                    global_planning_run_id=501,
+                    input_fingerprint="fp-input",
+                    optimization_policy_fingerprint="fp-policy",
+                    response_plan_ids_by_event={77: 601},
+                    assignment_changes=(),
+                    shortage=GlobalResourceShortage(
+                        total_required=1,
+                        total_desired=1,
+                        total_assigned=1,
+                        unmet_required=0,
+                        unmet_desired=0,
+                        candidate_assignable_resource_count=1,
+                        committed_resource_count=1,
+                        unavailable_resource_count=0,
+                    ),
+                    event_results=(
+                        GlobalEventOptimizationResult(
+                            fire_event_id=77,
+                            actions=(),
+                            covered_slot_ids=(),
+                            uncovered_slot_ids=(),
+                            coverage_score=75.0,
+                            average_eta_seconds=642.0,
+                            demand_result=GlobalEventResourceDemandResult(
+                                fire_event_id=77,
+                                minimum_resources=1,
+                                desired_resources=1,
+                                suppression_resources_assigned=1,
+                                required_slots_covered=1,
+                                required_slots_uncovered=0,
+                                desired_slots_covered=0,
+                                desired_slots_uncovered=0,
+                                predicted_risk_slots_covered=0,
+                            ),
+                        ),
                     ),
                 )
                 if self.mode == "planning"
-                else ()
+                else None
             ),
             fire_event_ids=(77,),
         )
@@ -1287,12 +1329,11 @@ def test_planning_refresh_result_is_printed_with_core_fields():
     )
 
     text = output.getvalue()
-    assert "RESPONSE PLANNING REFRESH" in text
-    assert "fire_event_id=77" in text
-    assert "status=REFRESHED" in text
-    assert "route_planning_run_id=501" in text
-    assert "response_plan_id=601" in text
-    assert "comparison_id=701" in text
+    assert "GLOBAL PLANNING REFRESH" in text
+    assert "global_planning_run_id=501" in text
+    assert "status=ACTIVATED" in text
+    assert "active_events=[77]" in text
+    assert "event_id=77" in text
 
 
 def test_planning_refresh_result_is_not_printed_when_no_planning_occurred():
@@ -1311,7 +1352,7 @@ def test_planning_refresh_result_is_not_printed_when_no_planning_occurred():
         simulation_refresh_coordinator=refresh,
     )
 
-    assert "RESPONSE PLANNING REFRESH" not in output.getvalue()
+    assert "GLOBAL PLANNING REFRESH" not in output.getvalue()
 
 
 def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_without_recomputation(monkeypatch):
@@ -1363,8 +1404,6 @@ def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_withou
 
     assert fake_service.calls == [601]
     text = output.getvalue()
-    assert "plan_score=87.50" in text
     assert "coverage_score=0.75" in text
     assert "average_eta_seconds=642.0" in text
     assert "response_actions=0" in text
-    assert "uncovered_targets=2" in text

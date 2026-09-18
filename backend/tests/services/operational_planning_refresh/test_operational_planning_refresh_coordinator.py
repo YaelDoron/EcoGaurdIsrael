@@ -1,18 +1,18 @@
-"""Tests for OperationalPlanningRefreshCoordinator (the US4.4 -> US5.4 bridge).
+"""Tests for OperationalPlanningRefreshCoordinator (the US4.4 -> Stage 6
+global-planning bridge).
 
-Uses fakes for both the operational orchestrator and the planning
-collaborator, matching how ResponsePlanningRefreshOrchestrator's own tests
-use fake routing/optimization/baseline collaborators: this suite proves the
-coordinator's own composition logic (when it calls planning, with what
-arguments, how it aggregates results) without re-deriving or re-testing
-either US4.4's or US5.4's already-covered internal behavior.
+Uses fakes for both the operational orchestrator and the global planning
+collaborator: this suite proves the coordinator's own composition logic
+(when it calls the global refresh, with what arguments, how it aggregates
+results) without re-deriving or re-testing either US4.4's or
+GlobalPlanningRefreshCoordinator's own already-covered internal behavior.
 
-The planning-side fake never imports the real PlanningRefreshResult /
-PlanningRefreshStatus classes (see operational_planning_refresh_ports.py's
-docstring): those live in a package with an optional osmnx dependency, and
-the coordinator itself never inspects their shape beyond passing them
-through, so a lightweight local stand-in is sufficient and keeps this
-suite runnable without osmnx installed.
+Stage 6 Task 47 (production cutover): this coordinator now calls a
+GlobalPlanningRefreshPort exactly ONCE per operational change - never a
+per-FireEvent fan-out. The fake below never imports the real
+GlobalPlanningRefreshResult/GlobalPlanningRefreshStatus classes: the
+coordinator itself never inspects their shape beyond passing them through,
+so a lightweight local stand-in is sufficient.
 """
 from __future__ import annotations
 
@@ -36,28 +36,26 @@ FIRE_EVENT_ID = 42
 
 
 @dataclass(frozen=True)
-class FakePlanningRefreshResult:
-    """Stand-in for PlanningRefreshResult - see module docstring."""
+class FakeGlobalPlanningRefreshResult:
+    """Stand-in for GlobalPlanningRefreshResult - see module docstring."""
 
     status: str
-    fire_event_id: int
-    route_planning_run_id: int | None = None
-    response_plan_id: int | None = None
-    comparison_id: int | None = None
+    trigger: str
+    global_planning_run_id: int | None = None
 
 
-class FakePlanningRefresh:
-    """Fake PlanningRefreshPort: records calls, returns a canned/mapped result."""
+class FakeGlobalPlanningRefresh:
+    """Fake GlobalPlanningRefreshPort: records calls, returns a canned/mapped result."""
 
-    def __init__(self, *, results_by_fire_event_id: dict[int, FakePlanningRefreshResult] | None = None) -> None:
+    def __init__(self, *, result: FakeGlobalPlanningRefreshResult | None = None) -> None:
         self.calls: list[dict] = []
-        self._results_by_fire_event_id = results_by_fire_event_id or {}
+        self._result = result
 
-    def refresh(self, *, fire_event_id: int, as_of: datetime) -> FakePlanningRefreshResult:
-        self.calls.append({"fire_event_id": fire_event_id, "as_of": as_of})
-        if fire_event_id in self._results_by_fire_event_id:
-            return self._results_by_fire_event_id[fire_event_id]
-        return FakePlanningRefreshResult(status="no_op", fire_event_id=fire_event_id)
+    def refresh(self, *, trigger: str, as_of: datetime) -> FakeGlobalPlanningRefreshResult:
+        self.calls.append({"trigger": trigger, "as_of": as_of})
+        if self._result is not None:
+            return self._result
+        return FakeGlobalPlanningRefreshResult(status="no_op", trigger=trigger)
 
 
 class FakeOperationalRefreshOrchestrator:
@@ -97,26 +95,16 @@ class FakeOperationalRefreshOrchestrator:
         return self._resource_result
 
 
-class LoggingPlanningRefresh(FakePlanningRefresh):
-    """FakePlanningRefresh that also appends to a shared call-order log."""
+class LoggingGlobalPlanningRefresh(FakeGlobalPlanningRefresh):
+    """FakeGlobalPlanningRefresh that also appends to a shared call-order log."""
 
     def __init__(self, *, call_log: list[str], **kwargs) -> None:
         super().__init__(**kwargs)
         self._call_log = call_log
 
-    def refresh(self, *, fire_event_id: int, as_of: datetime) -> FakePlanningRefreshResult:
+    def refresh(self, *, trigger: str, as_of: datetime) -> FakeGlobalPlanningRefreshResult:
         self._call_log.append("planning")
-        return super().refresh(fire_event_id=fire_event_id, as_of=as_of)
-
-
-class FakeFireEventRepository:
-    def __init__(self, active_ids: tuple[int, ...] = ()) -> None:
-        self.active_ids = active_ids
-        self.calls = 0
-
-    def get_active_fire_event_ids(self) -> tuple[int, ...]:
-        self.calls += 1
-        return self.active_ids
+        return super().refresh(trigger=trigger, as_of=as_of)
 
 
 def operational_success(
@@ -156,13 +144,11 @@ def operational_failure(
 def make_coordinator(
     *,
     operational: FakeOperationalRefreshOrchestrator,
-    planning: FakePlanningRefresh,
-    fire_event_repository: FakeFireEventRepository | None = None,
+    planning: FakeGlobalPlanningRefresh,
 ) -> OperationalPlanningRefreshCoordinator:
     return OperationalPlanningRefreshCoordinator(
         operational_refresh_orchestrator=operational,
-        planning_refresh=planning,
-        fire_event_repository=fire_event_repository or FakeFireEventRepository(),
+        global_planning_refresh=planning,
     )
 
 
@@ -171,13 +157,13 @@ def make_coordinator(
 # ---------------------------------------------------------------------------
 
 
-def test_fire_event_refresh_triggers_planning_for_the_same_fire_event():
+def test_fire_event_refresh_triggers_exactly_one_global_refresh():
     operational = FakeOperationalRefreshOrchestrator(
         fire_event_result=operational_success(
             trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE, fire_event_id=FIRE_EVENT_ID, as_of=AS_OF
         )
     )
-    planning = FakePlanningRefresh()
+    planning = FakeGlobalPlanningRefresh()
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_fire_event(
@@ -185,61 +171,58 @@ def test_fire_event_refresh_triggers_planning_for_the_same_fire_event():
     )
 
     assert len(planning.calls) == 1
-    assert planning.calls[0] == {"fire_event_id": FIRE_EVENT_ID, "as_of": AS_OF}
-    assert result.planning_results == (FakePlanningRefreshResult(status="no_op", fire_event_id=FIRE_EVENT_ID),)
+    assert planning.calls[0] == {"trigger": OperationalRefreshTriggerType.WEATHER_UPDATE.value, "as_of": AS_OF}
+    assert result.global_planning_result == FakeGlobalPlanningRefreshResult(
+        status="no_op", trigger=OperationalRefreshTriggerType.WEATHER_UPDATE.value
+    )
 
 
-def test_fire_event_refresh_scenario_a_changed_targets_surfaces_the_refreshed_plan_untouched():
-    """Task 6 Scenario A: the planning collaborator reports a full replan (new
-    RoutePlanningRun/ResponsePlan/comparison ids); the coordinator must
-    surface that exact result, not reinterpret or duplicate it."""
-    refreshed = FakePlanningRefreshResult(
-        status="refreshed",
-        fire_event_id=FIRE_EVENT_ID,
-        route_planning_run_id=901,
-        response_plan_id=902,
-        comparison_id=903,
+def test_fire_event_refresh_scenario_a_changed_targets_surfaces_the_activated_result_untouched():
+    """The global planning collaborator reports an ACTIVATED cycle; the
+    coordinator must surface that exact result, not reinterpret or duplicate it."""
+    activated = FakeGlobalPlanningRefreshResult(
+        status="activated", trigger=OperationalRefreshTriggerType.FIRE_EVENT_UPDATE.value, global_planning_run_id=901
     )
     operational = FakeOperationalRefreshOrchestrator(
         fire_event_result=operational_success(trigger_type=OperationalRefreshTriggerType.FIRE_EVENT_UPDATE)
     )
-    planning = FakePlanningRefresh(results_by_fire_event_id={FIRE_EVENT_ID: refreshed})
+    planning = FakeGlobalPlanningRefresh(result=activated)
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_fire_event(
         fire_event_id=FIRE_EVENT_ID, trigger_type=OperationalRefreshTriggerType.FIRE_EVENT_UPDATE, as_of=AS_OF
     )
 
-    assert result.planning_results == (refreshed,)
+    assert result.global_planning_result == activated
     assert len(planning.calls) == 1
 
 
 def test_fire_event_refresh_scenario_b_unchanged_state_surfaces_the_no_op_result_untouched():
-    """Task 6 Scenario B: the planning collaborator reports NO_OP (fingerprint
+    """The global planning collaborator reports NO_OP (fingerprint
     unchanged); the coordinator still calls it exactly once and surfaces the
     NO_OP result as-is - it never decides NO_OP itself."""
-    no_op = FakePlanningRefreshResult(
-        status="no_op", fire_event_id=FIRE_EVENT_ID, route_planning_run_id=1, response_plan_id=2, comparison_id=3
+    no_op = FakeGlobalPlanningRefreshResult(
+        status="no_op", trigger=OperationalRefreshTriggerType.SEVERITY_UPDATE.value, global_planning_run_id=5
     )
     operational = FakeOperationalRefreshOrchestrator(
         fire_event_result=operational_success(trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE)
     )
-    planning = FakePlanningRefresh(results_by_fire_event_id={FIRE_EVENT_ID: no_op})
+    planning = FakeGlobalPlanningRefresh(result=no_op)
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_fire_event(
         fire_event_id=FIRE_EVENT_ID, trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE, as_of=AS_OF
     )
 
-    assert result.planning_results == (no_op,)
+    assert result.global_planning_result == no_op
     assert len(planning.calls) == 1
 
 
-def test_fire_event_refresh_skips_planning_when_operational_refresh_fails():
+def test_fire_event_refresh_skips_global_planning_when_operational_refresh_fails():
     operational = FakeOperationalRefreshOrchestrator(
         fire_event_result=operational_failure(trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE)
     )
-    planning = FakePlanningRefresh()
+    planning = FakeGlobalPlanningRefresh()
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_fire_event(
@@ -247,13 +230,13 @@ def test_fire_event_refresh_skips_planning_when_operational_refresh_fails():
     )
 
     assert result.operational_result.success is False
-    assert result.planning_results == ()
+    assert result.global_planning_result is None
     assert planning.calls == []
 
 
 def test_fire_event_refresh_wraps_unexpected_operational_exception_into_failed_result_and_skips_planning():
     operational = FakeOperationalRefreshOrchestrator(raise_on_fire_event=RuntimeError("boom"))
-    planning = FakePlanningRefresh()
+    planning = FakeGlobalPlanningRefresh()
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_fire_event(
@@ -263,7 +246,7 @@ def test_fire_event_refresh_wraps_unexpected_operational_exception_into_failed_r
     assert result.operational_result.success is False
     assert result.operational_result.status is OperationalRefreshStatus.FAILED
     assert result.operational_result.error_message == "boom"
-    assert result.planning_results == ()
+    assert result.global_planning_result is None
     assert planning.calls == []
 
 
@@ -273,7 +256,7 @@ def test_fire_event_refresh_calls_operational_before_planning():
         fire_event_result=operational_success(trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE),
         call_log=call_log,
     )
-    planning = LoggingPlanningRefresh(call_log=call_log)
+    planning = LoggingGlobalPlanningRefresh(call_log=call_log)
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     coordinator.refresh_fire_event(
@@ -287,7 +270,7 @@ def test_fire_event_refresh_passes_through_the_same_as_of_used_for_the_operation
     operational = FakeOperationalRefreshOrchestrator(
         fire_event_result=operational_success(trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE)
     )
-    planning = FakePlanningRefresh()
+    planning = FakeGlobalPlanningRefresh()
     coordinator = make_coordinator(operational=operational, planning=planning)
 
     coordinator.refresh_fire_event(
@@ -296,6 +279,20 @@ def test_fire_event_refresh_passes_through_the_same_as_of_used_for_the_operation
 
     assert operational.fire_event_calls[0]["as_of"] == AS_OF
     assert planning.calls[0]["as_of"] == AS_OF
+
+
+def test_fire_event_refresh_passes_the_trigger_type_value_as_the_global_refresh_trigger():
+    operational = FakeOperationalRefreshOrchestrator(
+        fire_event_result=operational_success(trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE)
+    )
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
+
+    coordinator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID, trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE, as_of=AS_OF
+    )
+
+    assert planning.calls[0]["trigger"] == "severity_update"
 
 
 # ---------------------------------------------------------------------------
@@ -307,59 +304,46 @@ def test_fire_event_refresh_passes_through_the_same_as_of_used_for_the_operation
     "new_status",
     [ResourceStatus.UNAVAILABLE, ResourceStatus.ASSIGNED, ResourceStatus.AVAILABLE],
 )
-def test_resource_refresh_triggers_planning_for_every_active_fire_event(new_status):
-    """Task 7: AVAILABLE->UNAVAILABLE, AVAILABLE->ASSIGNED, and back to
-    AVAILABLE must all trigger a planning check for every active FireEvent -
-    the bridge does not special-case which transition occurred."""
+def test_resource_refresh_triggers_exactly_one_global_refresh_regardless_of_active_event_count(new_status):
+    """AVAILABLE->UNAVAILABLE, AVAILABLE->ASSIGNED, and back to AVAILABLE
+    must all trigger exactly ONE global planning refresh - never a fan-out
+    loop, and the bridge does not special-case which transition occurred or
+    how many FireEvents are active (that is GlobalPlanningRefreshCoordinator's
+    own concern)."""
     operational = FakeOperationalRefreshOrchestrator(
         resource_result=operational_success(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE)
     )
-    planning = FakePlanningRefresh()
-    fire_event_repository = FakeFireEventRepository(active_ids=(1, 5, 9))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_resource(resource_id="truck-1", new_status=new_status, as_of=AS_OF)
 
     assert operational.resource_calls == [{"resource_id": "truck-1", "new_status": new_status}]
-    assert [call["fire_event_id"] for call in planning.calls] == [1, 5, 9]
-    assert len(result.planning_results) == 3
+    assert len(planning.calls) == 1
+    assert planning.calls[0]["trigger"] == "resource_status_update"
+    assert result.global_planning_result is not None
 
 
-def test_resource_refresh_checks_active_fire_events_in_deterministic_ascending_order():
+def test_resource_refresh_skips_global_planning_when_operational_refresh_fails():
     operational = FakeOperationalRefreshOrchestrator(
-        resource_result=operational_success(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE)
+        resource_result=operational_failure(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE)
     )
-    planning = FakePlanningRefresh()
-    fire_event_repository = FakeFireEventRepository(active_ids=(2, 3, 7))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
-
-    coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
-
-    assert [call["fire_event_id"] for call in planning.calls] == [2, 3, 7]
-
-
-def test_resource_refresh_with_no_active_fire_events_calls_no_planning():
-    operational = FakeOperationalRefreshOrchestrator(
-        resource_result=operational_success(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE)
-    )
-    planning = FakePlanningRefresh()
-    coordinator = make_coordinator(
-        operational=operational, planning=planning, fire_event_repository=FakeFireEventRepository(active_ids=())
-    )
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
 
     assert planning.calls == []
-    assert result.planning_results == ()
-    assert result.operational_result.success is True
+    assert result.global_planning_result is None
+    assert result.operational_result.success is False
 
 
-def test_resource_refresh_still_checks_planning_on_resource_no_op_but_causes_no_unnecessary_new_plan():
-    """Task 7 'same status repeated': ResourceStatusUpdateService's existing
-    NO_OP outcome still succeeds, so the bridge still asks US5.4 to check -
-    but since nothing relevant changed, the fake (standing in for US5.4's own
-    fingerprint check) reports NO_OP for every FireEvent, proving no
-    unnecessary new plan results from a same-status update."""
+def test_resource_refresh_still_triggers_global_planning_on_resource_no_op():
+    """ResourceStatusUpdateService's existing NO_OP outcome still succeeds,
+    so the bridge still asks the global planner to check - but since
+    nothing relevant changed, the fake (standing in for the Global GA's own
+    fingerprint check) reports NO_OP, proving no unnecessary new plan
+    results from a same-status update."""
     operational = FakeOperationalRefreshOrchestrator(
         resource_result=OperationalRefreshResult(
             trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE,
@@ -367,14 +351,13 @@ def test_resource_refresh_still_checks_planning_on_resource_no_op_but_causes_no_
             success=True,
         )
     )
-    planning = FakePlanningRefresh()  # defaults every fire_event_id to a "no_op" result
-    fire_event_repository = FakeFireEventRepository(active_ids=(1,))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
+    planning = FakeGlobalPlanningRefresh()  # defaults to a "no_op" result
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.AVAILABLE, as_of=AS_OF)
 
     assert len(planning.calls) == 1
-    assert result.planning_results[0].status == "no_op"
+    assert result.global_planning_result.status == "no_op"
 
 
 def test_resource_refresh_skips_planning_when_resource_not_found():
@@ -386,23 +369,20 @@ def test_resource_refresh_skips_planning_when_resource_not_found():
             error_message="Firefighting resource 'truck-1' was not found.",
         )
     )
-    planning = FakePlanningRefresh()
-    fire_event_repository = FakeFireEventRepository(active_ids=(1, 2))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
 
     assert result.operational_result.success is False
-    assert result.planning_results == ()
+    assert result.global_planning_result is None
     assert planning.calls == []
-    assert fire_event_repository.calls == 0
 
 
 def test_resource_refresh_wraps_unexpected_operational_exception_into_failed_result_and_skips_planning():
     operational = FakeOperationalRefreshOrchestrator(raise_on_resource=RuntimeError("db unavailable"))
-    planning = FakePlanningRefresh()
-    fire_event_repository = FakeFireEventRepository(active_ids=(1,))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     result = coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
 
@@ -410,12 +390,12 @@ def test_resource_refresh_wraps_unexpected_operational_exception_into_failed_res
     assert result.operational_result.status is OperationalRefreshStatus.FAILED
     assert result.operational_result.trigger_type is OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE
     assert result.operational_result.error_message == "db unavailable"
-    assert result.planning_results == ()
+    assert result.global_planning_result is None
     assert planning.calls == []
 
 
 def test_resource_refresh_never_triggers_the_environmental_fire_event_refresh_path():
-    """Task 5: a resource-only update must not rerun Fire Detection/Severity/
+    """A resource-only update must not rerun Fire Detection/Severity/
     Spread/Response Targets. Proven here by making refresh_fire_event raise
     if the coordinator ever calls it from refresh_resource - it must not."""
 
@@ -426,8 +406,21 @@ def test_resource_refresh_never_triggers_the_environmental_fire_event_refresh_pa
     operational = ExplodingOnFireEventRefresh(
         resource_result=operational_success(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE)
     )
-    planning = FakePlanningRefresh()
-    fire_event_repository = FakeFireEventRepository(active_ids=(1, 2))
-    coordinator = make_coordinator(operational=operational, planning=planning, fire_event_repository=fire_event_repository)
+    planning = FakeGlobalPlanningRefresh()
+    coordinator = make_coordinator(operational=operational, planning=planning)
 
     coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
+
+
+def test_resource_refresh_calls_operational_before_planning():
+    call_log: list[str] = []
+    operational = FakeOperationalRefreshOrchestrator(
+        resource_result=operational_success(trigger_type=OperationalRefreshTriggerType.RESOURCE_STATUS_UPDATE),
+        call_log=call_log,
+    )
+    planning = LoggingGlobalPlanningRefresh(call_log=call_log)
+    coordinator = make_coordinator(operational=operational, planning=planning)
+
+    coordinator.refresh_resource(resource_id="truck-1", new_status=ResourceStatus.UNAVAILABLE, as_of=AS_OF)
+
+    assert call_log == ["operational", "planning"]

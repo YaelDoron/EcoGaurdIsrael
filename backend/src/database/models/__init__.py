@@ -21,6 +21,8 @@ from src.database.models.fire_spread_prediction_db import FireSpreadPredictionDB
 from src.database.models.fire_spread_prediction_weather_input_db import (
     FireSpreadPredictionWeatherInputDB,
 )
+from src.database.models.global_planning_run_db import GlobalPlanningRunDB
+from src.database.models.global_planning_run_event_db import GlobalPlanningRunEventDB
 from src.database.models.graph_edge_db import GraphEdgeDB
 from src.database.models.graph_node_db import GraphNodeDB
 from src.database.models.plan_comparison_db import PlanComparisonDB
@@ -32,6 +34,7 @@ from src.database.models.response_plan_db import ResponsePlanDB
 from src.database.models.response_action_db import ResponseActionDB
 from src.database.models.response_plan_planning_state_db import ResponsePlanPlanningStateDB
 from src.database.models.response_plan_uncovered_target_db import ResponsePlanUncoveredTargetDB
+from src.database.models.resource_commitment_db import ResourceCommitmentDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
 from src.database.models.weather_observation_db import WeatherObservationDB
 from src.database.models.weather_station_db import WeatherStationDB
@@ -55,6 +58,8 @@ __all__ = [
     "FireSpreadPredictionDB",
     "FireSpreadPredictionCellDB",
     "FireSpreadPredictionWeatherInputDB",
+    "GlobalPlanningRunDB",
+    "GlobalPlanningRunEventDB",
     "GraphNodeDB",
     "GraphEdgeDB",
     "PlanComparisonDB",
@@ -66,4 +71,5 @@ __all__ = [
     "ResponseActionDB",
     "ResponsePlanPlanningStateDB",
     "ResponsePlanUncoveredTargetDB",
+    "ResourceCommitmentDB",
 ]

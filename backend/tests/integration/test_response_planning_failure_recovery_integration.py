@@ -37,6 +37,7 @@ from src.repositories.plan_comparison_repository import PlanComparisonRepository
 from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
+from src.repositories.resource_commitment_repository import ResourceCommitmentRepository
 from src.repositories.route_planning_repository import RoutePlanningRepository
 from src.services.baseline_comparison.baseline_comparison_production_readers import (
     ResponsePlanOptimizedPlanReaderAdapter,
@@ -60,6 +61,7 @@ from src.services.response_planning.response_optimization_collaborator_adapter i
 from src.services.response_planning.response_planning_refresh_orchestrator import (
     ResponsePlanningRefreshOrchestrator,
 )
+from src.services.resource_reservation import ResponsePlanActivationService
 
 AS_OF = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
 
@@ -187,6 +189,24 @@ class FailingSidecarRepository(ResponsePlanPlanningStateRepository):
         raise RuntimeError("sidecar write failed")
 
 
+class FailingActivationService(ResponsePlanActivationService):
+    """Real activation service whose activate() is forced to fail (Stage 1
+    moved the sidecar write inside the atomic commitment+sidecar
+    transaction, so a "sidecar failure" is now an activation failure): the
+    ResponsePlan row itself was already saved earlier, separately, by
+    ResponseOptimizationAgent - only the atomic activation step fails,
+    leaving that plan real but without commitments or a current-plan
+    sidecar, exactly like the old sidecar-only failure this replaces."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.save_calls = []
+
+    def activate(self, **kwargs):
+        self.save_calls.append(kwargs.get("response_plan_id"))
+        raise RuntimeError("activation failed")
+
+
 class FailingBaselineComparisonService(BaselineComparisonService):
     """Stands in for the baseline-comparison stage failing before anything is persisted."""
 
@@ -289,6 +309,14 @@ class Wiring:
         self.plan_comparison_repository = PlanComparisonRepository(session_factory)
         self.sidecar_repository = ResponsePlanPlanningStateRepository(session_factory)
         self.fire_event_repository = FireEventRepository(session_factory)
+        self.resource_commitment_repository = ResourceCommitmentRepository(session_factory)
+
+    def working_activation_service(self):
+        return ResponsePlanActivationService(
+            response_plan_repository=self.response_plan_repository,
+            resource_commitment_repository=self.resource_commitment_repository,
+            session_factory=self.session_factory,
+        )
 
     def working_routing_collaborator(self):
         return PersistingFakeRoutingCollaborator(
@@ -319,6 +347,7 @@ class Wiring:
         optimization=None,
         baseline=None,
         sidecar_repository=None,
+        activation_collaborator=None,
     ) -> ResponsePlanningRefreshOrchestrator:
         return ResponsePlanningRefreshOrchestrator(
             planning_state_builder=PlanningEffectiveStateBuilder(
@@ -333,6 +362,8 @@ class Wiring:
             response_plan_planning_state_repository=sidecar_repository or self.sidecar_repository,
             plan_comparison_repository=self.plan_comparison_repository,
             optimization_seed=DEFAULT_RANDOM_SEED,
+            activation_collaborator=activation_collaborator or self.working_activation_service(),
+            resource_commitment_repository=self.resource_commitment_repository,
         )
 
     def history_counts(self, fire_event_id):
@@ -438,9 +469,13 @@ def test_sidecar_failure_leaves_plan_persisted_with_no_comparison_and_prevents_f
     wiring = Wiring(sqlite_session_factory)
     seed_target_set(wiring.response_target_repository, fire_event_id)
 
-    failing_sidecar = FailingSidecarRepository(sqlite_session_factory)
+    failing_activation = FailingActivationService(
+        response_plan_repository=wiring.response_plan_repository,
+        resource_commitment_repository=wiring.resource_commitment_repository,
+        session_factory=sqlite_session_factory,
+    )
     baseline_collaborator = wiring.working_baseline_collaborator()
-    result = wiring.orchestrator(sidecar_repository=failing_sidecar, baseline=baseline_collaborator).refresh(
+    result = wiring.orchestrator(activation_collaborator=failing_activation, baseline=baseline_collaborator).refresh(
         fire_event_id=fire_event_id, as_of=AS_OF
     )
 
@@ -448,7 +483,7 @@ def test_sidecar_failure_leaves_plan_persisted_with_no_comparison_and_prevents_f
     assert result.route_planning_run_id is not None
     assert result.response_plan_id is not None
     assert result.comparison_id is None
-    assert len(failing_sidecar.save_calls) == 1
+    assert len(failing_activation.save_calls) == 1
 
     new_plan_id = result.response_plan_id
     assert wiring.response_plan_repository.get_by_id(new_plan_id) is not None  # plan NOT rolled back
@@ -928,8 +963,12 @@ def test_resolver_sidecar_failure_keeps_prior_sidecar_backed_plan_current(sqlite
     prior = run_full_success_cycle(wiring, fire_event_id, AS_OF)
     seed_target_set(wiring.response_target_repository, fire_event_id, as_of=later(1), priority_score=999.0)
 
-    failing_sidecar = FailingSidecarRepository(sqlite_session_factory)
-    result = wiring.orchestrator(sidecar_repository=failing_sidecar).refresh(
+    failing_activation = FailingActivationService(
+        response_plan_repository=wiring.response_plan_repository,
+        resource_commitment_repository=wiring.resource_commitment_repository,
+        session_factory=sqlite_session_factory,
+    )
+    result = wiring.orchestrator(activation_collaborator=failing_activation).refresh(
         fire_event_id=fire_event_id, as_of=later(1)
     )
     assert result.status is PlanningRefreshStatus.FAILED
@@ -986,8 +1025,12 @@ def test_task5_no_op_baseline_and_task8_current_plan_are_intentionally_different
 
     prior = run_full_success_cycle(wiring, fire_event_id, AS_OF)
     seed_target_set(wiring.response_target_repository, fire_event_id, as_of=later(1), priority_score=999.0)
-    failing_sidecar = FailingSidecarRepository(sqlite_session_factory)
-    failed = wiring.orchestrator(sidecar_repository=failing_sidecar).refresh(
+    failing_activation = FailingActivationService(
+        response_plan_repository=wiring.response_plan_repository,
+        resource_commitment_repository=wiring.resource_commitment_repository,
+        session_factory=sqlite_session_factory,
+    )
+    failed = wiring.orchestrator(activation_collaborator=failing_activation).refresh(
         fire_event_id=fire_event_id, as_of=later(1)
     )
     assert failed.status is PlanningRefreshStatus.FAILED

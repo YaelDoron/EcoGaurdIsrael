@@ -45,8 +45,12 @@ from src.services.operational import OperationalContextService
 from src.services.operational_planning_refresh.operational_planning_refresh_production_factory import (
     build_operational_planning_refresh_coordinator,
 )
+from src.calculators.global_response_optimization.global_assignment_change_calculator import AssignmentChangeType
+from src.services.global_planning.global_planning_refresh_coordinator import (
+    GlobalPlanningRefreshResult,
+    GlobalPlanningRefreshStatus,
+)
 from src.services.operational_refresh import OperationalRefreshResult
-from src.services.response_planning.planning_refresh_result import PlanningRefreshResult
 from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
 from src.services.response_target import ResponseTargetInputService
 from src.services.fire_severity import FireSeverityInputService
@@ -720,46 +724,84 @@ def print_simulation_refresh_result(
             print_resource_refresh_result(refresh_result, output)
         else:
             print_operational_refresh_result(refresh_result, output)
-    for planning_result in simulation_refresh_result.planning_results:
-        print_planning_refresh_result(planning_result, output)
+    if simulation_refresh_result.global_planning_result is not None:
+        print_global_planning_refresh_result(simulation_refresh_result.global_planning_result, output)
 
 
-def print_planning_refresh_result(
-    planning_result: PlanningRefreshResult,
+def print_global_planning_refresh_result(
+    result: GlobalPlanningRefreshResult,
     output: TextIO = sys.stdout,
 ) -> None:
-    """Show whether US 5.4 planning refresh ran, and its outcome, for one FireEvent.
+    """Show the Stage 6 Global GA's authoritative planning-cycle outcome.
 
-    Prints only fields already present on PlanningRefreshResult itself, plus
-    (when a response_plan_id exists) a compact enrichment reusing the
-    existing US 5.5 ResponsePlanDetailsService read - never recomputing
-    routes, optimization, or scores here.
+    Deliberately compact - GlobalPlanningRun id, active-event membership,
+    planning status, per-event minimum/desired/assigned, global shortage,
+    which resources are already dispatched vs newly assigned vs released,
+    and NO_OP - never the internal GA search-space/population details
+    (Task 12: keep the demo understandable).
     """
-    print("RESPONSE PLANNING REFRESH", file=output)
-    print(f"fire_event_id={planning_result.fire_event_id}", file=output)
-    print(f"status={planning_result.status.name}", file=output)
-    if planning_result.route_planning_run_id is not None:
-        print(f"route_planning_run_id={planning_result.route_planning_run_id}", file=output)
-    if planning_result.response_plan_id is not None:
-        print(f"response_plan_id={planning_result.response_plan_id}", file=output)
-    if planning_result.comparison_id is not None:
-        print(f"comparison_id={planning_result.comparison_id}", file=output)
-    if planning_result.error:
-        print(f"message={planning_result.error}", file=output)
+    print("GLOBAL PLANNING REFRESH", file=output)
+    print(f"global_planning_run_id={result.global_planning_run_id}", file=output)
+    print(f"trigger={result.trigger}", file=output)
+    print(f"status={result.status.name}", file=output)
+    if result.retry_count:
+        print(f"retry_count={result.retry_count}", file=output)
 
-    if planning_result.response_plan_id is None:
+    if result.status is GlobalPlanningRefreshStatus.NO_OP:
+        print("no_op=true (semantic input and policy unchanged - nothing rewritten)", file=output)
         return
-    plan_details = get_response_plan_details_service().get_plan_details_by_id(planning_result.response_plan_id)
-    if plan_details is None:
+    if result.status is not GlobalPlanningRefreshStatus.ACTIVATED:
         return
-    average_eta = (
-        f"{plan_details.average_eta_seconds:.1f}" if plan_details.average_eta_seconds is not None else "-"
-    )
-    print(f"plan_score={plan_details.plan_score:.2f}", file=output)
-    print(f"coverage_score={plan_details.coverage_score:.2f}", file=output)
-    print(f"average_eta_seconds={average_eta}", file=output)
-    print(f"response_actions={len(plan_details.actions)}", file=output)
-    print(f"uncovered_targets={len(plan_details.uncovered_target_ids)}", file=output)
+
+    print(f"active_events={sorted(result.response_plan_ids_by_event)}", file=output)
+
+    if result.shortage is not None:
+        shortage = result.shortage
+        print(
+            "shortage="
+            f"required({shortage.total_required}/{shortage.unmet_required} unmet) "
+            f"desired({shortage.total_desired}/{shortage.unmet_desired} unmet) "
+            f"assigned={shortage.total_assigned} "
+            f"candidate_supply={shortage.candidate_assignable_resource_count}",
+            file=output,
+        )
+
+    for event_result in result.event_results:
+        demand = event_result.demand_result
+        print(
+            f"event_id={event_result.fire_event_id} "
+            f"minimum={demand.minimum_resources} desired={demand.desired_resources} "
+            f"assigned={demand.suppression_resources_assigned} "
+            f"unmet_required={demand.unmet_minimum} unmet_desired={demand.unmet_desired}",
+            file=output,
+        )
+
+    changes_by_type: dict[AssignmentChangeType, list[str]] = {}
+    for change in result.assignment_changes:
+        changes_by_type.setdefault(change.change_type, []).append(change.resource_id)
+    for change_type in (
+        AssignmentChangeType.NEW_ASSIGNMENT,
+        AssignmentChangeType.REASSIGNED,
+        AssignmentChangeType.RELEASED,
+        AssignmentChangeType.UNCHANGED,
+    ):
+        resource_ids = changes_by_type.get(change_type)
+        if resource_ids:
+            print(f"{change_type.value}={sorted(resource_ids)}", file=output)
+
+    for fire_event_id, response_plan_id in sorted(result.response_plan_ids_by_event.items()):
+        plan_details = get_response_plan_details_service().get_plan_details_by_id(response_plan_id)
+        if plan_details is None:
+            continue
+        average_eta = (
+            f"{plan_details.average_eta_seconds:.1f}" if plan_details.average_eta_seconds is not None else "-"
+        )
+        print(
+            f"event_id={fire_event_id} response_plan_id={response_plan_id} "
+            f"coverage_score={plan_details.coverage_score:.2f} average_eta_seconds={average_eta} "
+            f"response_actions={len(plan_details.actions)}",
+            file=output,
+        )
 
 
 def print_operational_refresh_result(

@@ -66,6 +66,17 @@ class ResponsePlanDB(Base):
         nullable=False,
         index=True,
     )
+    # Stage 2 (Global Multi-Incident Optimizer refactor): which GlobalPlanningRun
+    # CREATED this plan, if any. Nullable for every historical plan (no backfill -
+    # see scripts/migrate_global_planning_run.py) and for any plan created outside
+    # a global cycle. Never set for a NO_OP/baseline-only-recovery result that
+    # reuses an already-existing plan - see GlobalPlanningOrchestrator.
+    global_planning_run_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("global_planning_runs.id"),
+        nullable=True,
+        index=True,
+    )
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String, nullable=False, index=True)
     methodology: Mapped[str] = mapped_column(String, nullable=False)

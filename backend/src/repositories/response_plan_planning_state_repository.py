@@ -81,28 +81,49 @@ class ResponsePlanPlanningStateRepository:
         exist fails explicitly (foreign-key violation) - both enforced by
         the database, not by an upstream lookup here.
         """
-        self._validate_response_plan_id(response_plan_id)
-        self._validate_fingerprint(planning_effective_state_fingerprint)
-
         with self._session_scope() as session:
-            db_state = ResponsePlanPlanningStateDB(
+            return self.save_in_session(
+                session,
                 response_plan_id=response_plan_id,
                 planning_effective_state_fingerprint=planning_effective_state_fingerprint,
             )
-            session.add(db_state)
-            try:
-                session.flush()
-            except (IntegrityError, SQLAlchemyError) as exc:
-                raise ResponsePlanPlanningStateRepositoryError(
-                    "Response-plan planning-state persistence failed."
-                ) from exc
 
-            logger.info(
-                "Linked ResponsePlan %s to planning-state fingerprint %s",
-                response_plan_id,
-                planning_effective_state_fingerprint,
-            )
-            return self._to_domain(db_state)
+    def save_in_session(
+        self,
+        session: Session,
+        *,
+        response_plan_id: int,
+        planning_effective_state_fingerprint: str,
+    ) -> StoredResponsePlanPlanningState:
+        """Same link-creation as save, composed into a CALLER-OWNED session/
+        transaction (Stage 6: GlobalResponsePlanActivationService writes this
+        sidecar for every activating FireEvent's plan in the same
+        transaction as the plan/route/commitment writes - CurrentResponsePlanResolver
+        already treats "has a sidecar row" as "is current" regardless of
+        which methodology produced the fingerprint, so a Global-GA-produced
+        plan becomes current through the exact same existing mechanism
+        Epic 6's API already reads). Does NOT commit or close the session."""
+        self._validate_response_plan_id(response_plan_id)
+        self._validate_fingerprint(planning_effective_state_fingerprint)
+
+        db_state = ResponsePlanPlanningStateDB(
+            response_plan_id=response_plan_id,
+            planning_effective_state_fingerprint=planning_effective_state_fingerprint,
+        )
+        session.add(db_state)
+        try:
+            session.flush()
+        except (IntegrityError, SQLAlchemyError) as exc:
+            raise ResponsePlanPlanningStateRepositoryError(
+                "Response-plan planning-state persistence failed."
+            ) from exc
+
+        logger.info(
+            "Linked ResponsePlan %s to planning-state fingerprint %s",
+            response_plan_id,
+            planning_effective_state_fingerprint,
+        )
+        return self._to_domain(db_state)
 
     def get_for_plan(self, response_plan_id: int) -> StoredResponsePlanPlanningState | None:
         """Return the fingerprint linked to one ResponsePlan, or None if none has been recorded."""

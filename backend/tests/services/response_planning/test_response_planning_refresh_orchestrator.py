@@ -27,6 +27,7 @@ from src.repositories.plan_comparison_repository import StoredPlanComparison
 from src.repositories.response_plan_planning_state_repository import StoredResponsePlanPlanningState
 from src.repositories.response_plan_repository import StoredResponsePlan
 from src.repositories.route_planning_repository import StoredRoutePlanningRun
+from src.services.resource_reservation import ResourceCommitmentConflict
 from src.services.response_planning import (
     PlanningRefreshResult,
     PlanningRefreshStatus,
@@ -156,6 +157,53 @@ class FakeBaselineCollaborator:
         if self.exc is not None:
             raise self.exc
         return self.result
+
+
+class FakeActivationCollaborator:
+    """Stage 1: stands in for ResponsePlanActivationService.
+
+    `excs` is an optional list of exceptions to raise on successive calls
+    (e.g. [ResourceCommitmentConflict(...)] raises on the first call only,
+    then succeeds on the second - used to test the orchestrator's bounded
+    retry). A single `exc` always raises (no retry can succeed).
+    """
+
+    def __init__(self, sidecar=None, exc=None, excs=None, call_log=None):
+        self.sidecar = sidecar
+        self.exc = exc
+        self._excs = list(excs) if excs is not None else None
+        self.calls = []
+        self._call_log = call_log
+
+    def activate(self, *, response_plan_id, planning_effective_state_fingerprint, as_of):
+        self.calls.append(
+            {
+                "response_plan_id": response_plan_id,
+                "planning_effective_state_fingerprint": planning_effective_state_fingerprint,
+                "as_of": as_of,
+            }
+        )
+        if self._call_log is not None:
+            self._call_log.append("activation")
+        if self._excs:
+            raise self._excs.pop(0)
+        if self.exc is not None:
+            raise self.exc
+        return self.sidecar or StoredResponsePlanPlanningState(
+            id=1,
+            response_plan_id=response_plan_id,
+            planning_effective_state_fingerprint=planning_effective_state_fingerprint,
+            created_at=as_of,
+        )
+
+
+class FakeResourceCommitmentRepository:
+    def __init__(self):
+        self.release_calls = []
+
+    def release_for_fire_event(self, fire_event_id):
+        self.release_calls.append(fire_event_id)
+        return 0
 
 
 # ---------------------------------------------------------------------------
@@ -350,10 +398,12 @@ def make_orchestrator(
     planning_state_builder=None,
     response_plan_repository=None,
     response_plan_planning_state_repository=None,
+    resource_commitment_repository=None,
     plan_comparison_repository=None,
     routing_collaborator=None,
     optimization_collaborator=None,
     baseline_collaborator=None,
+    activation_collaborator=None,
 ) -> ResponsePlanningRefreshOrchestrator:
     return ResponsePlanningRefreshOrchestrator(
         planning_state_builder=planning_state_builder or FakePlanningStateBuilder(make_built_result()),
@@ -361,11 +411,13 @@ def make_orchestrator(
         optimization_collaborator=optimization_collaborator
         or FakeOptimizationCollaborator(make_optimization_success()),
         baseline_collaborator=baseline_collaborator or FakeBaselineCollaborator(make_comparison()),
+        activation_collaborator=activation_collaborator or FakeActivationCollaborator(),
         fire_event_repository=fire_event_repository or FakeFireEventRepository(make_stored_event()),
         response_plan_repository=response_plan_repository or FakeResponsePlanRepository(None),
         response_plan_planning_state_repository=(
             response_plan_planning_state_repository or FakeResponsePlanPlanningStateRepository(None)
         ),
+        resource_commitment_repository=resource_commitment_repository or FakeResourceCommitmentRepository(),
         plan_comparison_repository=plan_comparison_repository or FakePlanComparisonRepository(()),
     )
 
@@ -674,15 +726,18 @@ def test_optimization_failure_returns_failed_and_preserves_routing_run_id():
     assert baseline_collaborator.calls == []
 
 
-def test_sidecar_save_failure_returns_failed_without_baseline():
+def test_activation_failure_returns_failed_without_baseline():
+    """A non-conflict activation exception (e.g. a genuine DB error) fails
+    immediately - no retry, no baseline call. Contrast with
+    test_activation_conflict_retries_once_and_succeeds_on_second_attempt/
+    test_activation_conflict_exhausts_retries_and_returns_failed below,
+    which cover the ResourceCommitmentConflict-specific retry path."""
     baseline_collaborator = FakeBaselineCollaborator(make_comparison())
 
     result = make_orchestrator(
         routing_collaborator=FakeRoutingCollaborator(make_routing_success(run_id=601)),
         optimization_collaborator=FakeOptimizationCollaborator(make_optimization_success(plan_id=501)),
-        response_plan_planning_state_repository=FakeResponsePlanPlanningStateRepository(
-            None, save_exc=RuntimeError("sidecar write failed")
-        ),
+        activation_collaborator=FakeActivationCollaborator(exc=RuntimeError("activation write failed")),
         baseline_collaborator=baseline_collaborator,
     ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
@@ -719,13 +774,13 @@ def test_full_success_sequence_returns_refreshed_in_correct_order():
     optimization_collaborator = FakeOptimizationCollaborator(
         make_optimization_success(plan_id=501), call_log=call_log
     )
-    sidecar_repository = FakeResponsePlanPlanningStateRepository(None, call_log=call_log)
+    activation_collaborator = FakeActivationCollaborator(call_log=call_log)
     baseline_collaborator = FakeBaselineCollaborator(make_comparison(comparison_id=701), call_log=call_log)
 
     result = make_orchestrator(
         routing_collaborator=routing_collaborator,
         optimization_collaborator=optimization_collaborator,
-        response_plan_planning_state_repository=sidecar_repository,
+        activation_collaborator=activation_collaborator,
         baseline_collaborator=baseline_collaborator,
     ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
@@ -737,12 +792,12 @@ def test_full_success_sequence_returns_refreshed_in_correct_order():
         comparison_id=701,
         error=None,
     )
-    assert call_log == ["routing", "optimization", "sidecar", "baseline"]
+    assert call_log == ["routing", "optimization", "activation", "baseline"]
 
 
-def test_sidecar_receives_exact_current_fingerprint():
+def test_activation_receives_exact_current_fingerprint():
     planning_state = make_planning_state()
-    sidecar_repository = FakeResponsePlanPlanningStateRepository(None)
+    activation_collaborator = FakeActivationCollaborator()
 
     make_orchestrator(
         planning_state_builder=FakePlanningStateBuilder(
@@ -750,21 +805,23 @@ def test_sidecar_receives_exact_current_fingerprint():
                 status=PlanningEffectiveStateStatus.BUILT, state=planning_state, fire_event_id=FIRE_EVENT_ID
             )
         ),
-        response_plan_planning_state_repository=sidecar_repository,
+        activation_collaborator=activation_collaborator,
     ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
-    assert sidecar_repository.save_calls[0]["planning_effective_state_fingerprint"] == planning_state.fingerprint
+    assert (
+        activation_collaborator.calls[0]["planning_effective_state_fingerprint"] == planning_state.fingerprint
+    )
 
 
-def test_sidecar_receives_exact_response_plan_id_from_optimizer():
-    sidecar_repository = FakeResponsePlanPlanningStateRepository(None)
+def test_activation_receives_exact_response_plan_id_from_optimizer():
+    activation_collaborator = FakeActivationCollaborator()
 
     make_orchestrator(
         optimization_collaborator=FakeOptimizationCollaborator(make_optimization_success(plan_id=999)),
-        response_plan_planning_state_repository=sidecar_repository,
+        activation_collaborator=activation_collaborator,
     ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
 
-    assert sidecar_repository.save_calls[0]["response_plan_id"] == 999
+    assert activation_collaborator.calls[0]["response_plan_id"] == 999
 
 
 def test_baseline_receives_exact_same_response_plan_id():
@@ -888,6 +945,93 @@ def test_result_rejects_no_op_missing_ids():
             comparison_id=701,
             error=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (Global Multi-Incident Optimizer refactor): bounded activation-conflict retry
+# ---------------------------------------------------------------------------
+
+
+def test_activation_conflict_retries_once_and_succeeds_on_second_attempt():
+    """Task 16: losing the activation race rebuilds context and retries the
+    whole routing->optimization->activation cycle, not just activation
+    alone - each retry gets a fresh routing/optimization call."""
+    conflict = ResourceCommitmentConflict(fire_event_id=FIRE_EVENT_ID, conflicts={"truck-1": "not_available"})
+    routing_collaborator = FakeRoutingCollaborator(make_routing_success())
+    optimization_collaborator = FakeOptimizationCollaborator(make_optimization_success())
+    activation_collaborator = FakeActivationCollaborator(excs=[conflict])
+    baseline_collaborator = FakeBaselineCollaborator(make_comparison())
+
+    result = make_orchestrator(
+        routing_collaborator=routing_collaborator,
+        optimization_collaborator=optimization_collaborator,
+        activation_collaborator=activation_collaborator,
+        baseline_collaborator=baseline_collaborator,
+    ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert result.status is PlanningRefreshStatus.REFRESHED
+    assert len(routing_collaborator.calls) == 2
+    assert len(optimization_collaborator.calls) == 2
+    assert len(activation_collaborator.calls) == 2
+    assert len(baseline_collaborator.calls) == 1
+
+
+def test_activation_conflict_exhausts_retries_and_returns_failed():
+    """After MAX_COMMITMENT_CONFLICT_RETRIES (1) retries - 2 attempts total -
+    a persistent conflict returns a safe FAILED result, never fabricating
+    success, and never calling baseline comparison for a plan that was
+    never actually activated."""
+    conflict = ResourceCommitmentConflict(fire_event_id=FIRE_EVENT_ID, conflicts={"truck-1": "not_available"})
+    routing_collaborator = FakeRoutingCollaborator(make_routing_success())
+    optimization_collaborator = FakeOptimizationCollaborator(make_optimization_success())
+    activation_collaborator = FakeActivationCollaborator(excs=[conflict, conflict, conflict])
+    baseline_collaborator = FakeBaselineCollaborator(make_comparison())
+
+    result = make_orchestrator(
+        routing_collaborator=routing_collaborator,
+        optimization_collaborator=optimization_collaborator,
+        activation_collaborator=activation_collaborator,
+        baseline_collaborator=baseline_collaborator,
+    ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert result.status is PlanningRefreshStatus.FAILED
+    assert result.error
+    assert len(routing_collaborator.calls) == 2
+    assert len(optimization_collaborator.calls) == 2
+    assert len(activation_collaborator.calls) == 2
+    assert baseline_collaborator.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Stage 1 (Global Multi-Incident Optimizer refactor): commitment release on lifecycle transition
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_inactive_event_releases_its_resource_commitments(status):
+    """Task 14: the only place in the codebase today that observes a
+    FireEvent having become RESOLVED/DISMISSED for planning purposes also
+    releases that event's commitments - see the orchestrator's own
+    docstring note for why this fires lazily rather than being pushed at
+    transition time."""
+    resource_commitment_repository = FakeResourceCommitmentRepository()
+
+    make_orchestrator(
+        fire_event_repository=FakeFireEventRepository(make_stored_event(status=status)),
+        resource_commitment_repository=resource_commitment_repository,
+    ).refresh(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert resource_commitment_repository.release_calls == [FIRE_EVENT_ID]
+
+
+def test_active_event_does_not_release_any_commitments():
+    resource_commitment_repository = FakeResourceCommitmentRepository()
+
+    make_orchestrator(resource_commitment_repository=resource_commitment_repository).refresh(
+        fire_event_id=FIRE_EVENT_ID, as_of=AS_OF
+    )
+
+    assert resource_commitment_repository.release_calls == []
 
 
 def test_result_rejects_inactive_event_with_ids():

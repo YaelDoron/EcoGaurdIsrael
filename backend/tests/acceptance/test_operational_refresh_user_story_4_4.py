@@ -66,7 +66,10 @@ from src.services.operational_refresh import (
     OperationalRefreshStatus,
     ResourceStatusUpdateService,
 )
-from src.services.response_planning import PlanningRefreshResult, PlanningRefreshStatus
+from src.services.global_planning.global_planning_refresh_coordinator import (
+    GlobalPlanningRefreshResult,
+    GlobalPlanningRefreshStatus,
+)
 from src.services.response_target import ResponseTargetInputService
 from src.simulation import (
     SimulationEvent,
@@ -84,34 +87,29 @@ GOLAN_LATITUDE = 33.127
 GOLAN_LONGITUDE = 35.781
 
 
-class NoOpPlanningRefresh:
-    """Stands in for US 5.4 in these US 4.4-focused acceptance tests.
+class NoOpGlobalPlanningRefresh:
+    """Stands in for Stage 6's Global GA planning cycle in these US
+    4.4-focused acceptance tests.
 
     These tests assert only on operational-refresh (severity/spread/target)
     behavior, not on planning outcomes, so this returns a minimal, always-
-    legal PlanningRefreshResult rather than requiring real routing/GA/
-    baseline wiring (station, resources, road network) that US 4.4 has no
-    reason to set up here.
+    legal GlobalPlanningRefreshResult rather than requiring real routing/GA/
+    candidate-resource wiring (station, resources, road network) that US
+    4.4 has no reason to set up here.
     """
 
-    def refresh(self, *, fire_event_id, as_of):
-        return PlanningRefreshResult(
-            status=PlanningRefreshStatus.INSUFFICIENT_DATA,
-            fire_event_id=fire_event_id,
-            route_planning_run_id=None,
-            response_plan_id=None,
-            comparison_id=None,
-        )
+    def refresh(self, *, trigger, as_of):
+        return GlobalPlanningRefreshResult(status=GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS, trigger=trigger, as_of=as_of)
 
 
 def make_simulation_refresh_coordinator(stack: "AcceptanceStack") -> SimulationRefreshCoordinator:
-    """Build a SimulationRefreshCoordinator wired through the real US4.4 -> US5.4
-    bridge, with a no-op planning collaborator (see NoOpPlanningRefresh)."""
+    """Build a SimulationRefreshCoordinator wired through the real US4.4 ->
+    Stage 6 bridge, with a no-op global planning collaborator (see
+    NoOpGlobalPlanningRefresh)."""
     return SimulationRefreshCoordinator(
         operational_planning_refresh=OperationalPlanningRefreshCoordinator(
             operational_refresh_orchestrator=stack.orchestrator,
-            planning_refresh=NoOpPlanningRefresh(),
-            fire_event_repository=stack.fire_events,
+            global_planning_refresh=NoOpGlobalPlanningRefresh(),
         ),
         fire_event_repository=stack.fire_events,
     )
