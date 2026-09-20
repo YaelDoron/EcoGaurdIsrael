@@ -13,24 +13,24 @@ function makeMetrics(overrides: Partial<ResponsePlanMetrics> = {}): ResponsePlan
 }
 
 describe("PlanMetrics", () => {
-  it("displays the persisted plan score", () => {
+  it("does not show the internal algorithmic plan score", () => {
     render(<PlanMetrics metrics={makeMetrics({ plan_score: 87.3 })} />);
 
-    expect(screen.getByText("Plan Score")).toBeInTheDocument();
-    expect(screen.getByText("87.3")).toBeInTheDocument();
+    expect(screen.queryByText("Plan Score")).not.toBeInTheDocument();
+    expect(screen.queryByText("87.3")).not.toBeInTheDocument();
   });
 
-  it("displays the persisted coverage score as a percentage", () => {
+  it("does not show a Coverage metric card", () => {
     render(<PlanMetrics metrics={makeMetrics({ coverage_score: 60 })} />);
 
-    expect(screen.getByText("Coverage")).toBeInTheDocument();
-    expect(screen.getByText("60.0%")).toBeInTheDocument();
+    expect(screen.queryByText("Coverage")).not.toBeInTheDocument();
+    expect(screen.queryByText("60.0%")).not.toBeInTheDocument();
   });
 
   it("displays the persisted average ETA as a human-readable duration", () => {
     render(<PlanMetrics metrics={makeMetrics({ average_eta_seconds: 125 })} />);
 
-    expect(screen.getByText("Average ETA")).toBeInTheDocument();
+    expect(screen.getByText("Average Travel Time")).toBeInTheDocument();
     expect(screen.getByText("2m 5s")).toBeInTheDocument();
   });
 
@@ -45,13 +45,19 @@ describe("PlanMetrics", () => {
     // for this component to derive a value from. Two different metrics
     // objects must produce two different displays, straight from the
     // fields given.
-    const { rerender } = render(<PlanMetrics metrics={makeMetrics({ plan_score: 10, coverage_score: 20 })} />);
-    expect(screen.getByText("10.0")).toBeInTheDocument();
-    expect(screen.getByText("20.0%")).toBeInTheDocument();
+    const { rerender } = render(<PlanMetrics metrics={makeMetrics({ average_eta_seconds: 60 })} />);
+    expect(screen.getByText("1m 0s")).toBeInTheDocument();
 
-    rerender(<PlanMetrics metrics={makeMetrics({ plan_score: 99.9, coverage_score: 5.5 })} />);
-    expect(screen.getByText("99.9")).toBeInTheDocument();
-    expect(screen.getByText("5.5%")).toBeInTheDocument();
-    expect(screen.queryByText("10.0")).not.toBeInTheDocument();
+    rerender(<PlanMetrics metrics={makeMetrics({ average_eta_seconds: 300 })} />);
+    expect(screen.getByText("5m 0s")).toBeInTheDocument();
+    expect(screen.queryByText("1m 0s")).not.toBeInTheDocument();
+  });
+
+  it("has no visible Plan Metrics heading but stays an accessible labelled section", () => {
+    render(<PlanMetrics metrics={makeMetrics()} />);
+
+    expect(screen.queryByText("Plan Metrics")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Plan metrics")).toBeInTheDocument();
   });
 });

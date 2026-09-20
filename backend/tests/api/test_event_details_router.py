@@ -18,15 +18,20 @@ from src.api.routers.fire_events import fire_events_router
 from src.api.schemas.event_details import (
     BaselineComparisonResponse,
     CurrentResponsePlanResponse,
+    DetectionEvidenceResponse,
     EventDetailsResult,
     FireEventSummaryResponse,
     FirefightingResourceResponse,
     FireStationResponse,
+    NewsEvidenceResponse,
     ResponseActionResponse,
     ResponseTargetResponse,
+    SatelliteEvidenceResponse,
     SeverityAssessmentResponse,
     SpreadPredictionCellResponse,
     SpreadPredictionResponse,
+    StationAllocationResponse,
+    StationSummaryResponse,
 )
 from src.database.connection import DatabaseConfigurationError
 from src.models.fire_event_status import FireEventStatus
@@ -172,16 +177,75 @@ def make_plan(**overrides) -> CurrentResponsePlanResponse:
     return CurrentResponsePlanResponse(**values)
 
 
+def make_satellite_evidence(**overrides) -> SatelliteEvidenceResponse:
+    values = dict(
+        id=501,
+        detected_at=DETECTED_AT,
+        latitude=32.7,
+        longitude=35.0,
+        confidence="high",
+        frp=15.0,
+        brightness=310.0,
+        satellite="Terra",
+        instrument="MODIS",
+        day_night="D",
+    )
+    values.update(overrides)
+    return SatelliteEvidenceResponse(**values)
+
+
+def make_news_evidence(**overrides) -> NewsEvidenceResponse:
+    values = dict(
+        id=701,
+        title="Blaze reported near reserve",
+        summary="A wildfire was reported near the nature reserve.",
+        source="haaretz",
+        observed_at=DETECTED_AT,
+        location_name="Modiin",
+        latitude=31.9,
+        longitude=35.0,
+    )
+    values.update(overrides)
+    return NewsEvidenceResponse(**values)
+
+
+def make_detection_evidence(**overrides) -> DetectionEvidenceResponse:
+    values = dict(satellite=[], news=[])
+    values.update(overrides)
+    return DetectionEvidenceResponse(**values)
+
+
+def make_station_allocation(**overrides) -> StationAllocationResponse:
+    values = dict(resource_id="R1", fire_event_id=12, response_plan_id=77)
+    values.update(overrides)
+    return StationAllocationResponse(**values)
+
+
+def make_station_summary(**overrides) -> StationSummaryResponse:
+    values = dict(
+        station_id="S1",
+        total_resources=4,
+        available=2,
+        assigned_status=1,
+        unavailable=1,
+        current_global_plan_allocations=[],
+    )
+    values.update(overrides)
+    return StationSummaryResponse(**values)
+
+
 def make_result(**overrides) -> EventDetailsResult:
     values = dict(
         as_of=AS_OF,
         fire_event=make_fire_event(),
         severity=None,
         danger=None,
+        detection_evidence=make_detection_evidence(),
         spread_predictions=[],
         targets=[],
         stations=[],
         resources=[],
+        station_summaries=[],
         current_response_plan=None,
     )
     values.update(overrides)
@@ -210,10 +274,14 @@ def endpoint_for(fire_event_id: int) -> str:
 def test_happy_path_returns_full_details():
     result = make_result(
         severity=make_severity(),
+        detection_evidence=make_detection_evidence(
+            satellite=[make_satellite_evidence()], news=[make_news_evidence()]
+        ),
         spread_predictions=[make_spread_prediction()],
         targets=[make_target()],
         stations=[make_station()],
         resources=[make_resource()],
+        station_summaries=[make_station_summary(current_global_plan_allocations=[make_station_allocation()])],
         current_response_plan=make_plan(),
     )
     client = client_for(FakeEventDetailsService(result))
@@ -225,11 +293,29 @@ def test_happy_path_returns_full_details():
     assert body["fire_event"]["fire_event_id"] == 12
     assert body["severity"]["assessment_id"] == 44
     assert body["danger"] is None
+    assert len(body["detection_evidence"]["satellite"]) == 1
+    assert body["detection_evidence"]["satellite"][0]["id"] == 501
+    assert body["detection_evidence"]["satellite"][0]["satellite"] == "Terra"
+    assert len(body["detection_evidence"]["news"]) == 1
+    assert body["detection_evidence"]["news"][0]["id"] == 701
+    assert body["detection_evidence"]["news"][0]["source"] == "haaretz"
     assert len(body["spread_predictions"]) == 1
     assert len(body["targets"]) == 1
     assert len(body["stations"]) == 1
     assert len(body["resources"]) == 1
     assert body["current_response_plan"]["plan_id"] == 77
+    assert len(body["station_summaries"]) == 1
+    summary = body["station_summaries"][0]
+    assert summary["station_id"] == "S1"
+    assert summary["total_resources"] == 4
+    assert summary["available"] == 2
+    assert summary["assigned_status"] == 1
+    assert summary["unavailable"] == 1
+    assert len(summary["current_global_plan_allocations"]) == 1
+    allocation = summary["current_global_plan_allocations"][0]
+    assert allocation["resource_id"] == "R1"
+    assert allocation["fire_event_id"] == 12
+    assert allocation["response_plan_id"] == 77
 
 
 def test_service_is_called_with_the_path_fire_event_id():
@@ -239,6 +325,37 @@ def test_service_is_called_with_the_path_fire_event_id():
     client.get(endpoint_for(42))
 
     assert service.calls == [42]
+
+
+# ---------------------------------------------------------------------------
+# Detection evidence
+# ---------------------------------------------------------------------------
+
+
+def test_detection_evidence_is_serialized_with_timezone_aware_timestamps():
+    result = make_result(
+        detection_evidence=make_detection_evidence(
+            satellite=[make_satellite_evidence()], news=[make_news_evidence()]
+        )
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    satellite = body["detection_evidence"]["satellite"][0]
+    news = body["detection_evidence"]["news"][0]
+    for value in (satellite["detected_at"], news["observed_at"]):
+        assert value.endswith("Z") or "+" in value[-6:]
+        assert parse_dt(value).tzinfo is not None
+
+
+def test_no_detection_evidence_serializes_as_empty_lists():
+    client = client_for(FakeEventDetailsService(make_result()))
+
+    body = client.get(endpoint_for(12)).json()
+
+    assert body["detection_evidence"]["satellite"] == []
+    assert body["detection_evidence"]["news"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +408,8 @@ def test_missing_optional_sections_serialize_as_null_or_empty():
     assert body["targets"] == []
     assert body["stations"] == []
     assert body["resources"] == []
+    assert body["station_summaries"] == []
+    assert body["detection_evidence"] == {"satellite": [], "news": []}
 
 
 # ---------------------------------------------------------------------------

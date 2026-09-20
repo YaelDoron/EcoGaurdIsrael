@@ -30,17 +30,24 @@ from datetime import datetime, timezone
 from src.api.schemas.event_details import (
     BaselineComparisonResponse,
     CurrentResponsePlanResponse,
+    DetectionEvidenceResponse,
     EventDetailsResult,
     FireEventSummaryResponse,
     FirefightingResourceResponse,
     FireStationResponse,
+    NewsEvidenceResponse,
     ResponseActionResponse,
     ResponseTargetResponse,
+    SatelliteEvidenceResponse,
     SeverityAssessmentResponse,
     SpreadPredictionCellResponse,
     SpreadPredictionResponse,
+    StationAllocationResponse,
+    StationSummaryResponse,
 )
+from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_spread_prediction import SUPPORTED_HORIZON_MINUTES
+from src.models.resource_status import ResourceStatus
 from src.models.response_plan_details import ResponseActionDetails, ResponsePlanDetails
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
@@ -50,7 +57,9 @@ from src.repositories.fire_spread_prediction_repository import (
 )
 from src.repositories.fire_station_repository import FireStationRepository
 from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
+from src.repositories.news_repository import NewsRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
+from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
 
 
@@ -66,6 +75,8 @@ class EventDetailsService:
         response_target_repository: ResponseTargetRepository | None = None,
         fire_station_repository: FireStationRepository | None = None,
         firefighting_resource_repository: FirefightingResourceRepository | None = None,
+        satellite_hotspot_repository: SatelliteHotspotRepository | None = None,
+        news_repository: NewsRepository | None = None,
         response_plan_details_service: ResponsePlanDetailsService | None = None,
     ) -> None:
         self._fire_event_repository = fire_event_repository or FireEventRepository()
@@ -80,6 +91,8 @@ class EventDetailsService:
         self._firefighting_resource_repository = (
             firefighting_resource_repository or FirefightingResourceRepository()
         )
+        self._satellite_hotspot_repository = satellite_hotspot_repository or SatelliteHotspotRepository()
+        self._news_repository = news_repository or NewsRepository()
         self._response_plan_details_service = response_plan_details_service or ResponsePlanDetailsService()
 
     def get_event_details(
@@ -103,16 +116,25 @@ class EventDetailsService:
         if stored_event is None:
             return None
 
+        db_stations = self._fire_station_repository.get_all_stations()
+        station_ids = [str(db_station.id) for db_station in db_stations]
+        db_resources = self._firefighting_resource_repository.get_resources_for_stations(station_ids)
+        plan_details = self._response_plan_details_service.get_current_plan_details(fire_event_id)
+
         return EventDetailsResult(
             as_of=snapshot_time,
             fire_event=self._to_fire_event_response(stored_event.id, stored_event.event),
             severity=self._load_severity(fire_event_id),
             danger=None,
+            detection_evidence=self._load_detection_evidence(stored_event.supporting_evidence),
             spread_predictions=self._load_spread_predictions(fire_event_id),
             targets=self._load_targets(fire_event_id, snapshot_time),
-            stations=self._load_stations(),
-            resources=self._load_resources(),
-            current_response_plan=self._load_current_response_plan(fire_event_id),
+            stations=self._to_station_responses(db_stations),
+            resources=self._to_resource_responses(db_resources),
+            station_summaries=self._build_station_summaries(fire_event_id, db_stations, db_resources, plan_details),
+            current_response_plan=(
+                self._to_current_response_plan_response(plan_details) if plan_details is not None else None
+            ),
         )
 
     def _load_severity(self, fire_event_id: int) -> SeverityAssessmentResponse | None:
@@ -126,6 +148,50 @@ class EventDetailsService:
             score=assessment.score,
             level=assessment.level,
             assessed_at=assessment.assessed_at,
+        )
+
+    def _load_detection_evidence(self, supporting_evidence) -> DetectionEvidenceResponse:  # noqa: ANN001
+        satellite_evidence: list[SatelliteEvidenceResponse] = []
+        news_evidence: list[NewsEvidenceResponse] = []
+        for evidence_ref in supporting_evidence:
+            if evidence_ref.evidence_type is FireEvidenceType.SATELLITE:
+                stored_hotspot = self._satellite_hotspot_repository.get_by_id(evidence_ref.evidence_id)
+                if stored_hotspot is not None:
+                    satellite_evidence.append(self._to_satellite_evidence_response(stored_hotspot))
+            elif evidence_ref.evidence_type is FireEvidenceType.NEWS:
+                stored_report = self._news_repository.get_by_id(evidence_ref.evidence_id)
+                if stored_report is not None:
+                    news_evidence.append(self._to_news_evidence_response(stored_report))
+        return DetectionEvidenceResponse(satellite=satellite_evidence, news=news_evidence)
+
+    @staticmethod
+    def _to_satellite_evidence_response(stored_hotspot) -> SatelliteEvidenceResponse:  # noqa: ANN001
+        hotspot = stored_hotspot.hotspot
+        return SatelliteEvidenceResponse(
+            id=stored_hotspot.id,
+            detected_at=hotspot.detected_at,
+            latitude=hotspot.latitude,
+            longitude=hotspot.longitude,
+            confidence=hotspot.confidence,
+            frp=hotspot.frp,
+            brightness=hotspot.brightness,
+            satellite=hotspot.satellite,
+            instrument=hotspot.instrument,
+            day_night=hotspot.day_night,
+        )
+
+    @staticmethod
+    def _to_news_evidence_response(stored_report) -> NewsEvidenceResponse:  # noqa: ANN001
+        report = stored_report.report
+        return NewsEvidenceResponse(
+            id=stored_report.id,
+            title=report.title,
+            summary=report.summary,
+            source=report.source_feed,
+            observed_at=stored_report.observed_at,
+            location_name=report.location_name,
+            latitude=report.latitude,
+            longitude=report.longitude,
         )
 
     def _load_spread_predictions(self, fire_event_id: int) -> list[SpreadPredictionResponse]:
@@ -177,7 +243,8 @@ class EventDetailsService:
             for stored_target in stored_target_set.targets
         ]
 
-    def _load_stations(self) -> list[FireStationResponse]:
+    @staticmethod
+    def _to_station_responses(db_stations) -> list[FireStationResponse]:  # noqa: ANN001
         return [
             FireStationResponse(
                 station_id=str(db_station.id),
@@ -187,25 +254,63 @@ class EventDetailsService:
                 station_type=db_station.station_type,
                 address=db_station.address,
             )
-            for db_station in self._fire_station_repository.get_all_stations()
+            for db_station in db_stations
         ]
 
-    def _load_resources(self) -> list[FirefightingResourceResponse]:
-        station_ids = [str(db_station.id) for db_station in self._fire_station_repository.get_all_stations()]
+    @staticmethod
+    def _to_resource_responses(db_resources) -> list[FirefightingResourceResponse]:  # noqa: ANN001
         return [
             FirefightingResourceResponse(
                 resource_id=str(db_resource.id),
                 station_id=str(db_resource.station_id),
                 status=db_resource.status,
             )
-            for db_resource in self._firefighting_resource_repository.get_resources_for_stations(station_ids)
+            for db_resource in db_resources
         ]
 
-    def _load_current_response_plan(self, fire_event_id: int) -> CurrentResponsePlanResponse | None:
-        plan_details = self._response_plan_details_service.get_current_plan_details(fire_event_id)
-        if plan_details is None:
-            return None
-        return self._to_current_response_plan_response(plan_details)
+    @staticmethod
+    def _build_station_summaries(
+        fire_event_id: int,
+        db_stations,  # noqa: ANN001
+        db_resources,  # noqa: ANN001
+        plan_details: ResponsePlanDetails | None,
+    ) -> list[StationSummaryResponse]:
+        resources_by_station_id: dict[str, list] = {str(db_station.id): [] for db_station in db_stations}
+        for db_resource in db_resources:
+            resources_by_station_id.setdefault(str(db_resource.station_id), []).append(db_resource)
+
+        allocations_by_station_id: dict[str, list[StationAllocationResponse]] = {}
+        if plan_details is not None:
+            for action in plan_details.actions:
+                allocations_by_station_id.setdefault(action.station_id, []).append(
+                    StationAllocationResponse(
+                        resource_id=action.resource_id,
+                        fire_event_id=fire_event_id,
+                        response_plan_id=plan_details.plan_id,
+                    )
+                )
+
+        summaries: list[StationSummaryResponse] = []
+        for db_station in db_stations:
+            station_id = str(db_station.id)
+            station_resources = resources_by_station_id.get(station_id, [])
+            summaries.append(
+                StationSummaryResponse(
+                    station_id=station_id,
+                    total_resources=len(station_resources),
+                    available=sum(
+                        1 for db_resource in station_resources if db_resource.status is ResourceStatus.AVAILABLE
+                    ),
+                    assigned_status=sum(
+                        1 for db_resource in station_resources if db_resource.status is ResourceStatus.ASSIGNED
+                    ),
+                    unavailable=sum(
+                        1 for db_resource in station_resources if db_resource.status is ResourceStatus.UNAVAILABLE
+                    ),
+                    current_global_plan_allocations=allocations_by_station_id.get(station_id, []),
+                )
+            )
+        return summaries
 
     @classmethod
     def _to_current_response_plan_response(cls, plan_details: ResponsePlanDetails) -> CurrentResponsePlanResponse:

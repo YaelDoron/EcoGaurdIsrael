@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { StationLayer } from "./StationLayer";
-import type { FireStation } from "../../types/eventDetails";
+import { StationLayer, dynamicAvailableCount } from "./StationLayer";
+import type { FireStation, StationSummary } from "../../types/eventDetails";
 
 vi.mock("react-leaflet", async () => import("../../test/reactLeafletStub"));
 
@@ -13,6 +13,18 @@ function makeStation(overrides: Partial<FireStation> = {}): FireStation {
     longitude: 34.8,
     station_type: "urban",
     address: "1 Main St",
+    ...overrides,
+  };
+}
+
+function makeStationSummary(overrides: Partial<StationSummary> = {}): StationSummary {
+  return {
+    station_id: "S1",
+    total_resources: 4,
+    available: 2,
+    assigned_status: 1,
+    unavailable: 1,
+    current_global_plan_allocations: [],
     ...overrides,
   };
 }
@@ -39,7 +51,312 @@ describe("StationLayer", () => {
     render(<StationLayer stations={[makeStation({ station_type: null, address: null })]} />);
 
     expect(screen.getByText("Central Station")).toBeInTheDocument();
-    expect(screen.queryByText(/Type:/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Type:")).not.toBeInTheDocument();
     expect(screen.queryByText("1 Main St")).not.toBeInTheDocument();
+  });
+
+  it("shows total/available/unavailable counts from the matching station summary", () => {
+    render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ total_resources: 4, available: 2, unavailable: 1 })]}
+      />,
+    );
+
+    expect(screen.getByText("Total")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+  });
+
+  it("lists allocated resource ids from the current global plan", () => {
+    render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            current_global_plan_allocations: [
+              { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Allocated in current plan")).toBeInTheDocument();
+    expect(screen.getByText("R1")).toBeInTheDocument();
+    expect(screen.getByText("R2")).toBeInTheDocument();
+  });
+
+  it('shows the Hebrew "none allocated" text for allocations when the current plan allocates nothing at this station', () => {
+    render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ current_global_plan_allocations: [] })]}
+      />,
+    );
+
+    expect(screen.getByText("No allocated trucks")).toBeInTheDocument();
+  });
+
+  it("omits the resource summary section when no matching station summary is given", () => {
+    render(<StationLayer stations={[makeStation()]} />);
+
+    expect(screen.queryByText("Allocated in current plan")).not.toBeInTheDocument();
+    expect(screen.queryByText("Total")).not.toBeInTheDocument();
+  });
+
+  it("uses a location-pin glyph icon, not a plain dot", () => {
+    render(<StationLayer stations={[makeStation()]} />);
+
+    const icon = screen.getByTestId("marker-icon");
+    expect(icon.querySelector("[data-station-icon] svg")).not.toBeNull();
+  });
+
+  it("keeps unallocated stations the default green, amber when only assigned trucks remain, grey when nothing is usable", () => {
+    const { rerender } = render(
+      <StationLayer stations={[makeStation()]} stationSummaries={[makeStationSummary({ available: 2 })]} />,
+    );
+    expect(screen.getByTestId("marker-icon").innerHTML).toContain("var(--color-success)");
+
+    rerender(<StationLayer stations={[makeStation()]} />);
+    expect(screen.getByTestId("marker-icon").innerHTML).toContain("var(--color-success)");
+
+    rerender(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ available: 0, assigned_status: 1, unavailable: 0, total_resources: 1 })]}
+      />,
+    );
+    expect(screen.getByTestId("marker-icon").innerHTML).toContain("var(--color-warning)");
+
+    rerender(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ available: 0, assigned_status: 0, unavailable: 3, total_resources: 3 })]}
+      />,
+    );
+    expect(screen.getByTestId("marker-icon").innerHTML).toContain("var(--color-text-muted)");
+  });
+
+  it("wraps the popup in an LTR container", () => {
+    render(<StationLayer stations={[makeStation()]} stationSummaries={[makeStationSummary()]} />);
+
+    const popup = screen.getByText("Central Station").closest(".station-popup") as HTMLElement;
+    expect(popup).toHaveAttribute("dir", "ltr");
+  });
+
+  it("renders the station name as a header, the address as muted text, and the type as a badge", () => {
+    render(<StationLayer stations={[makeStation({ station_type: "משנה", address: "Main St. 1" })]} />);
+
+    expect(screen.getByRole("heading", { name: "Central Station" })).toBeInTheDocument();
+    expect(screen.getByText("Main St. 1")).toHaveClass("station-popup__address");
+    expect(screen.getByText("Type:")).toBeInTheDocument();
+    expect(screen.getByText("Sub-station")).toHaveClass("station-popup__type-badge");
+  });
+
+  it("renders Hebrew station data in English, with no Hebrew left in the popup", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation({ name: "מפרץ חיפה", address: "החרש 1 חיפה", station_type: "משנה" })]}
+        stationSummaries={[makeStationSummary({ current_global_plan_allocations: [] })]}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Haifa Bay Station" })).toBeInTheDocument();
+    expect(screen.getByText("Haifa, HaCharash 1")).toHaveClass("station-popup__address");
+    expect(screen.getByText("Sub-station")).toHaveClass("station-popup__type-badge");
+    expect(container.textContent).not.toMatch(/[֐-׿]/);
+  });
+
+  it("lays the inventory out as four columns with semantic colors, and a divider before allocations", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ total_resources: 4, available: 2, unavailable: 2 })]}
+      />,
+    );
+
+    expect(container.querySelectorAll(".station-popup__stat")).toHaveLength(4);
+    expect(container.querySelector(".station-popup__stat--available")).not.toBeNull();
+    expect(container.querySelector(".station-popup__stat--unavailable")).not.toBeNull();
+    const divider = container.querySelector("hr.station-popup__divider") as HTMLElement;
+    const allocations = container.querySelector(".station-popup__allocations") as HTMLElement;
+    expect(divider.compareDocumentPosition(allocations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("mutes a zero unavailable count instead of coloring it as a problem", () => {
+    const { container } = render(
+      <StationLayer stations={[makeStation()]} stationSummaries={[makeStationSummary({ unavailable: 0 })]} />,
+    );
+
+    expect(container.querySelector(".station-popup__stat--unavailable")).toBeNull();
+    expect(container.querySelector(".station-popup__stat--zero")).not.toBeNull();
+  });
+
+  it("shows the available count net of trucks allocated to the current plan", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            total_resources: 6,
+            available: 5,
+            unavailable: 1,
+            current_global_plan_allocations: [
+              { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    const available = container.querySelector(".station-popup__stat--available dd") as HTMLElement;
+    expect(available).toHaveTextContent("3");
+    expect(container.querySelector(".station-popup__stat--available dt")).toHaveTextContent("Available");
+  });
+
+  it("mutes the available count to grey when the plan depletes the station's available trucks", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            total_resources: 3,
+            available: 2,
+            unavailable: 0,
+            current_global_plan_allocations: [
+              { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(container.querySelector(".station-popup__stat--available")).toBeNull();
+    const zero = Array.from(container.querySelectorAll(".station-popup__stat--zero")).find((el) => el.textContent?.includes("Available"));
+    expect(zero).toBeDefined();
+    expect(zero).toHaveTextContent("0");
+  });
+
+  it("never shows a negative available count when allocations exceed the raw available count", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            available: 1,
+            current_global_plan_allocations: [
+              { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R3", fire_event_id: 12, response_plan_id: 77 },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    expect(container.textContent).not.toContain("-");
+    expect(dynamicAvailableCount(makeStationSummary({ available: 1, current_global_plan_allocations: [
+      { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+      { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+    ] }))).toBe(0);
+  });
+
+  it("marks a station that contributes trucks to the current plan deep blue - never red, never inactive grey", () => {
+    const { rerender } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            available: 1,
+            current_global_plan_allocations: [{ resource_id: "R1", fire_event_id: 12, response_plan_id: 77 }],
+          }),
+        ]}
+      />,
+    );
+    let html = screen.getByTestId("marker-icon").innerHTML;
+    expect(html).toContain("#1e3a8a");
+    expect(html).not.toContain("var(--color-danger)");
+
+    // Fully allocated (0 available under the plan) stays blue, not grey.
+    rerender(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            available: 1,
+            unavailable: 0,
+            total_resources: 1,
+            current_global_plan_allocations: [{ resource_id: "R1", fire_event_id: 12, response_plan_id: 77 }],
+          }),
+        ]}
+      />,
+    );
+    html = screen.getByTestId("marker-icon").innerHTML;
+    expect(html).toContain("#1e3a8a");
+    expect(html).not.toContain("var(--color-text-muted)");
+  });
+
+  it("shows Total, Available, Allocated and Unavailable in four columns whose counts balance", () => {
+    const allocations = [
+      { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+      { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+    ];
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            total_resources: 7,
+            available: 5,
+            assigned_status: 0,
+            unavailable: 2,
+            current_global_plan_allocations: allocations,
+          }),
+        ]}
+      />,
+    );
+
+    const stats = Array.from(container.querySelectorAll(".station-popup__stat")).map((el) => [
+      el.querySelector("dt")?.textContent,
+      Number(el.querySelector("dd")?.textContent),
+    ]);
+    expect(stats).toEqual([
+      ["Total", 7],
+      ["Available", 3],
+      ["Allocated", 2],
+      ["Unavailable", 2],
+    ]);
+    const [, total] = stats[0] as [string, number];
+    const sum = (stats[1][1] as number) + (stats[2][1] as number) + (stats[3][1] as number);
+    expect(sum).toBe(total);
+  });
+
+  it("styles the Allocated number with the operational orange used by the allocated truck pills", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({ current_global_plan_allocations: [{ resource_id: "R1", fire_event_id: 12, response_plan_id: 77 }] }),
+        ]}
+      />,
+    );
+
+    expect(container.querySelector(".station-popup__stat--allocated dd")).toHaveTextContent("1");
+    expect(container.querySelector(".station-popup__allocation")).not.toBeNull();
+  });
+
+  it("shows 0 allocated when the plan allocates nothing at this station", () => {
+    const { container } = render(
+      <StationLayer stations={[makeStation()]} stationSummaries={[makeStationSummary({ current_global_plan_allocations: [] })]} />,
+    );
+
+    expect(container.querySelector(".station-popup__stat--allocated dd")).toHaveTextContent("0");
   });
 });

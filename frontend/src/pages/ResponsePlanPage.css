@@ -1,32 +1,87 @@
-.response-plan-page__identity {
-  margin: 0 0 var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  max-width: 480px;
+/* Breadcrumb-style back link: muted text, no box (same as Event Details). */
+.response-plan-page__breadcrumb-nav {
+  margin-bottom: var(--space-2);
 }
 
-.response-plan-page__row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-3);
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-2);
-}
-
-.response-plan-page__row dt {
+.response-plan-page__breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.875rem;
   color: var(--color-text-muted);
-  font-size: 0.8125rem;
+  text-decoration: none;
+  transition: color 0.15s ease;
 }
 
-.response-plan-page__row dd {
-  margin: 0;
-  text-align: right;
-}
-
-.response-plan-page__back-link {
-  display: inline-block;
+.response-plan-page__breadcrumb:hover {
   color: var(--color-text);
-  font-weight: 600;
+  text-decoration: underline;
+}
+
+.response-plan-page__breadcrumb svg {
+  transition: transform 0.15s ease;
+}
+
+.response-plan-page__breadcrumb:hover svg {
+  transform: translateX(-2px);
+}
+
+/* Compact metadata bar under the header: chips + badges instead of a table. */
+.response-plan-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: calc(var(--space-3) * -1) 0 var(--space-4);
+}
+
+.response-plan-page__event-badge {
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.response-plan-page__generated {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+/* Actions on the left, map pinned on the right. */
+.response-plan-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.response-plan-page__details {
+  min-width: 0;
+}
+
+.response-plan-page__map {
+  position: sticky;
+  top: var(--space-4);
+  margin-bottom: 0;
+}
+
+.response-plan-page__map .map-view__container {
+  height: min(78vh, 720px);
+}
+
+@media (max-width: 800px) {
+  .response-plan-page__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .response-plan-page__map {
+    position: static;
+    order: -1;
+  }
+
+  .response-plan-page__map .map-view__container {
+    height: 400px;
+  }
 }

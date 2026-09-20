@@ -1,0 +1,34 @@
+/* Origin marker popup: English station name is the title, truck id is secondary. */
+.origin-popup__station {
+  display: block;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.origin-popup__heading {
+  margin: 6px 0 4px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-caps);
+  color: var(--color-text-muted);
+}
+
+.origin-popup__trucks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Orange pills, same as the allocation pills in the station popup. */
+.origin-popup__truck {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fdebd0;
+  color: #d35400;
+  font-size: 0.75rem;
+  font-weight: 600;
+}

@@ -7,8 +7,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.response_plan_db import ResponsePlanDB
+from src.database.models.response_target_set_db import ResponseTargetSetDB
+from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.models.global_planning_run_event_status import GlobalPlanningRunEventStatus
 from src.models.global_planning_run_status import GlobalPlanningRunStatus
+from src.models.response_plan_status import ResponsePlanStatus
 from src.repositories.exceptions import GlobalPlanningRunRepositoryError
 from src.repositories.global_planning_run_repository import GlobalPlanningRunRepository
 
@@ -41,6 +45,48 @@ def _persist_fire_events(sqlite_session_factory, count: int) -> tuple[int, ...]:
     session.commit()
     session.close()
     return tuple(ids)
+
+
+def _persist_response_plan(sqlite_session_factory, fire_event_id: int, *, generated_at: datetime = STARTED_AT) -> int:
+    """Persist a minimal, fully-materialized ResponsePlan row (plus its
+    required response_target_set/route_planning_run FK prerequisites) and
+    return its id - for tests that need a real response_plan_id to attach
+    to a GlobalPlanningRunEvent membership row."""
+    session = sqlite_session_factory()
+    target_set = ResponseTargetSetDB(
+        fire_event_id=fire_event_id,
+        generated_at=generated_at,
+        methodology="m",
+        methodology_version="1.0",
+    )
+    session.add(target_set)
+    session.flush()
+    route_run = RoutePlanningRunDB(
+        fire_event_id=fire_event_id,
+        response_target_set_id=target_set.id,
+        planned_at=generated_at,
+        methodology="m",
+        methodology_version="1.0",
+        resource_ids=[],
+    )
+    session.add(route_run)
+    session.flush()
+    plan = ResponsePlanDB(
+        fire_event_id=fire_event_id,
+        response_target_set_id=target_set.id,
+        route_planning_run_id=route_run.id,
+        generated_at=generated_at,
+        status=ResponsePlanStatus.COMPLETE.value,
+        methodology="m",
+        methodology_version="1.0",
+        random_seed=1,
+    )
+    session.add(plan)
+    session.flush()
+    plan_id = plan.id
+    session.commit()
+    session.close()
+    return plan_id
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +312,176 @@ def test_get_latest_activated_excludes_given_run_id(repository):
 
 def test_get_latest_activated_returns_none_when_no_runs_exist(repository):
     assert repository.get_latest_activated() is None
+
+
+# ---------------------------------------------------------------------------
+# Task B-BE-3 - get_latest_materialized_generation
+# ---------------------------------------------------------------------------
+
+
+def test_get_latest_materialized_generation_returns_none_when_no_runs_exist(repository):
+    assert repository.get_latest_materialized_generation() is None
+
+
+def test_get_latest_materialized_generation_skips_a_later_no_op_run(repository, sqlite_session_factory):
+    (fire_event_id,) = _persist_fire_events(sqlite_session_factory, 1)
+    plan_id = _persist_response_plan(sqlite_session_factory, fire_event_id)
+
+    materialized = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        materialized.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.PLANNED,
+        response_plan_id=plan_id,
+        local_state_fingerprint="a" * 64,
+        error_code=None,
+    )
+    repository.complete_run(materialized.id, status=GlobalPlanningRunStatus.COMPLETED, completed_at=COMPLETED_AT)
+
+    no_op = repository.create_run(
+        started_at=STARTED_AT.replace(minute=30), trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        no_op.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.NO_OP,
+        response_plan_id=None,
+        local_state_fingerprint="b" * 64,
+        error_code=None,
+    )
+    repository.complete_run(
+        no_op.id, status=GlobalPlanningRunStatus.COMPLETED, completed_at=COMPLETED_AT.replace(minute=30)
+    )
+
+    latest_materialized = repository.get_latest_materialized_generation()
+
+    assert latest_materialized is not None
+    assert latest_materialized.id == materialized.id
+    assert latest_materialized.id != no_op.id
+
+
+def test_get_latest_materialized_generation_includes_partial_status(repository, sqlite_session_factory):
+    (fire_event_id,) = _persist_fire_events(sqlite_session_factory, 1)
+    plan_id = _persist_response_plan(sqlite_session_factory, fire_event_id)
+
+    stored = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        stored.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.PLANNED,
+        response_plan_id=plan_id,
+        local_state_fingerprint="a" * 64,
+        error_code=None,
+    )
+    repository.complete_run(stored.id, status=GlobalPlanningRunStatus.PARTIAL, completed_at=COMPLETED_AT)
+
+    assert repository.get_latest_materialized_generation().id == stored.id
+
+
+def test_get_latest_materialized_generation_ignores_running_and_failed_runs(repository, sqlite_session_factory):
+    (fire_event_id,) = _persist_fire_events(sqlite_session_factory, 1)
+    plan_id = _persist_response_plan(sqlite_session_factory, fire_event_id)
+
+    running = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        running.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.PLANNED,
+        response_plan_id=plan_id,
+        local_state_fingerprint="a" * 64,
+        error_code=None,
+    )
+    # running is left RUNNING (never completed).
+
+    failed = repository.create_run(
+        started_at=STARTED_AT.replace(minute=1), trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        failed.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.FAILED,
+        response_plan_id=plan_id,
+        local_state_fingerprint="b" * 64,
+        error_code="child_planning_failed",
+    )
+    repository.complete_run(failed.id, status=GlobalPlanningRunStatus.FAILED, completed_at=COMPLETED_AT)
+
+    assert repository.get_latest_materialized_generation() is None
+
+
+def test_get_latest_materialized_generation_returns_none_when_only_no_op_runs_exist(
+    repository, sqlite_session_factory
+):
+    (fire_event_id,) = _persist_fire_events(sqlite_session_factory, 1)
+
+    no_op = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        no_op.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.NO_OP,
+        response_plan_id=None,
+        local_state_fingerprint="a" * 64,
+        error_code=None,
+    )
+    repository.complete_run(no_op.id, status=GlobalPlanningRunStatus.COMPLETED, completed_at=COMPLETED_AT)
+
+    assert repository.get_latest_materialized_generation() is None
+
+
+def test_get_latest_materialized_generation_orders_by_completed_at_desc(repository, sqlite_session_factory):
+    (fire_event_id,) = _persist_fire_events(sqlite_session_factory, 1)
+    earlier_plan_id = _persist_response_plan(sqlite_session_factory, fire_event_id, generated_at=STARTED_AT)
+    later_plan_id = _persist_response_plan(
+        sqlite_session_factory, fire_event_id, generated_at=STARTED_AT.replace(minute=30)
+    )
+
+    earlier = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        earlier.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.PLANNED,
+        response_plan_id=earlier_plan_id,
+        local_state_fingerprint="a" * 64,
+        error_code=None,
+    )
+    repository.complete_run(earlier.id, status=GlobalPlanningRunStatus.COMPLETED, completed_at=COMPLETED_AT)
+
+    later = repository.create_run(
+        started_at=STARTED_AT.replace(minute=30), trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(fire_event_id,),
+    )
+    repository.record_member_result(
+        later.id,
+        fire_event_id,
+        result_status=GlobalPlanningRunEventStatus.PLANNED,
+        response_plan_id=later_plan_id,
+        local_state_fingerprint="b" * 64,
+        error_code=None,
+    )
+    repository.complete_run(
+        later.id, status=GlobalPlanningRunStatus.COMPLETED, completed_at=COMPLETED_AT.replace(minute=30)
+    )
+
+    latest_materialized = repository.get_latest_materialized_generation()
+
+    assert latest_materialized.id == later.id
 
 
 # ---------------------------------------------------------------------------

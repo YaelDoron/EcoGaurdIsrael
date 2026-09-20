@@ -7,6 +7,8 @@ import { OperationsStatusHeader } from "../components/dashboard/OperationsStatus
 import { ErrorState } from "../components/feedback/ErrorState";
 import { LoadingState } from "../components/feedback/LoadingState";
 import { PageHeader } from "../components/layout/PageHeader";
+import { Link } from "react-router-dom";
+import { useActiveFireEvents } from "../hooks/useActiveFireEvents";
 import { useOperationsOverview } from "../hooks/useOperationsOverview";
 import type { OperationsActivityFeedItem } from "../types/operationsOverview";
 import "./ActiveWildfiresPage.css";
@@ -70,6 +72,25 @@ export function ActiveWildfiresPage() {
 
   return (
     <section>
+      <PageHeader
+        title={PAGE_TITLE}
+        description={PAGE_DESCRIPTION}
+        actions={
+          <>
+            <Link to="/response-plan" className="active-wildfires-page__global-plan">
+              Global Response Plan
+            </Link>
+            <button
+              type="button"
+              className="active-wildfires-page__refresh"
+              onClick={refresh}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </>
+        }
+      />
       <PageHeader title={PAGE_TITLE} />
 
       <OperationsStatusHeader

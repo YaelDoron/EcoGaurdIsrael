@@ -16,6 +16,14 @@ vi.mock("../api/responsePlans", () => ({
   getResponsePlanById: getResponsePlanByIdMock,
 }));
 
+const { getEventDetailsMock } = vi.hoisted(() => ({ getEventDetailsMock: vi.fn() }));
+
+vi.mock("../api/eventDetails", () => ({ getEventDetails: getEventDetailsMock }));
+
+const { reverseGeocodeMock } = vi.hoisted(() => ({ reverseGeocodeMock: vi.fn() }));
+
+vi.mock("../api/reverseGeocode", () => ({ reverseGeocode: reverseGeocodeMock }));
+
 vi.mock("react-leaflet", async () => import("../test/reactLeafletStub"));
 
 function makePlan(overrides: Partial<ResponsePlan> = {}): ResponsePlan {
@@ -55,6 +63,10 @@ describe("ResponsePlanPage", () => {
   beforeEach(() => {
     getCurrentResponsePlanMock.mockReset();
     getResponsePlanByIdMock.mockReset();
+    getEventDetailsMock.mockReset();
+    reverseGeocodeMock.mockReset();
+    reverseGeocodeMock.mockResolvedValue(null);
+    getEventDetailsMock.mockResolvedValue({ detection_evidence: { satellite: [], news: [] } });
   });
 
   afterEach(() => {
@@ -66,7 +78,7 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/events/3/plan");
 
-    await screen.findByText("Plan ID");
+    await screen.findByText("Generated:");
     expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(3);
     expect(getResponsePlanByIdMock).not.toHaveBeenCalled();
   });
@@ -76,7 +88,7 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/55");
 
-    await screen.findByText("Plan ID");
+    await screen.findByText("Generated:");
     expect(getResponsePlanByIdMock).toHaveBeenCalledWith(55);
     expect(getCurrentResponsePlanMock).not.toHaveBeenCalled();
   });
@@ -87,6 +99,8 @@ describe("ResponsePlanPage", () => {
     renderAtPath("/events/3/plan");
 
     expect(screen.getByRole("status")).toHaveTextContent(/loading/i);
+    expect(screen.getByRole("heading", { level: 1, name: "Loading Response Plan…" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 1, name: "Response Plan" })).not.toBeInTheDocument();
   });
 
   it("shows a safe ErrorState with Retry when the load fails", async () => {
@@ -110,14 +124,27 @@ describe("ResponsePlanPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("displays the correct Plan ID and FireEvent ID", async () => {
+  it("titles the page by its event and never shows the internal plan id", async () => {
     getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ plan_id: 55, fire_event_id: 12 }) });
 
     renderAtPath("/plans/55");
 
-    await screen.findByText("Plan ID");
-    expect(screen.getByText("55")).toBeInTheDocument();
-    expect(screen.getByText("12")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Response Plan for Event #12" })).toBeInTheDocument();
+    expect(screen.queryByText(/Plan #55/)).not.toBeInTheDocument();
+    expect(screen.queryByText("55")).not.toBeInTheDocument();
+    expect(screen.queryByText("Plan ID")).not.toBeInTheDocument();
+  });
+
+  it("shows metadata as compact chips/badges, not a definition-list table", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ generated_at: "2026-09-17T13:20:00" }) });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
+
+    const meta = screen.getByLabelText("Plan details");
+    expect(meta.querySelector("dl")).toBeNull();
+    expect(within(meta).getByText("Generated:")).toBeInTheDocument();
+    expect(within(meta).getByText("13:20", { exact: false })).toBeInTheDocument();
   });
 
   it("renders the generated timestamp", async () => {
@@ -125,17 +152,18 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/7");
 
-    await screen.findByText("Plan ID");
+    await screen.findByText("Generated:");
     const time = document.querySelector("time");
     expect(time).toHaveAttribute("dateTime", "2026-09-17T13:20:00Z");
   });
 
-  it("shows CURRENT when is_current is true", async () => {
+  it("does not show a CURRENT tag when is_current is true", async () => {
     getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ is_current: true }) });
 
     renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
 
-    expect(await screen.findByText("CURRENT")).toBeInTheDocument();
+    expect(screen.queryByText("CURRENT")).not.toBeInTheDocument();
     expect(screen.queryByText("SUPERSEDED")).not.toBeInTheDocument();
   });
 
@@ -164,14 +192,41 @@ describe("ResponsePlanPage", () => {
     expect(await screen.findByText("Partial")).toBeInTheDocument();
   });
 
-  it("displays methodology and methodology version", async () => {
-    getResponsePlanByIdMock.mockResolvedValue(
-      { plan: makePlan({ methodology: "genetic_algorithm", methodology_version: "2.3.0" }) },
-    );
+  it("does not show technical badges: methodology, Calculation: Success, or a Fire event chip", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({ methodology: "genetic_algorithm", methodology_version: "2.3.0", status: "complete" }),
+    });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
+
+    expect(screen.queryByText(/genetic_algorithm/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Calculation: Success")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fire event")).not.toBeInTheDocument();
+  });
+
+  it("titles target groups with the parent event's location name", async () => {
+    getEventDetailsMock.mockResolvedValue({
+      detection_evidence: {
+        satellite: [],
+        news: [{ id: 1, title: "t", summary: "s", source: "x", observed_at: "2026-09-17T13:10:00Z", location_name: "Modiin", latitude: null, longitude: null }],
+      },
+    });
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "s1", station_name: "One", origin: null },
+            target: { response_target_id: 4, target_type: "active_fire", priority_score: 1, latitude: 1, longitude: 1 },
+            route: { status: "reachable", eta_seconds: 60, distance_meters: 1, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
 
     renderAtPath("/plans/7");
 
-    expect(await screen.findByText("genetic_algorithm (v2.3.0)")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Active fire - Modiin" })).toBeInTheDocument();
   });
 
   it("links back to the correct FireEvent route", async () => {
@@ -181,6 +236,18 @@ describe("ResponsePlanPage", () => {
 
     const link = await screen.findByRole("link", { name: "Back to Event" });
     expect(link).toHaveAttribute("href", "/events/42");
+  });
+
+  it("puts the back link in a breadcrumb above the title, not in the header actions", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ fire_event_id: 42 }) });
+
+    renderAtPath("/plans/7");
+
+    const link = await screen.findByRole("link", { name: "Back to Event" });
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(link.closest("nav")).toHaveAttribute("aria-label", "Breadcrumb");
+    expect(link.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(link.closest(".page-header__actions")).toBeNull();
   });
 
   it("does not call the API and shows a safe state for a non-numeric plan id", async () => {
@@ -219,18 +286,45 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/7");
 
-    await screen.findByText("Plan Metrics");
-    expect(screen.getByText("87.3")).toBeInTheDocument();
-    expect(screen.getByText("60.0%")).toBeInTheDocument();
+    await screen.findByText("Average Travel Time");
+    expect(screen.queryByText("Plan Metrics")).not.toBeInTheDocument();
+    expect(screen.queryByText("87.3")).not.toBeInTheDocument();
+    expect(screen.queryByText("Coverage")).not.toBeInTheDocument();
+    expect(screen.queryByText("60.0%")).not.toBeInTheDocument();
     expect(screen.getByText("2m 5s")).toBeInTheDocument();
   });
 
-  it('shows "Baseline comparison not available" when plan.baseline_comparison is null', async () => {
-    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ baseline_comparison: null }) });
+  it("shows only a small time-of-day 'Generated:' string, not the date or an Algorithm Run Time badge", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ generated_at: "2026-09-17T13:33:00" }) });
 
     renderAtPath("/plans/7");
 
-    expect(await screen.findByText("Baseline comparison not available")).toBeInTheDocument();
+    expect(await screen.findByText("Generated:")).toBeInTheDocument();
+    expect(document.querySelector(".response-plan-page__generated time")).toHaveTextContent("13:33");
+    expect(screen.queryByText("Algorithm Run Time")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Sep|2026/)).not.toBeInTheDocument();
+  });
+
+  it("hides the Baseline Comparison section entirely when plan.baseline_comparison is null", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ baseline_comparison: null }) });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
+
+    expect(screen.queryByText("Baseline Comparison")).not.toBeInTheDocument();
+    expect(screen.queryByText("Baseline comparison not available")).not.toBeInTheDocument();
+  });
+
+  it("splits the page into an actions column and a map column", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan() });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
+
+    const layout = screen.getByRole("region", { name: "Map of Response Plan for Event #3" }).closest(".response-plan-page__layout") as HTMLElement;
+    const details = layout.querySelector(".response-plan-page__details") as HTMLElement;
+    expect(within(details).getByText("Response Actions")).toBeInTheDocument();
+    expect(within(details).queryByRole("region", { name: "Map of Response Plan for Event #3" })).not.toBeInTheDocument();
   });
 
   it("renders the Baseline Comparison section from plan.baseline_comparison when present", async () => {
@@ -355,52 +449,17 @@ describe("ResponsePlanPage", () => {
     expect(await screen.findByText("All response targets are covered by this plan.")).toBeInTheDocument();
   });
 
-  it("renders Optimization Details in the successful plan view, with methodology/version/seed always shown", async () => {
+  it("does not show internal optimization (GA) details in the operational UI", async () => {
     getResponsePlanByIdMock.mockResolvedValue({
-      plan: makePlan({ methodology: "genetic_algorithm", methodology_version: "1.0.0", random_seed: 42 }),
+      plan: makePlan({ methodology: "genetic_algorithm", methodology_version: "1.0.0", random_seed: 4242 }),
     });
 
     renderAtPath("/plans/7");
+    await screen.findByText("Generated:");
 
-    await screen.findByText("Optimization Details");
-    expect(screen.getByText("Technical details")).toBeInTheDocument();
-    expect(screen.getByText("42")).toBeInTheDocument();
-  });
-
-  it("shows the optimization config unavailable message when optimization_config is null", async () => {
-    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ optimization_config: null }) });
-
-    renderAtPath("/plans/7");
-
-    expect(
-      await screen.findByText("Detailed optimization configuration is not available for this response plan."),
-    ).toBeInTheDocument();
-  });
-
-  it("displays the persisted optimization config fields when present", async () => {
-    getResponsePlanByIdMock.mockResolvedValue({
-      plan: makePlan({
-        optimization_config: {
-          population_size: 50,
-          generation_count: 100,
-          mutation_rate: 0.1,
-          crossover_rate: 0.8,
-          eta_reference_seconds: 600,
-          initial_assignment_probability: 0.5,
-          tournament_size: 9,
-          elitism_count: 4,
-        },
-      }),
-    });
-
-    renderAtPath("/plans/7");
-
-    const heading = await screen.findByText("Optimization Details");
-    const section = heading.closest("section") as HTMLElement;
-    expect(within(section).getByText("50")).toBeInTheDocument();
-    expect(within(section).getByText("100")).toBeInTheDocument();
-    expect(within(section).getByText("9")).toBeInTheDocument();
-    expect(within(section).getByText("4")).toBeInTheDocument();
+    expect(screen.queryByText("Optimization Details")).not.toBeInTheDocument();
+    expect(screen.queryByText("Technical details")).not.toBeInTheDocument();
+    expect(screen.queryByText("4242")).not.toBeInTheDocument();
   });
 
   it("still shows loading/error/empty/metrics/actions behavior unchanged alongside the new sections", async () => {
@@ -433,12 +492,15 @@ describe("ResponsePlanPage", () => {
     renderAtPath("/plans/7");
     await screen.findByText("Response Actions");
 
+    // The first listed action is highlighted by default.
+    expect(screen.getAllByRole("button", { name: "Selected" })).toHaveLength(1);
     const selectButtons = screen.getAllByRole("button", { name: "Highlight on map" });
-    expect(selectButtons).toHaveLength(2);
+    expect(selectButtons).toHaveLength(1);
 
-    await user.click(selectButtons[1]);
+    await user.click(selectButtons[0]);
 
     expect(await screen.findByRole("button", { name: "Selected" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByRole("button", { name: "Highlight on map" })).toHaveLength(1);
     const resourceIds = screen.getAllByText(/^engine-[12]$/).map((el) => el.textContent);
     expect(resourceIds).toEqual(["engine-1", "engine-2"]);
   });
@@ -452,7 +514,7 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/7");
 
-    expect(await screen.findByRole("region", { name: "Map of Response Plan #7" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Map of Response Plan for Event #3" })).toBeInTheDocument();
     expect(screen.getByTestId("tile-layer")).toBeInTheDocument();
   });
 
@@ -653,7 +715,7 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/7");
 
-    expect(await screen.findByText("engine-1")).toBeInTheDocument();
+    expect((await screen.findAllByText("engine-1")).length).toBeGreaterThan(0);
     // Exactly one marker (the target) - no origin marker was fabricated.
     expect(screen.getAllByTestId("marker")).toHaveLength(1);
   });
@@ -673,7 +735,7 @@ describe("ResponsePlanPage", () => {
 
     renderAtPath("/plans/7");
 
-    expect(await screen.findByText("engine-1")).toBeInTheDocument();
+    expect((await screen.findAllByText("engine-1")).length).toBeGreaterThan(0);
     // Exactly one marker (the origin) - no target marker was fabricated.
     expect(screen.getAllByTestId("marker")).toHaveLength(1);
   });
@@ -683,9 +745,134 @@ describe("ResponsePlanPage", () => {
     getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan() });
 
     renderAtPath("/plans/7");
-    await screen.findByText("Plan ID");
+    await screen.findByText("Generated:");
 
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("renders whichever route the user highlights as the solid thick line, and the primary as dashed once deselected", async () => {
+    const user = userEvent.setup();
+    const route = (a: number, b: number) => ({
+      status: "reachable" as const,
+      eta_seconds: 60,
+      distance_meters: 100,
+      node_path: null,
+      path_coordinates: [
+        { latitude: a, longitude: b },
+        { latitude: a + 0.1, longitude: b + 0.1 },
+      ],
+    });
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "s1", station_name: "One", origin: { latitude: 32, longitude: 35 } },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 32.1, longitude: 35.1 },
+            route: route(32, 35),
+          },
+          {
+            resource: { resource_id: "engine-2", station_id: "s2", station_name: "Two", origin: { latitude: 33, longitude: 36 } },
+            target: { response_target_id: 1, target_type: "active_fire", priority_score: 0.9, latitude: 33.1, longitude: 36.1 },
+            route: route(33, 36),
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+    await screen.findByText("Response Actions");
+
+    let lines = screen.getAllByTestId("polyline");
+    expect(lines[0]).toHaveAttribute("data-weight", "6");
+    expect(lines[1]).toHaveAttribute("data-dash", "6 8");
+
+    await user.click(screen.getByRole("button", { name: "Highlight on map" }));
+
+    lines = screen.getAllByTestId("polyline");
+    expect(lines[1]).toHaveAttribute("data-weight", "6");
+    expect(lines[1]).not.toHaveAttribute("data-dash");
+    expect(lines[1]).toHaveAttribute("data-opacity", "1");
+    expect(lines[0]).toHaveAttribute("data-weight", "3");
+    expect(lines[0]).toHaveAttribute("data-dash", "6 8");
+  });
+
+  it("titles a target group with its reverse-geocoded place, using the event location until it resolves", async () => {
+    let resolveGeocode: (value: string | null) => void = () => {};
+    reverseGeocodeMock.mockReturnValue(new Promise<string | null>((resolve) => (resolveGeocode = resolve)));
+    getEventDetailsMock.mockResolvedValue({
+      detection_evidence: {
+        satellite: [],
+        news: [{ id: 1, title: "t", summary: "s", source: "x", observed_at: "2026-09-17T13:10:00Z", location_name: "Modiin", latitude: null, longitude: null }],
+      },
+    });
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "s1", station_name: "One", origin: null },
+            target: { response_target_id: 223, target_type: "active_fire", priority_score: 1, latitude: 32.7323, longitude: 35.0373 },
+            route: { status: "reachable", eta_seconds: 60, distance_meters: 1, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    // Fetching: fall back to the parent event's location, never "Target #223".
+    expect(await screen.findByRole("heading", { name: "Active fire - Modiin" })).toBeInTheDocument();
+    expect(reverseGeocodeMock).toHaveBeenCalledWith(32.7323, 35.0373);
+
+    resolveGeocode("Haifa");
+    expect(await screen.findByRole("heading", { name: "Active fire - Haifa" })).toBeInTheDocument();
+    expect(screen.queryByText(/Target #223/)).not.toBeInTheDocument();
+  });
+
+  it("titles the page with the event's location and shows the event id as a badge beside Generated", async () => {
+    getEventDetailsMock.mockResolvedValue({
+      detection_evidence: {
+        satellite: [],
+        news: [{ id: 1, title: "t", summary: "s", source: "x", observed_at: "2026-09-17T13:10:00Z", location_name: "Haifa Subdistrict", latitude: null, longitude: null }],
+      },
+    });
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ fire_event_id: 12 }) });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Response Plan for Haifa Subdistrict" })).toBeInTheDocument();
+    const meta = screen.getByLabelText("Plan details");
+    expect(within(meta).getByText("Generated:")).toBeInTheDocument();
+    expect(within(meta).getByText("Event #12")).toBeInTheDocument();
+  });
+
+  it("falls back to the event id in the title, without a duplicate badge, when no location is known", async () => {
+    getResponsePlanByIdMock.mockResolvedValue({ plan: makePlan({ fire_event_id: 12 }) });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Response Plan for Event #12" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Plan details")).queryByText("Event #12")).not.toBeInTheDocument();
+  });
+
+  it("titles the page with a place geocoded from the plan's targets when the event has no location name", async () => {
+    reverseGeocodeMock.mockResolvedValue("Haifa");
+    getResponsePlanByIdMock.mockResolvedValue({
+      plan: makePlan({
+        fire_event_id: 12,
+        actions: [
+          {
+            resource: { resource_id: "engine-1", station_id: "s1", station_name: "One", origin: null },
+            target: { response_target_id: 4, target_type: "active_fire", priority_score: 1, latitude: 32.7, longitude: 35.0 },
+            route: { status: "reachable", eta_seconds: 60, distance_meters: 1, node_path: null, path_coordinates: null },
+          },
+        ],
+      }),
+    });
+
+    renderAtPath("/plans/7");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Response Plan for Haifa" })).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Plan details")).getByText("Event #12")).toBeInTheDocument();
   });
 });

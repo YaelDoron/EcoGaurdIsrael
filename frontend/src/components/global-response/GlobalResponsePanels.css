@@ -1,0 +1,89 @@
+.global-response-panel {
+  margin-bottom: var(--space-5);
+}
+
+.global-response-panel__title {
+  font-size: 1.125rem;
+  margin-bottom: var(--space-3);
+}
+
+.global-response-panel__subtitle {
+  font-size: 0.9375rem;
+  margin: var(--space-4) 0 var(--space-3);
+}
+
+.global-response-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+/* Two headline metrics share the row and fill it. */
+.global-response-panel__grid--wide {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.global-response-panel__grid--wide .metric-card__value {
+  font-size: 2.25rem;
+}
+
+/* Resource shortage as one summary row with a progress bar. */
+.resource-summary {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-md);
+}
+
+.resource-summary__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-2);
+}
+
+.resource-summary__label {
+  margin-right: var(--space-2);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-caps);
+  color: var(--color-text-muted);
+}
+
+.resource-summary__sep {
+  color: var(--color-border);
+}
+
+.resource-summary__unmet {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.resource-summary__bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-background);
+  overflow: hidden;
+}
+
+.resource-summary__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-success);
+}
+
+.resource-summary__detail {
+  margin: var(--space-2) 0 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .global-response-panel__grid {
+    grid-template-columns: 1fr;
+  }
+}

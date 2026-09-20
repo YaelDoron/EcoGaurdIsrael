@@ -28,3 +28,19 @@
     grid-template-columns: 1fr;
   }
 }
+
+.active-wildfires-page__global-plan {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid var(--color-focus-ring);
+  border-radius: var(--radius-sm);
+  background: var(--color-focus-ring);
+  color: #ffffff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.active-wildfires-page__global-plan:hover {
+  filter: brightness(1.1);
+}

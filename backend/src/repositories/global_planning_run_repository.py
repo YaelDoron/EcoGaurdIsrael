@@ -464,6 +464,39 @@ class GlobalPlanningRunRepository:
             db_run = session.execute(statement).scalars().one_or_none()
             return self._to_stored_run(db_run) if db_run is not None else None
 
+    def get_latest_materialized_generation(self) -> StoredGlobalPlanningRun | None:
+        """Return the most recent COMPLETED/PARTIAL run that actually
+        materialized a ResponsePlan (Task B-BE-3).
+
+        A NO_OP cycle's run is still finalized as COMPLETED even though no
+        membership row ever got a response_plan_id - `get_latest_activated`
+        alone would happily return that empty run. This adds an EXISTS
+        filter requiring at least one membership row with a non-null
+        response_plan_id, so UI callers wanting "the latest generation with
+        an actual plan to show" skip NO_OP runs without needing to inspect
+        membership rows themselves."""
+        with self._session_scope() as session:
+            has_materialized_member = (
+                select(GlobalPlanningRunEventDB.id)
+                .where(
+                    GlobalPlanningRunEventDB.global_planning_run_id == GlobalPlanningRunDB.id,
+                    GlobalPlanningRunEventDB.response_plan_id.is_not(None),
+                )
+                .exists()
+            )
+            statement = (
+                select(GlobalPlanningRunDB)
+                .where(
+                    GlobalPlanningRunDB.status.in_(
+                        (GlobalPlanningRunStatus.COMPLETED.value, GlobalPlanningRunStatus.PARTIAL.value)
+                    ),
+                    has_materialized_member,
+                )
+                .order_by(GlobalPlanningRunDB.completed_at.desc(), GlobalPlanningRunDB.id.desc())
+                .limit(1)
+            )
+            db_run = session.execute(statement).scalars().one_or_none()
+            return self._to_stored_run(db_run) if db_run is not None else None
     def get_recent(self, limit: int) -> tuple[StoredGlobalPlanningRun, ...]:
         """Return the `limit` most recently started runs, newest first.
 

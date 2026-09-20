@@ -1,7 +1,8 @@
 .layer-controls {
   margin: 0 0 var(--space-3);
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
   border-radius: var(--radius-md);
   background: var(--color-surface);
 }
@@ -12,7 +13,7 @@
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--letter-spacing-caps);
 }
 
 .layer-controls__list {
@@ -32,4 +33,58 @@
 .layer-controls__count {
   color: var(--color-text-muted);
   font-size: 0.8125rem;
+}
+
+/* Modern toggle switches: the native checkbox (keeps its semantics and
+   keyboard behavior) is restyled as a pill track with a sliding knob. */
+.layer-controls__checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex-shrink: 0;
+  width: 34px;
+  height: 20px;
+  margin: 0 var(--space-1) 0 0;
+  border-radius: 999px;
+  background: #c3c8d2;
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.layer-controls__checkbox::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  transition: transform 0.18s ease;
+}
+
+.layer-controls__checkbox:checked {
+  background: var(--color-primary);
+}
+
+.layer-controls__checkbox:checked::after {
+  transform: translateX(14px);
+}
+
+.layer-controls__checkbox:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.layer-controls__item:hover .layer-controls__checkbox:not(:checked) {
+  background: #aab1be;
+}
+
+.layer-controls__label {
+  transition: color 0.15s ease;
+}
+
+.layer-controls__item:hover .layer-controls__label {
+  color: var(--color-primary);
 }

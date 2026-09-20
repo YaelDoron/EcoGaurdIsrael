@@ -682,4 +682,13 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
     expect(screen.getByText("No recent operational activity")).toBeInTheDocument();
     expect(screen.queryByTestId("circle")).not.toBeInTheDocument();
   });
+
+  it("offers a prominent Global Response Plan link to /response-plan with no focus filter", async () => {
+    getActiveFireEventsMock.mockResolvedValue({ as_of: "2026-09-17T14:00:00Z", items: [] });
+
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "Global Response Plan" });
+    expect(link).toHaveAttribute("href", "/response-plan");
+  });
 });

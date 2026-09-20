@@ -4,7 +4,7 @@
  * colors) belongs here - that is shared-component scope (Task 5).
  */
 :root {
-  --color-background: #f3f4f6;
+  --color-background: #e7eaf0; /* cool ash-gray: makes white cards and the map pop */
   --color-surface: #ffffff;
   --color-text: #111827;
   --color-text-muted: #6b7280;
@@ -20,9 +20,24 @@
   --color-fire-danger-very-high: #9a1414;
   --color-fire-danger-extreme: #7f1d1d;
 
-  --color-focus-ring: #1d4ed8;
+  /* Primary action color: firebrick red (wildfire theme). Also the focus ring
+     and the selected/highlighted state throughout the app. */
+  --color-primary: #c0392b;
+  --color-focus-ring: var(--color-primary);
+  /* Informational blue, kept for neutral map items (stations, resource
+     origins) so they never read as fire or as the selected route. */
+  --color-info: #1d4ed8;
 
-  --font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  /* Command-center header */
+  --color-header-bg: #2b2d42;
+  --color-header-text: #f8f9fa;
+  --color-header-muted: #a9adc1;
+
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.12), 0 1px 2px rgba(15, 23, 42, 0.08);
+
+  --font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --letter-spacing-caps: 0.06em; /* uppercase labels/headers read better slightly tracked out */
+  --color-card-border: #e5e7eb;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -54,6 +69,8 @@ body {
   background: var(--color-background);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 h1,
@@ -78,4 +95,9 @@ button {
 :focus-visible {
   outline: 2px solid var(--color-focus-ring);
   outline-offset: 2px;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--color-primary);
 }
