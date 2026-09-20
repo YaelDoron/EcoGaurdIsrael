@@ -17,34 +17,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.config.settings import settings
 from src.database.connection import DatabaseConfigurationError, init_db
-from src.agents.analysis import (
-    FireDangerAssessmentAgent,
-    FireDetectionAgent,
-    FireSeverityAssessmentAgent,
-    ResponseTargetGenerationAgent,
-)
-from src.agents.analysis import FireSpreadPredictionAgent
-from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
-from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
-from src.calculators.response_target import ResponseTargetCalculator
-from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
-from src.calculators.fire_spread import FireSpreadCalculator
-from src.repositories.fire_event_repository import FireEventRepository
-from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
-from src.repositories.fire_station_repository import FireStationRepository
-from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
-from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
-from src.repositories.fire_spread_prediction_repository import FireSpreadPredictionRepository
-from src.repositories.news_repository import NewsRepository
-from src.repositories.response_target_repository import ResponseTargetRepository
-from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
-from src.repositories.weather_repository import WeatherRepository
-from src.services.fire_danger import FireDangerInputService
-from src.services.fire_detection import FireDetectionEvidenceService
-from src.services.operational import OperationalContextService
-from src.services.operational_planning_refresh.operational_planning_refresh_production_factory import (
-    build_operational_planning_refresh_coordinator,
-)
 from src.calculators.global_response_optimization.global_assignment_change_calculator import AssignmentChangeType
 from src.services.global_planning.global_planning_refresh_coordinator import (
     GlobalPlanningRefreshResult,
@@ -52,13 +24,9 @@ from src.services.global_planning.global_planning_refresh_coordinator import (
 )
 from src.services.operational_refresh import OperationalRefreshResult
 from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
-from src.services.response_target import ResponseTargetInputService
-from src.services.fire_severity import FireSeverityInputService
-from src.services.fire_spread import FireSpreadInputService
 from src.simulation import (
     SIMULATION_LOCATIONS,
     ScenarioType,
-    SimulatedIncident,
     SimulationEvent,
     SimulationEventExecutionResult,
     SimulationEventExecutor,
@@ -78,16 +46,33 @@ from src.simulation import (
     SimulationRefreshResult,
     build_carmel_golan_active_fire_scenario,
     build_active_fire_resource_refresh_scenario,
+    build_operations_demo_scenario,
     build_scenario,
     get_simulation_location,
     simulation_event_timestamp,
 )
 from src.simulation import SimulationFireSpreadCoordinator, SimulationFireSpreadResult
+from src.simulation.demo_state_reset_service import DemoStateResetDisabledError, DemoStateResetService
+from src.simulation.demo_simulation_runner import (
+    DemoSimulationEventPhase,
+    DemoSimulationEventProgress,
+    DemoSimulationRunConfig,
+    DemoSimulationRunner,
+    SimulationEventOutcome,
+    build_fire_danger_coordinator,
+    build_fire_detection_coordinator,
+    build_fire_severity_coordinator,
+    build_fire_spread_coordinator,
+    build_operational_coordinator,
+    build_response_target_coordinator,
+    build_simulation_refresh_coordinator,
+    execute_simulation_event,
+)
 
 DEFAULT_SEED = 42
 DEFAULT_MODE = "manual"
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
-SUPPORTED_PRESETS = ("carmel_golan_active_fire", "active_fire_resource_refresh")
+SUPPORTED_PRESETS = ("carmel_golan_active_fire", "active_fire_resource_refresh", "operations_demo")
 
 
 @dataclass
@@ -152,6 +137,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"Default: {DEFAULT_POLL_INTERVAL_SECONDS}."
         ),
     )
+    parser.add_argument(
+        "--reset-demo-state",
+        action="store_true",
+        help=(
+            "DESTRUCTIVE: reset runtime demo state via DemoStateResetService before "
+            "running (see scripts/reset_demo_state.py). Requires ENABLE_DEMO_DATA_RESET=true; "
+            "intended only for a dedicated demo database, never the shared team database."
+        ),
+    )
     args = parser.parse_args(argv)
 
     if args.poll_interval <= 0:
@@ -174,6 +168,8 @@ def build_scenario_from_args(args: argparse.Namespace) -> SimulationScenario:
         return build_carmel_golan_active_fire_scenario(seed=args.seed)
     if args.preset == "active_fire_resource_refresh":
         return build_active_fire_resource_refresh_scenario(seed=args.seed)
+    if args.preset == "operations_demo":
+        return build_operations_demo_scenario(seed=args.seed)
     if args.preset:
         raise ValueError(f"Unsupported preset: {args.preset!r}")
 
@@ -201,43 +197,46 @@ def run_manual(
     input_func: Callable[[str], str] = input,
     output: TextIO = sys.stdout,
 ) -> RunSummary:
-    executor = executor or SimulationEventExecutor()
-    fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
-    fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
-    operational_coordinator = operational_coordinator or build_operational_coordinator()
-    if simulation_refresh_coordinator is None and fire_severity_coordinator is None:
-        simulation_refresh_coordinator = build_simulation_refresh_coordinator(operational_coordinator)
-    elif simulation_refresh_coordinator is None:
-        fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
-    service = service or SimulationScenarioService()
+    """Thin CLI adapter: configures DemoSimulationRunner for manual stepping.
+
+    input() lives only here (inside the `before_event` closure) - the
+    runner itself never calls input(). This is the CLI's only remaining
+    event loop responsibility: translating runner progress into terminal
+    output and driving manual acknowledgement.
+    """
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
 
-    service.start(scenario, mode=SimulationMode.MANUAL)
-    print_startup_summary(scenario, SimulationMode.MANUAL, scenario_started_at, output)
-
-    while not service.is_finished:
+    def before_event(_event: SimulationEvent) -> None:
         try:
             input_func("Press ENTER to execute next event...")
         except EOFError:
             print("No input available; continuing with next event.", file=output)
 
-        event = service.advance()
-        if event is None:
-            break
-        result = execute_and_report_event(
-            scenario,
-            event,
-            scenario_started_at,
-            executor,
-            output,
-            fire_danger_coordinator,
-            fire_detection_coordinator,
-            operational_coordinator,
-            fire_severity_coordinator,
-            simulation_refresh_coordinator,
-        )
-        summary.add(result)
+    def on_progress(progress: DemoSimulationEventProgress) -> None:
+        # The runner also emits an EVENT_STARTED tick before each event
+        # (Task A3); the CLI's terminal rendering only needs the completed
+        # outcome, so it ignores that first tick.
+        if progress.phase is not DemoSimulationEventPhase.EVENT_COMPLETED:
+            return
+        render_event_outcome(progress.event_outcome, output)
+        summary.add(progress.event_outcome.execution_result)
+
+    runner = DemoSimulationRunner(
+        executor=executor,
+        fire_danger_coordinator=fire_danger_coordinator,
+        fire_detection_coordinator=fire_detection_coordinator,
+        operational_coordinator=operational_coordinator,
+        fire_severity_coordinator=fire_severity_coordinator,
+        simulation_refresh_coordinator=simulation_refresh_coordinator,
+        fire_spread_coordinator_factory=get_fire_spread_coordinator,
+        response_target_coordinator_factory=get_response_target_coordinator,
+        service=service,
+    )
+    config = DemoSimulationRunConfig(mode=SimulationMode.MANUAL, before_event=before_event)
+
+    print_startup_summary(scenario, SimulationMode.MANUAL, scenario_started_at, output)
+    runner.run(scenario, config, scenario_started_at=scenario_started_at, on_progress=on_progress)
 
     print_run_summary(summary, output)
     return summary
@@ -257,40 +256,35 @@ def run_automatic(
     poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
     output: TextIO = sys.stdout,
 ) -> RunSummary:
-    executor = executor or SimulationEventExecutor()
-    fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
-    fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
-    operational_coordinator = operational_coordinator or build_operational_coordinator()
-    if simulation_refresh_coordinator is None and fire_severity_coordinator is None:
-        simulation_refresh_coordinator = build_simulation_refresh_coordinator(operational_coordinator)
-    elif simulation_refresh_coordinator is None:
-        fire_severity_coordinator = fire_severity_coordinator or build_fire_severity_coordinator()
-    service = service or SimulationScenarioService()
+    """Thin CLI adapter: configures DemoSimulationRunner for automatic polling."""
     scenario_started_at = scenario_started_at or datetime.now(timezone.utc)
     summary = RunSummary()
 
-    service.start(scenario, mode=SimulationMode.AUTOMATIC)
+    def on_progress(progress: DemoSimulationEventProgress) -> None:
+        if progress.phase is not DemoSimulationEventPhase.EVENT_COMPLETED:
+            return
+        render_event_outcome(progress.event_outcome, output)
+        summary.add(progress.event_outcome.execution_result)
+
+    runner = DemoSimulationRunner(
+        executor=executor,
+        fire_danger_coordinator=fire_danger_coordinator,
+        fire_detection_coordinator=fire_detection_coordinator,
+        operational_coordinator=operational_coordinator,
+        fire_severity_coordinator=fire_severity_coordinator,
+        simulation_refresh_coordinator=simulation_refresh_coordinator,
+        fire_spread_coordinator_factory=get_fire_spread_coordinator,
+        response_target_coordinator_factory=get_response_target_coordinator,
+        service=service,
+    )
+    config = DemoSimulationRunConfig(
+        mode=SimulationMode.AUTOMATIC,
+        sleep_fn=sleep_func,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+
     print_startup_summary(scenario, SimulationMode.AUTOMATIC, scenario_started_at, output)
-
-    while not service.is_finished:
-        due_events = service.get_due_events()
-        for event in due_events:
-            result = execute_and_report_event(
-                scenario,
-                event,
-                scenario_started_at,
-                executor,
-                output,
-                fire_danger_coordinator,
-                fire_detection_coordinator,
-                operational_coordinator,
-                fire_severity_coordinator,
-                simulation_refresh_coordinator,
-            )
-            summary.add(result)
-
-        if not service.is_finished:
-            sleep_func(poll_interval_seconds)
+    runner.run(scenario, config, scenario_started_at=scenario_started_at, on_progress=on_progress)
 
     print_run_summary(summary, output)
     return summary
@@ -308,126 +302,64 @@ def execute_and_report_event(
     fire_severity_coordinator: SimulationFireSeverityCoordinator | None = None,
     simulation_refresh_coordinator: SimulationRefreshCoordinator | None = None,
 ) -> SimulationEventExecutionResult:
-    incident = scenario.get_incident(event.incident_id)
-    event_timestamp = simulation_event_timestamp(scenario_started_at, event)
-    affected_fire_event_ids: list[int] = []
+    """Execute one event and print its outcome - a thin wrapper around the
+    single authoritative orchestration in src.simulation.demo_simulation_runner.
+    """
+    outcome = execute_simulation_event(
+        scenario=scenario,
+        event=event,
+        scenario_started_at=scenario_started_at,
+        executor=executor,
+        fire_danger_coordinator=fire_danger_coordinator,
+        fire_detection_coordinator=fire_detection_coordinator,
+        operational_coordinator=operational_coordinator,
+        fire_severity_coordinator=fire_severity_coordinator,
+        simulation_refresh_coordinator=simulation_refresh_coordinator,
+        fire_spread_coordinator_factory=get_fire_spread_coordinator,
+        response_target_coordinator_factory=get_response_target_coordinator,
+    )
+    render_event_outcome(outcome, output)
+    return outcome.execution_result
+
+
+def render_event_outcome(outcome: SimulationEventOutcome, output: TextIO = sys.stdout) -> None:
+    """Print one event's outcome to the terminal - the CLI's only rendering
+    responsibility. Reproduces the exact terminal blocks the pre-Task-A2 CLI
+    printed, now driven by structured runner state instead of interleaving
+    printing with orchestration."""
+    incident = outcome.incident
+    event = outcome.event
+    result = outcome.execution_result
 
     print(
         f"[T+{event.offset_seconds}s] {event.event_type.value.upper()} | "
         f"{event.incident_id} | {incident.location.name}",
         file=output,
     )
-    result = executor.execute(scenario=scenario, event=event, event_timestamp=event_timestamp)
     print(format_execution_result(result), file=output)
     if result.error_message:
         print(f"Error: {result.error_message}", file=output)
-    if fire_danger_coordinator is not None:
-        fire_danger_result = fire_danger_coordinator.handle_event(
-            scenario=scenario,
-            event=event,
-            execution_result=result,
-            event_timestamp=event_timestamp,
-        )
-        if fire_danger_result.triggered:
-            print_fire_danger_result(fire_danger_result, output)
-    if fire_detection_coordinator is not None and event.event_type.name in {"SATELLITE", "NEWS"}:
-        fire_detection_result = fire_detection_coordinator.handle_event(
-            scenario=scenario,
-            event=event,
-            execution_result=result,
-            event_timestamp=event_timestamp,
-        )
-        if fire_detection_result.triggered:
-            print_fire_detection_result(fire_detection_result, output)
-            detection_result = fire_detection_result.detection_result
-            if detection_result is not None and detection_result.success:
-                affected_fire_event_ids.extend(detection_result.event_ids)
-            if operational_coordinator is not None:
-                scramble_resources_for_new_fire_events(
-                    fire_detection_result,
-                    incident,
-                    operational_coordinator,
-                    output,
-                )
-    else:
-        fire_detection_result = None
 
-    if simulation_refresh_coordinator is not None:
-        refresh_result = simulation_refresh_coordinator.handle_event(
-            scenario=scenario,
-            event=event,
-            execution_result=result,
-            event_timestamp=event_timestamp,
-            detection_result=(
-                fire_detection_result.detection_result
-                if fire_detection_result is not None and fire_detection_result.triggered
-                else None
-            ),
-        )
-        if refresh_result.triggered:
-            print_simulation_refresh_result(refresh_result, output)
-    elif fire_severity_coordinator is not None:
-        severity_result = fire_severity_coordinator.handle_event(
-            scenario=scenario,
-            event=event,
-            execution_result=result,
-            event_timestamp=event_timestamp,
-            detection_result=(
-                fire_detection_result.detection_result
-                if fire_detection_result is not None and fire_detection_result.triggered
-                else None
-            ),
-        )
-        if severity_result.triggered:
-            print_fire_severity_result(severity_result, output)
-            affected_fire_event_ids.extend(
-                stored.assessment.fire_event_id for stored in severity_result.assessment_results
-            )
-            affected_fire_event_ids.extend(severity_result.failed_fire_event_ids)
-            spread_result = get_fire_spread_coordinator().handle_severity_result(
-                severity_result=severity_result,
-                event_timestamp=event_timestamp,
-            )
-            if spread_result.triggered:
-                print_fire_spread_result(spread_result, output)
-                affected_fire_event_ids.extend(
-                    stored.prediction.fire_event_id for stored in spread_result.prediction_results
-                )
-                affected_fire_event_ids.extend(spread_result.failed_fire_event_ids)
-    if affected_fire_event_ids:
-        response_target_result = get_response_target_coordinator().generate_for_fire_events(
-            fire_event_ids=affected_fire_event_ids,
-            as_of=event_timestamp,
-        )
-        if response_target_result.triggered:
-            print_response_target_result(response_target_result, output)
+    if outcome.fire_danger_result is not None and outcome.fire_danger_result.triggered:
+        print_fire_danger_result(outcome.fire_danger_result, output)
+
+    if outcome.fire_detection_result is not None and outcome.fire_detection_result.triggered:
+        print_fire_detection_result(outcome.fire_detection_result, output)
+        if outcome.operational_context_scrambled:
+            print("OPERATIONAL CONTEXT", file=output)
+            print(f"depleted_resources={outcome.depleted_resource_count}", file=output)
+
+    if outcome.refresh_result is not None and outcome.refresh_result.triggered:
+        print_simulation_refresh_result(outcome.refresh_result, output)
+    elif outcome.fire_severity_result is not None and outcome.fire_severity_result.triggered:
+        print_fire_severity_result(outcome.fire_severity_result, output)
+        if outcome.fire_spread_result is not None and outcome.fire_spread_result.triggered:
+            print_fire_spread_result(outcome.fire_spread_result, output)
+
+    if outcome.response_target_result is not None and outcome.response_target_result.triggered:
+        print_response_target_result(outcome.response_target_result, output)
+
     print("", file=output)
-    return result
-
-
-def scramble_resources_for_new_fire_events(
-    fire_detection_result: SimulationFireDetectionResult,
-    incident: SimulatedIncident,
-    operational_coordinator: SimulationOperationalCoordinator,
-    output: TextIO = sys.stdout,
-) -> None:
-    """Deplete resource availability near an incident once it becomes an active fire.
-
-    Only fires when detection actually created a new fire event (not merely
-    updated an existing one or found no event), so the operational context
-    is scrambled once, at the moment an incident location genuinely becomes
-    an active wildfire.
-    """
-    detection_result = fire_detection_result.detection_result
-    if detection_result is None or not detection_result.success or detection_result.events_created <= 0:
-        return
-
-    depleted_resources = operational_coordinator.scramble_resource_availability(
-        incident.location.latitude,
-        incident.location.longitude,
-    )
-    print("OPERATIONAL CONTEXT", file=output)
-    print(f"depleted_resources={len(depleted_resources)}", file=output)
 
 
 def format_execution_result(result: SimulationEventExecutionResult) -> str:
@@ -440,122 +372,14 @@ def format_execution_result(result: SimulationEventExecutionResult) -> str:
     )
 
 
-def build_fire_danger_coordinator() -> SimulationFireDangerCoordinator:
-    """Build the simulation fire-danger analysis stack using shared repositories."""
-    weather_repository = WeatherRepository()
-    input_service = FireDangerInputService(weather_repository=weather_repository)
-    calculator = FFWICalculator()
-    assessment_repository = FireDangerAssessmentRepository()
-    agent = FireDangerAssessmentAgent(
-        input_service=input_service,
-        calculator=calculator,
-        repository=assessment_repository,
-    )
-    return SimulationFireDangerCoordinator(assessment_agent=agent)
-
-
-def build_fire_detection_coordinator() -> SimulationFireDetectionCoordinator:
-    """Build the simulation fire-detection analysis stack using shared repositories."""
-    satellite_repository = SatelliteHotspotRepository()
-    news_repository = NewsRepository()
-    evidence_service = FireDetectionEvidenceService(
-        satellite_repository=satellite_repository,
-        news_repository=news_repository,
-    )
-    calculator = FireDetectionCalculator()
-    fire_event_repository = FireEventRepository()
-    agent = FireDetectionAgent(
-        evidence_service=evidence_service,
-        calculator=calculator,
-        fire_event_repository=fire_event_repository,
-        satellite_repository=satellite_repository,
-        news_repository=news_repository,
-    )
-    return SimulationFireDetectionCoordinator(detection_agent=agent)
-
-
-def build_operational_coordinator() -> SimulationOperationalCoordinator:
-    """Build the simulation operational-context stack using shared repositories."""
-    fire_station_repository = FireStationRepository()
-    firefighting_resource_repository = FirefightingResourceRepository()
-    operational_context_service = OperationalContextService(
-        fire_station_repository=fire_station_repository,
-        firefighting_resource_repository=firefighting_resource_repository,
-    )
-    return SimulationOperationalCoordinator(
-        operational_context_service=operational_context_service,
-        firefighting_resource_repository=firefighting_resource_repository,
-    )
-
-
-def build_fire_severity_coordinator() -> SimulationFireSeverityCoordinator:
-    """Build the simulation fire-severity analysis stack using shared repositories."""
-    fire_event_repository = FireEventRepository()
-    input_service = FireSeverityInputService(fire_event_repository=fire_event_repository)
-    calculator = FireSeverityCalculator()
-    assessment_repository = FireSeverityAssessmentRepository()
-    agent = FireSeverityAssessmentAgent(
-        input_service=input_service,
-        calculator=calculator,
-        repository=assessment_repository,
-    )
-    return SimulationFireSeverityCoordinator(
-        severity_agent=agent,
-        fire_event_repository=fire_event_repository,
-    )
-
-
-def build_fire_spread_coordinator() -> SimulationFireSpreadCoordinator:
-    """Build the simulation fire-spread prediction stack using shared repositories.
-
-    Reuses the exact same production FireSpreadInputService/FireSpreadCalculator/
-    FireSpreadPredictionRepository as the live pipeline -- no separate
-    simulation-only spread mathematics.
-    """
-    input_service = FireSpreadInputService()
-    calculator = FireSpreadCalculator()
-    prediction_repository = FireSpreadPredictionRepository()
-    agent = FireSpreadPredictionAgent(
-        input_service=input_service,
-        calculator=calculator,
-        repository=prediction_repository,
-    )
-    return SimulationFireSpreadCoordinator(spread_agent=agent)
-
-
-def build_response_target_coordinator() -> SimulationResponseTargetCoordinator:
-    """Build the simulation response-target stack using the production agent."""
-    input_service = ResponseTargetInputService()
-    calculator = ResponseTargetCalculator()
-    repository = ResponseTargetRepository()
-    agent = ResponseTargetGenerationAgent(
-        input_service=input_service,
-        calculator=calculator,
-        repository=repository,
-    )
-    return SimulationResponseTargetCoordinator(generation_agent=agent)
-
-
-def build_simulation_refresh_coordinator(
-    operational_coordinator: SimulationOperationalCoordinator | None = None,
-) -> SimulationRefreshCoordinator:
-    """Build the central US 4.4 -> US 5.4 simulation refresh coordinator.
-
-    Delegates the entire operational-refresh-then-planning-refresh sequence
-    to the same production OperationalPlanningRefreshCoordinator normal
-    runtime uses (build_operational_planning_refresh_coordinator) - this
-    script does not construct RoutePlanningAgent, ResponseOptimizationAgent,
-    or BaselineComparisonService itself, and does not re-derive the US4.4 ->
-    US5.4 sequence.
-    """
-    operational_planning_refresh_coordinator = build_operational_planning_refresh_coordinator()
-
-    return SimulationRefreshCoordinator(
-        operational_planning_refresh=operational_planning_refresh_coordinator,
-        fire_event_repository=FireEventRepository(),
-        operational_coordinator=operational_coordinator or build_operational_coordinator(),
-    )
-
+# build_fire_danger_coordinator / build_fire_detection_coordinator /
+# build_operational_coordinator / build_fire_severity_coordinator /
+# build_fire_spread_coordinator / build_response_target_coordinator /
+# build_simulation_refresh_coordinator now live in
+# src.simulation.demo_simulation_runner (Task A2) and are imported above -
+# this keeps exactly one place that builds the production analysis stack,
+# reusable by this CLI and any future caller (e.g. a Task A3 API), rather
+# than the CLI owning its own copy.
 
 _fire_spread_coordinator: SimulationFireSpreadCoordinator | None = None
 _response_target_coordinator: SimulationResponseTargetCoordinator | None = None
@@ -910,6 +734,18 @@ def main(argv: list[str] | None = None) -> int:
     except DatabaseConfigurationError as exc:
         print(f"Database configuration error: {exc}", file=sys.stderr)
         return 2
+
+    if args.reset_demo_state:
+        try:
+            reset_result = DemoStateResetService().reset_demo_state()
+        except DemoStateResetDisabledError as exc:
+            print(f"Refused: {exc}", file=sys.stderr)
+            return 2
+        print("Demo state reset before run:")
+        for table_name, count in reset_result.deleted_counts.items():
+            print(f"- {table_name}: {count}")
+        print(f"Resources restored to AVAILABLE: {reset_result.resources_restored}")
+        print("")
 
     mode = SimulationMode(args.mode)
     if mode is SimulationMode.MANUAL:

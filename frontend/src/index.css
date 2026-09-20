@@ -13,6 +13,12 @@
   --color-success: #15803d;
   --color-warning: #b45309;
   --color-danger: #b91c1c;
+  /* Task A8: Fire Danger's 5-level sequential scale needs two tiers beyond
+     --color-danger (its "high" step) - low/moderate/high reuse the existing
+     success/warning/danger tokens above; these two extend the same ramp
+     rather than introducing a separate color system. */
+  --color-fire-danger-very-high: #9a1414;
+  --color-fire-danger-extreme: #7f1d1d;
 
   /* Primary action color: firebrick red (wildfire theme). Also the focus ring
      and the selected/highlighted state throughout the app. */

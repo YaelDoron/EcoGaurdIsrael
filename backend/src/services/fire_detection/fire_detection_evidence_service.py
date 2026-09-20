@@ -133,12 +133,20 @@ class FireDetectionEvidenceService:
                 longitude=stored_hotspot.hotspot.longitude,
                 observed_at=self._ensure_aware_datetime(stored_hotspot.hotspot.detected_at),
                 satellite_confidence=confidence,
+                location_name=stored_hotspot.hotspot.location_name,
             )
         except ValueError as exc:
             logger.info("Skipping invalid satellite hotspot %s: %s", stored_hotspot.id, exc)
             return None
 
     def _normalize_news(self, stored_report: StoredWildfireReport) -> FireDetectionEvidence | None:
+        """`WildfireReport.location_name` is deliberately NOT copied onto the
+        resulting evidence: unlike SatelliteHotspot.location_name (set only
+        by the demo simulation, to an exact canonical name), this field is
+        also populated by real news ingestion (NewsMonitoringAgent) via an
+        LLM best-effort location extraction that can be wrong or absent -
+        not trustworthy provenance for a persisted FireEvent's location.
+        """
         if stored_report.report.latitude is None or stored_report.report.longitude is None:
             logger.info("Skipping wildfire report %s without coordinates.", stored_report.id)
             return None

@@ -35,11 +35,20 @@ _ACTIVE_STATUSES = {FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED}
 
 @dataclass(frozen=True)
 class StoredFireEvent:
-    """Persisted FireEvent plus database identity and source-aware evidence refs."""
+    """Persisted FireEvent plus database identity and source-aware evidence refs.
+
+    `created_at` is the row's own DB-insert timestamp (server-assigned, set
+    once via the ORM column default at creation, never updated afterward -
+    see FireEventRepository.update_event, which never touches it). It
+    represents when EcoGuard actually opened/persisted this FireEvent,
+    distinct from `event.detected_at` (the earliest correlated evidence's
+    own observation time, which may be earlier).
+    """
 
     id: int
     event: FireEvent
     supporting_evidence: tuple[FireEvidenceRef, ...] = ()
+    created_at: datetime | None = None
 
 
 class FireEventRepository:
@@ -278,6 +287,31 @@ class FireEventRepository:
             )
             return tuple(self._to_stored_event(db_event) for db_event in db_events)
 
+    def get_recent(self, limit: int) -> tuple[StoredFireEvent, ...]:
+        """Return the `limit` most recently detected FireEvents, newest first.
+
+        Task A6: unlike get_active_events, this is NOT scoped to SUSPECTED/
+        CONFIRMED - the Activity Feed shows recent FireEvent activity
+        regardless of current status (a resolved fire is still a real past
+        event). Ordered by detected_at desc, id desc - the same timestamp
+        A5's FireEvent activity detail uses as occurred_at. Evidence traces
+        are not loaded here (supporting_evidence is left empty on each
+        result), matching get_active_events's own precedent, since the feed
+        preview doesn't need them.
+        """
+        self._validate_limit(limit)
+        with self._session_scope() as session:
+            db_events = (
+                session.execute(
+                    select(FireEventDB)
+                    .order_by(FireEventDB.detected_at.desc(), FireEventDB.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(self._to_stored_event(db_event) for db_event in db_events)
+
     def get_active_fire_event_ids(self) -> tuple[int, ...]:
         """Return ids of all currently active (SUSPECTED/CONFIRMED) FireEvents.
 
@@ -338,6 +372,7 @@ class FireEventRepository:
             detection_confidence=event.detection_confidence,
             methodology=event.methodology,
             methodology_version=event.methodology_version,
+            location_name=event.location_name,
         )
 
     @classmethod
@@ -357,8 +392,10 @@ class FireEventRepository:
                 detection_confidence=db_event.detection_confidence,
                 methodology=db_event.methodology,
                 methodology_version=db_event.methodology_version,
+                location_name=db_event.location_name,
             ),
             supporting_evidence=evidence_refs,
+            created_at=cls._ensure_aware_datetime(db_event.created_at),
         )
 
     @staticmethod
@@ -422,6 +459,11 @@ class FireEventRepository:
     def _validate_fire_event_id(fire_event_id: int) -> None:
         if isinstance(fire_event_id, bool) or not isinstance(fire_event_id, int) or fire_event_id <= 0:
             raise FireEventRepositoryError(f"fire_event_id must be a positive integer, got {fire_event_id!r}.")
+
+    @staticmethod
+    def _validate_limit(limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise FireEventRepositoryError(f"Invalid limit: {limit!r}. Must be a positive integer.")
 
     @staticmethod
     def _validate_aware_datetime(field_name: str, value: object) -> None:

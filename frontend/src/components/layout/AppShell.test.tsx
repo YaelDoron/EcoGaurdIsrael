@@ -23,30 +23,26 @@ describe("AppShell", () => {
     expect(screen.getByText("Wildfire Operations")).toBeInTheDocument();
   });
 
-  it("has an Active Wildfires navigation link", () => {
+  it("has an Operations Overview navigation link", () => {
     renderShell();
 
-    const link = screen.getByRole("link", { name: "Active Wildfires" });
+    const link = screen.getByRole("link", { name: "Operations Overview" });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/events");
   });
 
-  it("marks History as unavailable, not as a clickable link", () => {
+  it("does not render the old History/Monitoring placeholder items", () => {
     renderShell();
 
-    expect(screen.queryByRole("link", { name: /history/i })).not.toBeInTheDocument();
-    const history = screen.getByText("History", { exact: false });
-    expect(history.closest(".nav-link")).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("History", { exact: false }).closest("li")).toHaveTextContent(/coming soon/i);
+    for (const forbidden of [/history/i, /monitoring/i, /coming soon/i]) {
+      expect(screen.queryByText(forbidden)).not.toBeInTheDocument();
+    }
   });
 
-  it("marks Monitoring as unavailable, not as a clickable link", () => {
+  it("renders exactly one navigation link", () => {
     renderShell();
 
-    expect(screen.queryByRole("link", { name: /monitoring/i })).not.toBeInTheDocument();
-    const monitoring = screen.getByText("Monitoring", { exact: false });
-    expect(monitoring.closest(".nav-link")).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText("Monitoring", { exact: false }).closest("li")).toHaveTextContent(/coming soon/i);
+    expect(screen.getAllByRole("link")).toHaveLength(1);
   });
 
   it("uses a semantic nav landmark for navigation", () => {

@@ -27,4 +27,16 @@ describe("MapView", () => {
 
     expect(screen.getByTestId("map-container")).toBeInTheDocument();
   });
+
+  it("defaults to scroll-wheel zoom enabled, preserving existing Event Details/Response Plan behavior", () => {
+    render(<MapView boundsPoints={[]} />);
+
+    expect(screen.getByTestId("map-container")).toHaveAttribute("data-scroll-wheel-zoom", "true");
+  });
+
+  it("disables scroll-wheel zoom when explicitly requested", () => {
+    render(<MapView boundsPoints={[]} scrollWheelZoom={false} />);
+
+    expect(screen.getByTestId("map-container")).toHaveAttribute("data-scroll-wheel-zoom", "false");
+  });
 });

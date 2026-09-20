@@ -1,0 +1,128 @@
+.activity-row-wrapper {
+  list-style: none;
+}
+
+/* Standard accessible visually-hidden utility, scoped to this component only. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * True single-row list item: a subtle bottom separator between rows, no
+ * heavy border around every row.
+ */
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.activity-row-wrapper:last-child .activity-row {
+  border-bottom: none;
+}
+
+.activity-row:hover {
+  background: var(--color-background);
+}
+
+.activity-row:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: -2px;
+}
+
+.activity-row--selected {
+  background: var(--color-background);
+  box-shadow: inset 3px 0 0 var(--color-focus-ring);
+}
+
+.activity-row--new {
+  animation: activity-row-arrive 2.5s ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-row--new {
+    animation: none;
+  }
+}
+
+@keyframes activity-row-arrive {
+  from {
+    background: #ecfdf5;
+  }
+  to {
+    background: transparent;
+  }
+}
+
+/* A thin colored accent - a subtle type cue, never a textual abbreviation badge. */
+.activity-row__accent {
+  flex-shrink: 0;
+  align-self: stretch;
+  width: 3px;
+  border-radius: 2px;
+}
+
+.activity-row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.875rem;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.activity-row__secondary {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.activity-row__meta {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.activity-row__new-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: var(--color-success);
+  border: 1px solid #a7f3d0;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 640px) {
+  .activity-row__meta {
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+  }
+}

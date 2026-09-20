@@ -1,57 +1,30 @@
-.active-wildfires-page__refresh {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.active-wildfires-page__refresh:hover:not(:disabled) {
-  background: var(--color-background);
-}
-
-.active-wildfires-page__refresh:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.active-wildfires-page__as-of {
-  margin: calc(var(--space-4) * -1) 0 var(--space-4);
-  color: var(--color-text-muted);
-  font-size: 0.8125rem;
-}
-
-.active-wildfires-page__refresh-error {
-  margin: 0 0 var(--space-4);
-  padding: var(--space-2) var(--space-3);
-  background: #fffbeb;
-  border: 1px solid #fde68a;
-  border-radius: var(--radius-sm);
-  color: var(--color-warning);
-}
-
-.active-wildfires-page__metrics {
+/*
+ * Layout polish pass: map-dominant top row (map | Active Fires), with the
+ * Activity Feed moved to its own full-width row below rather than
+ * stretching down a narrow right-hand column (which made the page feel
+ * asymmetric). Narrower screens stack Map -> Active Fires -> Activity Feed.
+ */
+.active-wildfires-page__top-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: var(--space-3);
-  margin-bottom: var(--space-5);
-}
-
-.active-wildfires-page__section-title {
-  font-size: 1.125rem;
-  margin-bottom: var(--space-3);
-}
-
-.active-wildfires-page__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
   gap: var(--space-4);
+  align-items: start;
 }
 
-@media (max-width: 640px) {
-  .active-wildfires-page__metrics {
+.active-wildfires-page__map-column {
+  min-width: 0;
+}
+
+.active-wildfires-page__fires-column {
+  min-width: 0;
+}
+
+.active-wildfires-page__feed-row {
+  margin-top: var(--space-5);
+}
+
+@media (max-width: 960px) {
+  .active-wildfires-page__top-row {
     grid-template-columns: 1fr;
   }
 }

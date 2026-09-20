@@ -29,13 +29,19 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class StoredFireSeverityAssessment:
-    """Persisted severity assessment plus database identity and input traces."""
+    """Persisted severity assessment plus database identity and input traces.
+
+    `created_at` is the row's own DB-insert timestamp (server-assigned once,
+    at creation - see FireSeverityAssessmentDB.created_at), distinct from
+    `assessment.assessed_at` (the domain assessment time).
+    """
 
     assessment_id: int
     assessment: FireSeverityAssessment
     weather_observation_ids: tuple[int, ...] = ()
     satellite_hotspot_ids: tuple[int, ...] = ()
     selected_frp_hotspot_id: int | None = None
+    created_at: datetime | None = None
 
 
 class FireSeverityAssessmentRepository:
@@ -213,6 +219,54 @@ class FireSeverityAssessmentRepository:
                 for row in rows
             }
 
+    def get_recent(self, limit: int) -> tuple[StoredFireSeverityAssessment, ...]:
+        """Return the `limit` most recently assessed rows across ALL FireEvents, newest first.
+
+        Task A6: a bounded "recent across every assessment" read for the
+        Activity Feed - distinct from get_latest_for_event(s) (latest per
+        event). Same deterministic ordering (assessed_at desc, id desc).
+        Does not populate weather_observation_ids/satellite_hotspot_ids/
+        selected_frp_hotspot_id (left at StoredFireSeverityAssessment's
+        defaults), same rationale as get_latest_for_events: this batched
+        path does not join the input-trace tables.
+        """
+        self._validate_limit(limit)
+        with self._session_scope() as session:
+            db_assessments = (
+                session.execute(
+                    select(FireSeverityAssessmentDB)
+                    .order_by(FireSeverityAssessmentDB.assessed_at.desc(), FireSeverityAssessmentDB.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(
+                StoredFireSeverityAssessment(
+                    assessment_id=db_assessment.id,
+                    assessment=FireSeverityAssessment(
+                        fire_event_id=db_assessment.fire_event_id,
+                        assessed_at=self._ensure_aware_datetime(db_assessment.assessed_at),
+                        status=FireSeverityAssessmentStatus(db_assessment.status),
+                        score=db_assessment.score,
+                        level=(
+                            FireSeverityLevel(db_assessment.severity_level)
+                            if db_assessment.severity_level is not None
+                            else None
+                        ),
+                        methodology=db_assessment.methodology,
+                        methodology_version=db_assessment.methodology_version,
+                        vegetation_source=db_assessment.vegetation_source,
+                        vegetation_dataset_year=db_assessment.vegetation_dataset_year,
+                        vegetation_radius_km=db_assessment.vegetation_radius_km,
+                        vegetation_dominant_land_cover=db_assessment.vegetation_dominant_land_cover,
+                        vegetation_fuel_score=db_assessment.vegetation_fuel_score,
+                    ),
+                    created_at=self._ensure_aware_datetime(db_assessment.created_at),
+                )
+                for db_assessment in db_assessments
+            )
+
     def get_weather_input_ids(self, assessment_id: int) -> tuple[int, ...]:
         """Return weather observation IDs linked to an assessment, sorted ascending."""
         self._validate_assessment_id(assessment_id)
@@ -315,6 +369,7 @@ class FireSeverityAssessmentRepository:
             weather_observation_ids=weather_ids,
             satellite_hotspot_ids=tuple(trace.satellite_hotspot_id for trace in satellite_inputs),
             selected_frp_hotspot_id=selected_ids[0] if selected_ids else None,
+            created_at=cls._ensure_aware_datetime(db_assessment.created_at),
         )
 
     @staticmethod
@@ -378,6 +433,11 @@ class FireSeverityAssessmentRepository:
             raise FireSeverityAssessmentRepositoryError(
                 f"assessment_id must be a positive integer, got {assessment_id!r}."
             )
+
+    @staticmethod
+    def _validate_limit(limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise FireSeverityAssessmentRepositoryError(f"Invalid limit: {limit!r}. Must be a positive integer.")
 
     @staticmethod
     def _validate_fire_event_id(fire_event_id: int) -> None:

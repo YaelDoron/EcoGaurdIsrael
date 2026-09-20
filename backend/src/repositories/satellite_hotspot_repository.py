@@ -11,7 +11,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -37,10 +37,18 @@ class SaveHotspotResult:
 
 @dataclass(frozen=True)
 class StoredSatelliteHotspot:
-    """Persisted satellite hotspot with database identity."""
+    """Persisted satellite hotspot with database identity.
+
+    `created_at` is the row's own DB-insert timestamp (server-assigned once,
+    at creation - see SatelliteHotspotDB.created_at). It is None only for
+    pre-migration rows that predate this column; callers needing an
+    availability timestamp must fall back to `hotspot.detected_at` for those
+    rather than fabricate a value.
+    """
 
     id: int
     hotspot: SatelliteHotspot
+    created_at: datetime | None = None
 
 
 class SatelliteHotspotRepository:
@@ -76,13 +84,14 @@ class SatelliteHotspotRepository:
                 detection_key=detection_key,
                 latitude=hotspot.latitude,
                 longitude=hotspot.longitude,
-                detected_at=hotspot.detected_at,
+                detected_at=self._ensure_aware_datetime(hotspot.detected_at),
                 confidence=hotspot.confidence,
                 frp=hotspot.frp,
                 brightness=hotspot.brightness,
                 satellite=hotspot.satellite,
                 instrument=hotspot.instrument,
                 day_night=hotspot.day_night,
+                location_name=hotspot.location_name,
             )
             session.add(db_hotspot)
 
@@ -163,9 +172,42 @@ class SatelliteHotspotRepository:
                 .all()
             )
             return [
-                StoredSatelliteHotspot(id=db_hotspot.id, hotspot=self._to_domain_hotspot(db_hotspot))
+                StoredSatelliteHotspot(
+                    id=db_hotspot.id,
+                    hotspot=self._to_domain_hotspot(db_hotspot),
+                    created_at=self._ensure_aware_created_at(db_hotspot.created_at),
+                )
                 for db_hotspot in db_hotspots
             ]
+
+    def get_recent(self, limit: int) -> tuple[StoredSatelliteHotspot, ...]:
+        """Return the `limit` most recently detected hotspots, newest first, WITH database ids.
+
+        Task A6: distinct from get_latest_hotspots (bounded by limit too,
+        but returns bare SatelliteHotspot domain objects with no id) and
+        from get_recent_hotspots (id-carrying, but time-window bounded, not
+        limit bounded). The Activity Feed needs both: a limit bound and the
+        database id. Same deterministic ordering (detected_at desc, id desc).
+        """
+        self._validate_limit(limit)
+        with self._session_scope() as session:
+            db_hotspots = (
+                session.execute(
+                    select(SatelliteHotspotDB)
+                    .order_by(SatelliteHotspotDB.detected_at.desc(), SatelliteHotspotDB.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(
+                StoredSatelliteHotspot(
+                    id=db_hotspot.id,
+                    hotspot=self._to_domain_hotspot(db_hotspot),
+                    created_at=self._ensure_aware_created_at(db_hotspot.created_at),
+                )
+                for db_hotspot in db_hotspots
+            )
 
     def get_by_id(self, hotspot_id: int) -> StoredSatelliteHotspot | None:
         """Return a persisted hotspot by database id, or None if absent."""
@@ -174,7 +216,11 @@ class SatelliteHotspotRepository:
             db_hotspot = session.get(SatelliteHotspotDB, hotspot_id)
             if db_hotspot is None:
                 return None
-            return StoredSatelliteHotspot(id=db_hotspot.id, hotspot=self._to_domain_hotspot(db_hotspot))
+            return StoredSatelliteHotspot(
+                id=db_hotspot.id,
+                hotspot=self._to_domain_hotspot(db_hotspot),
+                created_at=self._ensure_aware_created_at(db_hotspot.created_at),
+            )
 
     @staticmethod
     def _find_by_detection_key(session: Session, detection_key: str) -> SatelliteHotspotDB | None:
@@ -187,14 +233,38 @@ class SatelliteHotspotRepository:
         return SatelliteHotspot(
             latitude=db_hotspot.latitude,
             longitude=db_hotspot.longitude,
-            detected_at=db_hotspot.detected_at,
+            detected_at=SatelliteHotspotRepository._ensure_aware_datetime(db_hotspot.detected_at),
             confidence=db_hotspot.confidence,
             frp=db_hotspot.frp,
             brightness=db_hotspot.brightness,
             satellite=db_hotspot.satellite,
             instrument=db_hotspot.instrument,
             day_night=db_hotspot.day_night,
+            location_name=db_hotspot.location_name,
         )
+
+    @staticmethod
+    def _ensure_aware_datetime(value: datetime) -> datetime:
+        """Defense-in-depth: `detected_at` is now `TIMESTAMPTZ` and round-trips
+        aware, but a naive value (e.g. a pre-migration row, or a caller that
+        bypassed this repository) is treated as UTC rather than silently
+        misinterpreted downstream - the same convention already used by
+        NewsRepository._ensure_aware_datetime and
+        FireDangerAssessmentRepository._ensure_aware_datetime."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+
+    @staticmethod
+    def _ensure_aware_created_at(value: datetime | None) -> datetime | None:
+        """Same defense-in-depth as _ensure_aware_datetime, but for the
+        nullable created_at column (None for genuine pre-migration rows -
+        never coerced into a fabricated value)."""
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
     @staticmethod
     def _generate_detection_key(hotspot: SatelliteHotspot) -> str:

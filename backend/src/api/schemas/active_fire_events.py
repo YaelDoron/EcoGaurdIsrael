@@ -14,9 +14,11 @@ syntax is not evaluable on this project's Python 3.9 runtime for arbitrary
 types (unlike the plain dataclasses in src.models, whose annotations are
 never resolved at runtime).
 
-There is deliberately no `area_name` field - see src/models/active_fire_events.py
-for why (FireEvent persists no trustworthy area/location label); this layer
-does not fabricate one just to match an old draft contract.
+`location_name` reflects the persisted FireEvent's own trustworthy
+provenance where available, falling back to read-side Fire Danger area
+containment for historical rows - see src/models/active_fire_events.py for
+the exact priority. `created_at` is the FireEvent row's own DB-insert
+timestamp ("Opened") - distinct from `detected_at` (source evidence time).
 """
 from __future__ import annotations
 
@@ -55,7 +57,9 @@ class ActiveFireEventResponse(BaseModel):
     detection_confidence: float
     detected_at: datetime
     updated_at: datetime
+    created_at: datetime
     severity: Optional[ActiveFireEventSeverityResponse]
+    location_name: Optional[str] = None
 
 
 class ActiveFireEventsResponse(BaseModel):
@@ -82,7 +86,9 @@ def _to_event_response(item: ActiveFireEventSummary) -> ActiveFireEventResponse:
         detection_confidence=item.detection_confidence,
         detected_at=item.detected_at,
         updated_at=item.updated_at,
+        created_at=item.created_at,
         severity=_to_severity_response(item.severity) if item.severity is not None else None,
+        location_name=item.location_name,
     )
 
 

@@ -280,3 +280,222 @@ def test_transaction_rolls_back_if_trace_persistence_fails(repository, sqlite_se
     session = sqlite_session_factory()
     assert session.execute(select(WeatherObservationDB)).scalars().all() == []
     session.close()
+
+
+# ---------------------------------------------------------------------------
+# get_latest_for_all_areas (Task A4, Part 14: N+1 avoidance)
+# ---------------------------------------------------------------------------
+
+
+def test_get_latest_for_all_areas_empty_database_returns_empty_tuple(repository):
+    assert repository.get_latest_for_all_areas() == ()
+
+
+def test_get_latest_for_all_areas_returns_one_entry_per_area(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(
+        make_assessment(area_id="area-a", area_name="Area A"), (observation_id,), (station_id,)
+    )
+    repository.save_assessment(
+        make_assessment(area_id="area-b", area_name="Area B"), (observation_id,), (station_id,)
+    )
+
+    latest = repository.get_latest_for_all_areas()
+
+    assert {stored.assessment.area_id for stored in latest} == {"area-a", "area-b"}
+
+
+def test_get_latest_for_all_areas_picks_the_newest_per_area(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    older = make_assessment(assessed_at=ASSESSED_AT - timedelta(hours=1), score=20, level=FireDangerLevel.MODERATE)
+    newer = make_assessment(assessed_at=ASSESSED_AT, score=30, level=FireDangerLevel.HIGH)
+    repository.save_assessment(older, (observation_id,), (station_id,))
+    saved_newer = repository.save_assessment(newer, (observation_id,), (station_id,))
+    other_area = make_assessment(area_id="area-golan", area_name="Golan")
+    saved_other = repository.save_assessment(other_area, (observation_id,), (station_id,))
+
+    latest = repository.get_latest_for_all_areas()
+
+    by_area = {stored.assessment.area_id: stored for stored in latest}
+    assert by_area["area-carmel"].assessment_id == saved_newer.assessment_id
+    assert by_area["area-carmel"].assessment.score == 30
+    assert by_area["area-golan"].assessment_id == saved_other.assessment_id
+    assert len(latest) == 2
+
+
+def test_get_latest_for_all_areas_tie_breaks_deterministically_on_id(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    first = repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+    second = repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+
+    latest = repository.get_latest_for_all_areas()
+
+    assert len(latest) == 1
+    assert latest[0].assessment_id == max(first.assessment_id, second.assessment_id) == second.assessment_id
+
+
+def test_get_latest_for_all_areas_includes_insufficient_data_as_the_latest(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(
+        make_assessment(assessed_at=ASSESSED_AT - timedelta(hours=1)), (observation_id,), (station_id,)
+    )
+    insufficient = make_assessment(
+        assessed_at=ASSESSED_AT,
+        status=FireDangerAssessmentStatus.INSUFFICIENT_DATA,
+        score=None,
+        level=None,
+    )
+    saved_insufficient = repository.save_assessment(insufficient, (), ())
+
+    latest = repository.get_latest_for_all_areas()
+
+    assert len(latest) == 1
+    assert latest[0].assessment_id == saved_insufficient.assessment_id
+    assert latest[0].assessment.status is FireDangerAssessmentStatus.INSUFFICIENT_DATA
+    assert latest[0].assessment.score is None
+    assert latest[0].assessment.level is None
+
+
+def test_get_latest_for_all_areas_does_not_populate_trace_ids(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+
+    latest = repository.get_latest_for_all_areas()
+
+    assert latest[0].observation_ids == ()
+    assert latest[0].station_ids == ()
+
+
+# ---------------------------------------------------------------------------
+# get_recent (Task A6, Activity Feed)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent(10) == ()
+
+
+def test_get_recent_orders_by_assessed_at_desc_across_areas(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    older = repository.save_assessment(
+        make_assessment(area_id="area-a", assessed_at=ASSESSED_AT), (observation_id,), (station_id,)
+    )
+    newer = repository.save_assessment(
+        make_assessment(area_id="area-b", assessed_at=ASSESSED_AT + timedelta(hours=1)),
+        (observation_id,),
+        (station_id,),
+    )
+
+    recent = repository.get_recent(10)
+
+    assert [stored.assessment_id for stored in recent] == [newer.assessment_id, older.assessment_id]
+
+
+def test_get_recent_respects_limit(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    for index in range(5):
+        repository.save_assessment(
+            make_assessment(assessed_at=ASSESSED_AT + timedelta(hours=index)),
+            (observation_id,),
+            (station_id,),
+        )
+
+    recent = repository.get_recent(2)
+
+    assert len(recent) == 2
+
+
+def test_get_recent_rejects_invalid_limit(repository):
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_recent(0)
+
+
+# ---------------------------------------------------------------------------
+# get_recent_with_level_in (Weather Activity Feed signal)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_with_level_in_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent_with_level_in((FireDangerLevel.HIGH,), 10) == ()
+
+
+def test_get_recent_with_level_in_empty_levels_returns_empty_tuple(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(make_assessment(level=FireDangerLevel.HIGH), (observation_id,), (station_id,))
+
+    assert repository.get_recent_with_level_in((), 10) == ()
+
+
+@pytest.mark.parametrize("level", [FireDangerLevel.HIGH, FireDangerLevel.VERY_HIGH, FireDangerLevel.EXTREME])
+def test_get_recent_with_level_in_matches_each_high_plus_level(repository, weather_repository, level):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    saved = repository.save_assessment(make_assessment(level=level), (observation_id,), (station_id,))
+
+    matches = repository.get_recent_with_level_in((FireDangerLevel.HIGH, FireDangerLevel.VERY_HIGH, FireDangerLevel.EXTREME), 10)
+
+    assert [stored.assessment_id for stored in matches] == [saved.assessment_id]
+
+
+@pytest.mark.parametrize("level", [FireDangerLevel.LOW, FireDangerLevel.MODERATE])
+def test_get_recent_with_level_in_excludes_low_and_moderate(repository, weather_repository, level):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(make_assessment(level=level), (observation_id,), (station_id,))
+
+    matches = repository.get_recent_with_level_in((FireDangerLevel.HIGH, FireDangerLevel.VERY_HIGH, FireDangerLevel.EXTREME), 10)
+
+    assert matches == ()
+
+
+def test_get_recent_with_level_in_populates_observation_and_station_ids_unlike_get_recent(repository, weather_repository):
+    """The Weather Activity Feed signal needs the exact traced weather
+    inputs - unlike plain get_recent (a lighter summary-only read), this
+    method must eager-load the trace."""
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    saved = repository.save_assessment(make_assessment(level=FireDangerLevel.HIGH), (observation_id,), (station_id,))
+
+    matches = repository.get_recent_with_level_in((FireDangerLevel.HIGH,), 10)
+
+    assert matches[0].observation_ids == (observation_id,)
+    assert matches[0].station_ids == (station_id,)
+    # Confirm get_recent (unrelated method) is unaffected and still empty-trace.
+    assert repository.get_recent(10)[0].observation_ids == ()
+
+
+def test_get_recent_with_level_in_orders_newest_first(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    older = repository.save_assessment(
+        make_assessment(level=FireDangerLevel.HIGH, assessed_at=ASSESSED_AT), (observation_id,), (station_id,)
+    )
+    newer = repository.save_assessment(
+        make_assessment(level=FireDangerLevel.EXTREME, assessed_at=ASSESSED_AT + timedelta(hours=1)),
+        (observation_id,),
+        (station_id,),
+    )
+
+    matches = repository.get_recent_with_level_in((FireDangerLevel.HIGH, FireDangerLevel.EXTREME), 10)
+
+    assert [stored.assessment_id for stored in matches] == [newer.assessment_id, older.assessment_id]
+
+
+def test_get_recent_with_level_in_respects_limit(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    for index in range(5):
+        repository.save_assessment(
+            make_assessment(level=FireDangerLevel.HIGH, assessed_at=ASSESSED_AT + timedelta(hours=index)),
+            (observation_id,),
+            (station_id,),
+        )
+
+    matches = repository.get_recent_with_level_in((FireDangerLevel.HIGH,), 2)
+
+    assert len(matches) == 2
+
+
+def test_get_recent_with_level_in_rejects_invalid_limit(repository):
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_recent_with_level_in((FireDangerLevel.HIGH,), 0)
+
+
+def test_get_recent_with_level_in_rejects_non_level_values(repository):
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_recent_with_level_in(("high",), 10)

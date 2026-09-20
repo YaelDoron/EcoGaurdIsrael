@@ -16,7 +16,7 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import math
 
 from sqlalchemy import select
@@ -168,7 +168,7 @@ class WeatherRepository:
 
             db_observation = WeatherObservationDB(
                 station_id=db_station.id,
-                timestamp=observation.timestamp,
+                timestamp=self._ensure_aware_datetime(observation.timestamp),
                 temperature=observation.temperature,
                 relative_humidity=observation.relative_humidity,
                 wind_speed=observation.wind_speed,
@@ -390,7 +390,7 @@ class WeatherRepository:
     ) -> WeatherObservation:
         return WeatherObservation(
             station_external_id=external_station_id,
-            timestamp=db_observation.timestamp,
+            timestamp=WeatherRepository._ensure_aware_datetime(db_observation.timestamp),
             temperature=db_observation.temperature,
             relative_humidity=db_observation.relative_humidity,
             wind_speed=db_observation.wind_speed,
@@ -398,6 +398,17 @@ class WeatherRepository:
             wind_gust=db_observation.wind_gust,
             rainfall=db_observation.rainfall,
         )
+
+    @staticmethod
+    def _ensure_aware_datetime(value: datetime) -> datetime:
+        """Defense-in-depth: `timestamp` is now `TIMESTAMPTZ` and round-trips
+        aware, but a naive value (e.g. a pre-migration row) is treated as UTC
+        rather than silently misinterpreted downstream - same convention as
+        SatelliteHotspotRepository._ensure_aware_datetime /
+        NewsRepository._ensure_aware_datetime."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
 
     @staticmethod
     def _normalize_observation_ids(observation_ids: tuple[int, ...]) -> tuple[int, ...]:

@@ -10,10 +10,17 @@ import type L from "leaflet";
  * icon/color, which cells got rendered, bounds-fitting calls) without
  * depending on Leaflet's internal rendering pipeline.
  */
+export interface FakeLeafletHandler {
+  enable: () => void;
+  disable: () => void;
+}
+
 export interface FakeLeafletMap {
   setView: (center: [number, number], zoom: number) => FakeLeafletMap;
   fitBounds: (bounds: L.LatLngBounds, options?: L.FitBoundsOptions) => FakeLeafletMap;
   getZoom: () => number;
+  /** Mirrors Leaflet's own `Map.scrollWheelZoom` Handler (enable/disable pair) - see DisableScrollWheelZoom.tsx. */
+  scrollWheelZoom: FakeLeafletHandler;
 }
 
 export function createFakeMap(overrides: Partial<FakeLeafletMap> = {}): FakeLeafletMap {
@@ -21,6 +28,7 @@ export function createFakeMap(overrides: Partial<FakeLeafletMap> = {}): FakeLeaf
     setView: () => fakeMap,
     fitBounds: () => fakeMap,
     getZoom: () => 2,
+    scrollWheelZoom: { enable: () => {}, disable: () => {} },
     ...overrides,
   };
   return fakeMap;
@@ -36,9 +44,13 @@ interface ChildrenProps {
   children?: ReactNode;
 }
 
-export function MapContainer({ children }: ChildrenProps & Record<string, unknown>) {
+export interface MapContainerProps extends ChildrenProps {
+  scrollWheelZoom?: boolean;
+}
+
+export function MapContainer({ children, scrollWheelZoom }: MapContainerProps & Record<string, unknown>) {
   return (
-    <div data-testid="map-container">
+    <div data-testid="map-container" data-scroll-wheel-zoom={String(scrollWheelZoom)}>
       <MapInstanceContext.Provider value={createFakeMap()}>{children}</MapInstanceContext.Provider>
     </div>
   );
@@ -85,6 +97,34 @@ export function CircleMarker({ center, pathOptions, children }: CircleMarkerProp
       data-lng={center[1]}
       data-fill-color={pathOptions?.fillColor}
       data-fill-opacity={pathOptions?.fillOpacity}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * A true geographic circle (radius in meters) - distinct from CircleMarker's
+ * fixed-pixel radius. Added for Task A8's Fire Danger region layer.
+ */
+export interface CircleProps extends ChildrenProps {
+  center: [number, number];
+  radius: number;
+  pathOptions?: { color?: string; fillColor?: string; fillOpacity?: number; weight?: number };
+  eventHandlers?: { click?: () => void };
+}
+
+export function Circle({ center, radius, pathOptions, eventHandlers, children }: CircleProps) {
+  return (
+    <div
+      data-testid="circle"
+      data-lat={center[0]}
+      data-lng={center[1]}
+      data-radius={radius}
+      data-color={pathOptions?.color}
+      data-fill-color={pathOptions?.fillColor}
+      data-fill-opacity={pathOptions?.fillOpacity}
+      onClick={eventHandlers?.click}
     >
       {children}
     </div>

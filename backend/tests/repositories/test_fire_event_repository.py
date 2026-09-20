@@ -647,3 +647,50 @@ def test_update_preserves_methodology(repository, satellite_repository):
 
     assert found.event.methodology == FIRE_DETECTION_METHODOLOGY_NAME
     assert found.event.methodology_version == FIRE_DETECTION_METHODOLOGY_VERSION
+
+
+# ---------------------------------------------------------------------------
+# get_recent (Task A6, Activity Feed)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent(10) == ()
+
+
+def test_get_recent_orders_by_detected_at_desc(repository, satellite_repository):
+    older = create_event_with_satellite(
+        repository, satellite_repository, detected_at=DETECTED_AT, updated_at=DETECTED_AT
+    )
+    later = DETECTED_AT + timedelta(hours=1)
+    newer = create_event_with_satellite(
+        repository, satellite_repository, detected_at=later, updated_at=later
+    )
+
+    recent = repository.get_recent(10)
+
+    assert [stored.id for stored in recent] == [newer.id, older.id]
+
+
+def test_get_recent_includes_non_active_status(repository, satellite_repository):
+    resolved = create_event_with_satellite(repository, satellite_repository, status=FireEventStatus.SUSPECTED)
+    repository.update_event(resolved.id, make_event(status=FireEventStatus.RESOLVED, detection_confidence=0.5))
+
+    recent = repository.get_recent(10)
+
+    assert resolved.id in {stored.id for stored in recent}
+
+
+def test_get_recent_respects_limit(repository, satellite_repository):
+    for offset in range(5):
+        moment = DETECTED_AT + timedelta(hours=offset)
+        create_event_with_satellite(repository, satellite_repository, detected_at=moment, updated_at=moment)
+
+    recent = repository.get_recent(2)
+
+    assert len(recent) == 2
+
+
+def test_get_recent_rejects_invalid_limit(repository):
+    with pytest.raises(FireEventRepositoryError):
+        repository.get_recent(0)

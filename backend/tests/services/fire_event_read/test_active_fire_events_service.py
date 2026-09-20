@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from src.models.active_fire_events import ActiveFireEventsResult
+from src.models.fire_danger_areas import FireDangerAreaSnapshot
 from src.models.fire_event import FireEvent
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_severity_assessment import FireSeverityAssessment
@@ -70,6 +71,8 @@ def make_stored_event(
     latitude: float = 32.731,
     longitude: float = 35.046,
     detection_confidence: float = 0.6,
+    created_at: datetime = UPDATED_AT,
+    location_name: str | None = None,
 ) -> StoredFireEvent:
     return StoredFireEvent(
         id=event_id,
@@ -82,7 +85,9 @@ def make_stored_event(
             detection_confidence=detection_confidence,
             methodology="detector",
             methodology_version="1.0",
+            location_name=location_name,
         ),
+        created_at=created_at,
     )
 
 
@@ -313,6 +318,179 @@ def test_all_returned_timestamps_remain_timezone_aware():
 # ---------------------------------------------------------------------------
 # Read-only guarantee
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# location_name enrichment (read/presentation-only, mirrors satellite
+# hotspots' own resolve_nearest_containing_area_name usage)
+# ---------------------------------------------------------------------------
+
+
+def make_area(area_id: str, area_name: str, latitude: float, longitude: float, radius_km: float = 5.0) -> FireDangerAreaSnapshot:
+    return FireDangerAreaSnapshot(
+        area_id=area_id,
+        area_name=area_name,
+        area_latitude=latitude,
+        area_longitude=longitude,
+        area_radius_km=radius_km,
+        assessment=None,
+    )
+
+
+def test_location_name_is_none_when_fire_danger_areas_omitted():
+    stored_event = make_stored_event(1, latitude=32.731, longitude=35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    assert result.items[0].location_name is None
+
+
+def test_location_name_resolves_to_containing_area():
+    stored_event = make_stored_event(1, latitude=32.74, longitude=35.05)
+    area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(area,))
+
+    assert result.items[0].location_name == "Carmel Demo Area"
+
+
+def test_location_name_is_none_when_no_area_contains_the_event():
+    stored_event = make_stored_event(1, latitude=33.5, longitude=36.0)
+    area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(area,))
+
+    assert result.items[0].location_name is None
+
+
+def test_location_name_resolves_deterministically_with_overlapping_areas():
+    stored_event = make_stored_event(1, latitude=32.741, longitude=35.051)
+    near = make_area("area-near", "Near Area", 32.740, 35.050, radius_km=10.0)
+    far = make_area("area-far", "Far Area", 32.900, 35.200, radius_km=30.0)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(far, near))
+
+    assert result.items[0].location_name == "Near Area"
+
+
+def test_location_name_never_affects_which_events_are_active_or_their_order():
+    newest = make_stored_event(5, updated_at=UPDATED_AT + timedelta(hours=2), latitude=10.0, longitude=10.0)
+    oldest = make_stored_event(9, updated_at=UPDATED_AT, latitude=20.0, longitude=20.0)
+    area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(newest, oldest))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(area,))
+
+    assert [item.fire_event_id for item in result.items] == [5, 9]
+    assert all(item.location_name is None for item in result.items)
+
+
+def test_location_name_never_persisted_read_only_guarantee():
+    """The enrichment must never call a repository write method - it only
+    ever compares coordinates already in memory."""
+    import inspect
+
+    source = inspect.getsource(ActiveFireEventsService)
+    for forbidden in ("update_event", "save_assessment", ".save(", ".create_"):
+        assert forbidden not in source
+
+
+# ---------------------------------------------------------------------------
+# Trusted FireEvent.location_name takes priority over the read-side fallback
+# (Part I: 1. trusted persisted value, 2. safe containing-area fallback, 3. null)
+# ---------------------------------------------------------------------------
+
+
+def test_trusted_location_name_wins_even_without_any_fire_danger_areas():
+    stored_event = make_stored_event(1, latitude=32.965, longitude=35.381, location_name="Galilee Demo Area")
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    assert result.items[0].location_name == "Galilee Demo Area"
+
+
+def test_trusted_location_name_wins_over_a_conflicting_read_side_fallback():
+    """Even if the containing-area lookup would suggest a DIFFERENT area
+    (e.g. coordinate jitter placed the event near another area's circle),
+    the persisted, trusted FireEvent.location_name must never be
+    overwritten by the read-side approximation."""
+    stored_event = make_stored_event(1, latitude=32.74, longitude=35.05, location_name="Galilee Demo Area")
+    conflicting_area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(conflicting_area,))
+
+    assert result.items[0].location_name == "Galilee Demo Area"
+
+
+def test_fallback_used_only_when_fire_event_has_no_trusted_location_name():
+    stored_event = make_stored_event(1, latitude=32.74, longitude=35.05, location_name=None)
+    area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(area,))
+
+    assert result.items[0].location_name == "Carmel Demo Area"
+
+
+def test_null_when_no_trusted_location_and_no_fallback_area_contains_it():
+    stored_event = make_stored_event(1, latitude=1.0, longitude=1.0, location_name=None)
+    area = make_area("area-carmel", "Carmel Demo Area", 32.731, 35.046)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF, fire_danger_areas=(area,))
+
+    assert result.items[0].location_name is None
+
+
+def test_different_incidents_preserve_their_own_distinct_trusted_locations():
+    """No cross-incident location contamination (Part S item 9)."""
+    galilee_event = make_stored_event(1, location_name="Galilee Demo Area")
+    carmel_event = make_stored_event(2, location_name="Carmel Demo Area")
+    service, _, _ = make_service(active_events=(galilee_event, carmel_event))
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    by_id = {item.fire_event_id: item.location_name for item in result.items}
+    assert by_id[1] == "Galilee Demo Area"
+    assert by_id[2] == "Carmel Demo Area"
+
+
+# ---------------------------------------------------------------------------
+# created_at ("Opened") - distinct from detected_at, always surfaced
+# ---------------------------------------------------------------------------
+
+
+def test_created_at_is_surfaced_from_the_stored_event():
+    creation_time = DETECTED_AT + timedelta(minutes=2)
+    stored_event = make_stored_event(1, detected_at=DETECTED_AT, created_at=creation_time)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    assert result.items[0].created_at == creation_time
+
+
+def test_created_at_remains_distinct_from_detected_at_when_evidence_is_older():
+    """Reproduces the reported bug scenario: the FireEvent became visible
+    (created_at) at 11:46, but its earliest correlated evidence
+    (detected_at) was captured at 11:44 - both values must be preserved
+    and remain genuinely different, never conflated."""
+    detected_at = datetime(2026, 9, 20, 11, 44, 0, tzinfo=timezone.utc)
+    created_at = datetime(2026, 9, 20, 11, 46, 0, tzinfo=timezone.utc)
+    stored_event = make_stored_event(1, detected_at=detected_at, updated_at=detected_at, created_at=created_at)
+    service, _, _ = make_service(active_events=(stored_event,))
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    assert result.items[0].detected_at == detected_at
+    assert result.items[0].created_at == created_at
+    assert result.items[0].created_at != result.items[0].detected_at
 
 
 def test_service_source_calls_no_write_operation():

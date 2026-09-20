@@ -2,7 +2,7 @@
 of the Global Multi-Incident Optimizer refactor)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -504,3 +504,95 @@ def test_invalid_arguments_rejected(repository):
         repository.get_by_id(0)
     with pytest.raises(GlobalPlanningRunRepositoryError):
         repository.get_members(-1)
+
+
+# ---------------------------------------------------------------------------
+# get_recent (Task A6, Activity Feed)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent(10) == ()
+
+
+def test_get_recent_orders_by_started_at_desc(repository, sqlite_session_factory):
+    fire_event_ids = _persist_fire_events(sqlite_session_factory, 1)
+    older = repository.create_run(
+        started_at=STARTED_AT,
+        trigger="manual",
+        methodology="m",
+        methodology_version="1.0",
+        input_fingerprint=None,
+        fire_event_ids=fire_event_ids,
+    )
+    newer = repository.create_run(
+        started_at=STARTED_AT + timedelta(hours=1),
+        trigger="manual",
+        methodology="m",
+        methodology_version="1.0",
+        input_fingerprint=None,
+        fire_event_ids=fire_event_ids,
+    )
+
+    recent = repository.get_recent(10)
+
+    assert [stored.id for stored in recent] == [newer.id, older.id]
+
+
+def test_get_recent_respects_limit(repository, sqlite_session_factory):
+    fire_event_ids = _persist_fire_events(sqlite_session_factory, 1)
+    for index in range(5):
+        repository.create_run(
+            started_at=STARTED_AT + timedelta(hours=index),
+            trigger="manual",
+            methodology="m",
+            methodology_version="1.0",
+            input_fingerprint=None,
+            fire_event_ids=fire_event_ids,
+        )
+
+    recent = repository.get_recent(2)
+
+    assert len(recent) == 2
+
+
+def test_get_recent_rejects_invalid_limit(repository):
+    with pytest.raises(GlobalPlanningRunRepositoryError):
+        repository.get_recent(0)
+
+
+# ---------------------------------------------------------------------------
+# get_member_counts (Task A6, Activity Feed N+1 avoidance)
+# ---------------------------------------------------------------------------
+
+
+def test_get_member_counts_empty_input_returns_empty_dict(repository):
+    assert repository.get_member_counts([]) == {}
+
+
+def test_get_member_counts_batches_across_multiple_runs(repository, sqlite_session_factory):
+    two_events = _persist_fire_events(sqlite_session_factory, 2)
+    one_event = _persist_fire_events(sqlite_session_factory, 1)
+    run_with_two = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=two_events,
+    )
+    run_with_one = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=one_event,
+    )
+
+    counts = repository.get_member_counts([run_with_two.id, run_with_one.id])
+
+    assert counts == {run_with_two.id: 2, run_with_one.id: 1}
+
+
+def test_get_member_counts_omits_runs_with_no_members(repository):
+    run = repository.create_run(
+        started_at=STARTED_AT, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(),
+    )
+
+    counts = repository.get_member_counts([run.id])
+
+    assert counts == {}

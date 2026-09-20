@@ -63,6 +63,7 @@ def make_hotspot(
     longitude=BASE_LONGITUDE,
     detected_at=AS_OF - timedelta(minutes=10),
     confidence="n",
+    location_name=None,
 ):
     return StoredSatelliteHotspot(
         id=evidence_id,
@@ -71,6 +72,7 @@ def make_hotspot(
             longitude=longitude,
             detected_at=detected_at,
             confidence=confidence,
+            location_name=location_name,
         ),
     )
 
@@ -153,6 +155,35 @@ def test_satellite_with_unsupported_confidence_is_skipped(confidence):
     service, _, _ = make_service(satellite=[make_hotspot(confidence=confidence)])
 
     assert service.build_candidates(AS_OF) == ()
+
+
+def test_satellite_evidence_carries_forward_the_hotspots_trusted_location_name():
+    service, _, _ = make_service(satellite=[make_hotspot(location_name="Galilee Demo Area")])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.location_name == "Galilee Demo Area"
+
+
+def test_satellite_evidence_location_name_is_none_when_hotspot_has_none():
+    service, _, _ = make_service(satellite=[make_hotspot(location_name=None)])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.location_name is None
+
+
+def test_news_evidence_never_carries_the_reports_location_name():
+    """WildfireReport.location_name is a best-effort, sometimes-wrong NLP
+    guess for real ingestion (or a simulation display name) - not verified
+    provenance for a persisted FireEvent. Confirmed even though make_report
+    always sets a non-null location_name on the underlying WildfireReport."""
+    service, _, _ = make_service(news=[make_report()])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.evidence_type is FireEvidenceType.NEWS
+    assert evidence.location_name is None
 
 
 def test_news_evidence_uses_stored_observed_at_and_has_no_satellite_confidence():

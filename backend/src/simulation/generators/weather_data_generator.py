@@ -39,13 +39,32 @@ class WeatherScenarioProfile:
 
 
 WEATHER_SCENARIO_PROFILES: dict[ScenarioType, WeatherScenarioProfile] = {
+    # Worst-case corner (28C, 45%RH, max wind) must stay under
+    # MODERATE_THRESHOLD (15.0 FFWI). At wind=15 that corner already scores
+    # ~17.3 (MODERATE) -- verified against the real FFWICalculator -- so the
+    # wind ceiling is capped at 12.0 (worst-case ~13.9) to reliably stay LOW.
     ScenarioType.LOW_RISK_NO_FIRE: WeatherScenarioProfile(
         temperature_celsius=(18.0, 28.0),
         relative_humidity_percent=(45.0, 75.0),
-        wind_speed_kmh=(0.0, 15.0),
+        wind_speed_kmh=(0.0, 12.0),
         wind_gust_extra_kmh=(0.0, 10.0),
         rainfall_mm=(0.0, 5.0),
     ),
+    # Verified against the real FFWICalculator: worst/best corners of this box
+    # score ~15.9-23.7 FFWI, comfortably inside the MODERATE band
+    # [MODERATE_THRESHOLD, HIGH_THRESHOLD) = [15.0, 25.0).
+    ScenarioType.MODERATE_RISK_NO_FIRE: WeatherScenarioProfile(
+        temperature_celsius=(26.0, 32.0),
+        relative_humidity_percent=(30.0, 40.0),
+        wind_speed_kmh=(13.0, 17.0),
+        wind_gust_extra_kmh=(1.0, 10.0),
+        rainfall_mm=(0.0, 2.0),
+    ),
+    # By design this box spans HIGH through EXTREME, never below HIGH:
+    # verified worst corner (34C, 25%RH, 20km/h) scores ~29.6 FFWI and best
+    # corner (41C, 10%RH, 40km/h) scores ~71.0 FFWI, both >= HIGH_THRESHOLD
+    # (25.0). "HIGH_RISK_NO_FIRE" therefore means "HIGH or higher", matching
+    # the demo's "HIGH or higher danger, no fire" scenario intent.
     ScenarioType.HIGH_RISK_NO_FIRE: WeatherScenarioProfile(
         temperature_celsius=(34.0, 41.0),
         relative_humidity_percent=(10.0, 25.0),

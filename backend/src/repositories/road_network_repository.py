@@ -14,7 +14,8 @@ writes against it.
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.orm import Session
 
 from src.database.models.graph_edge_db import GraphEdgeDB
@@ -27,32 +28,73 @@ class RoadNetworkRepository:
     """Persists and retrieves the road network graph via SQLAlchemy."""
 
     def save_network(self, db: Session, nodes: list[GraphNode], edges: list[GraphEdge]) -> None:
-        """Upsert road-network nodes and edges into the database.
+        """Upsert road-network nodes and bulk-insert edges into the database.
 
-        Uses `Session.merge()` rather than `Session.add()` so re-importing
-        OSM data - where a node or edge id may already exist from a
-        previous import - updates the existing row in place instead of
-        raising a primary-key/unique-constraint violation.
+        Task A1.5: previously used `Session.merge()` in a per-object Python
+        loop. `merge()` with a primary key already set (every node carries
+        its real OSM node id) issues a synchronous SELECT-by-primary-key
+        round trip *per object* to decide insert vs. update. For a real
+        regional road network - tens of thousands of nodes/edges from one
+        OSM fetch - against a remote database, that is many minutes of pure
+        per-row network latency, not an OSM/network-fetch problem (this was
+        the dominant contributor to the observed multi-minute simulation
+        stall, on top of the separately-bounded OSM fetch itself - see
+        RoadNetworkFetcher.OSM_FETCH_TIMEOUT_SECONDS).
 
-        Nodes are merged before edges so that, within this same unit of
-        work, edge foreign keys always resolve to a node that is being
-        (or already was) persisted. Commits once at the end.
+        Nodes now use one batched `INSERT ... ON CONFLICT DO UPDATE`
+        statement (dialect-aware: PostgreSQL in production, SQLite in
+        tests) so a node already stored from a previous, overlapping bbox
+        fetch gets its coordinates refreshed instead of raising a
+        primary-key violation - preserving the original re-import
+        semantics, just in one round trip instead of one per node.
+
+        Edges never carry a pre-assigned id here - a fresh OSM fetch always
+        builds `GraphEdge` without one (`RoadNetworkFetcher._build_edges`),
+        since `GraphEdgeDB.id` is a surrogate autoincrement key, not an OSM
+        id - so they only need a single batched INSERT, matching the
+        previous per-edge insert-via-merge behavior exactly.
+
+        Nodes are saved before edges so that, within this same unit of
+        work, edge foreign keys always resolve to a node that is being (or
+        already was) persisted. Commits once at the end, same as before.
         """
-        for node in nodes:
-            db.merge(GraphNodeDB(id=node.id, latitude=node.latitude, longitude=node.longitude))
-
-        for edge in edges:
-            db.merge(
-                GraphEdgeDB(
-                    id=edge.id,
-                    source_node_id=edge.source_node_id,
-                    target_node_id=edge.target_node_id,
-                    distance_meters=edge.distance_meters,
-                    travel_time_seconds=edge.travel_time_seconds,
-                )
-            )
-
+        if nodes:
+            self._upsert_nodes(db, nodes)
+        if edges:
+            self._insert_edges(db, edges)
         db.commit()
+
+    def _upsert_nodes(self, db: Session, nodes: list[GraphNode]) -> None:
+        values = [{"id": node.id, "latitude": node.latitude, "longitude": node.longitude} for node in nodes]
+        insert_stmt = self._dialect_insert(db)(GraphNodeDB).values(values)
+        upsert_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=[GraphNodeDB.id],
+            set_={
+                "latitude": insert_stmt.excluded.latitude,
+                "longitude": insert_stmt.excluded.longitude,
+            },
+        )
+        db.execute(upsert_stmt)
+
+    def _insert_edges(self, db: Session, edges: list[GraphEdge]) -> None:
+        values = [
+            {
+                "source_node_id": edge.source_node_id,
+                "target_node_id": edge.target_node_id,
+                "distance_meters": edge.distance_meters,
+                "travel_time_seconds": edge.travel_time_seconds,
+            }
+            for edge in edges
+        ]
+        db.execute(insert(GraphEdgeDB), values)
+
+    @staticmethod
+    def _dialect_insert(db: Session):
+        """Return the dialect-specific `insert()` supporting `on_conflict_do_update`."""
+        dialect_name = db.get_bind().dialect.name
+        if dialect_name == "sqlite":
+            return sqlite.insert
+        return postgresql.insert
 
     def get_network_in_bbox(
         self,

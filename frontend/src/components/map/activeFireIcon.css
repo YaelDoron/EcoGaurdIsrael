@@ -1,0 +1,30 @@
+/* Task A8: subtle pulsing halo for CONFIRMED + HIGH/CRITICAL active fires.
+   Professional and understated on purpose (Part 27) - one slow fade/scale
+   cycle, not a blinking/flashing effect. */
+.active-fire-icon__halo {
+  animation: active-fire-pulse 1.8s ease-out infinite;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+@keyframes active-fire-pulse {
+  0% {
+    transform: scale(0.55);
+    opacity: 0.5;
+  }
+  70% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.15);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active-fire-icon__halo {
+    animation: none;
+    opacity: 0.3;
+  }
+}
