@@ -1,4 +1,4 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
 import type L from "leaflet";
 
 /**
@@ -96,17 +96,25 @@ export function Popup({ children }: ChildrenProps) {
 }
 
 export interface PolylineProps extends ChildrenProps {
+  ref?: Ref<{ bringToFront: () => void }>;
   positions: [number, number][];
-  pathOptions?: { color?: string; weight?: number };
+  pathOptions?: { color?: string; weight?: number; opacity?: number; dashArray?: string };
 }
 
-export function Polyline({ positions, pathOptions, children }: PolylineProps) {
+export function Polyline({ positions, pathOptions, children, ref }: PolylineProps) {
+  const element = useRef<HTMLDivElement>(null);
+  useImperativeHandle(ref, () => ({
+    bringToFront: () => element.current?.setAttribute("data-front", "true"),
+  }));
   return (
     <div
+      ref={element}
       data-testid="polyline"
       data-positions={JSON.stringify(positions)}
       data-color={pathOptions?.color}
       data-weight={pathOptions?.weight}
+      data-opacity={pathOptions?.opacity}
+      data-dash={pathOptions?.dashArray}
     >
       {children}
     </div>

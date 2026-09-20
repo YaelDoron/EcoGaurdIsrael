@@ -1,6 +1,6 @@
 import { MetricCard } from "../data/MetricCard";
 import type { ResponsePlanMetrics } from "../../types/responsePlan";
-import { formatCoveragePercentage, formatDurationSeconds, formatScore, NOT_AVAILABLE_LABEL } from "./formatting";
+import { formatDurationSeconds, NOT_AVAILABLE_LABEL } from "./formatting";
 import "./ResponsePlanSummary.css";
 
 export interface PlanMetricsProps {
@@ -16,15 +16,10 @@ export interface PlanMetricsProps {
  */
 export function PlanMetrics({ metrics }: PlanMetricsProps) {
   return (
-    <section aria-labelledby="plan-metrics-heading" className="response-plan-summary__section">
-      <h2 id="plan-metrics-heading" className="response-plan-summary__section-title">
-        Plan Metrics
-      </h2>
+    <section aria-label="Plan metrics" className="response-plan-summary__section">
       <div className="response-plan-summary__metrics-grid">
-        <MetricCard label="Plan Score" value={formatScore(metrics.plan_score)} />
-        <MetricCard label="Coverage" value={formatCoveragePercentage(metrics.coverage_score)} />
         <MetricCard
-          label="Average ETA"
+          label="Average Travel Time"
           value={
             metrics.average_eta_seconds !== null
               ? formatDurationSeconds(metrics.average_eta_seconds)

@@ -1,15 +1,29 @@
 import { Marker, Popup } from "react-leaflet";
 import { CoordinateDisplay } from "../data/CoordinateDisplay";
-import { STATUS_PRESENTATION } from "../status/presentation";
 import type { FireEventSummary } from "../../types/eventDetails";
-import { TONE_MAP_COLOR } from "./colors";
-import { createCircleIcon } from "./divIcon";
+import { FIRE_ICON_COLOR_ACTIVE, FIRE_ICON_COLOR_CONFIRMED, FIRE_ICON_COLOR_INACTIVE } from "./colors";
+import { createFireIcon } from "./divIcon";
 
 export interface FireEventMarkerProps {
   fireEvent: FireEventSummary;
 }
 
-const MARKER_SIZE = 22;
+const MARKER_SIZE = 32;
+
+const STATUS_LABEL: Record<FireEventSummary["status"], string> = {
+  suspected: "Suspected",
+  confirmed: "Confirmed",
+  resolved: "Resolved",
+  dismissed: "Dismissed",
+};
+
+// An active wildfire (suspected/confirmed) is drawn in fiery orange/red; a
+// resolved/dismissed one is muted so it never reads as still burning.
+function fireColor(status: FireEventSummary["status"]): string {
+  if (status === "confirmed") return FIRE_ICON_COLOR_CONFIRMED;
+  if (status === "suspected") return FIRE_ICON_COLOR_ACTIVE;
+  return FIRE_ICON_COLOR_INACTIVE;
+}
 
 /**
  * The current FireEvent's own location, always present (fire_event is a
@@ -18,15 +32,13 @@ const MARKER_SIZE = 22;
  * layers below it.
  */
 export function FireEventMarker({ fireEvent }: FireEventMarkerProps) {
-  const presentation = STATUS_PRESENTATION[fireEvent.status];
-  const color = presentation ? TONE_MAP_COLOR[presentation.tone] : TONE_MAP_COLOR.neutral;
-  const icon = createCircleIcon(color, { size: MARKER_SIZE });
+  const icon = createFireIcon(fireColor(fireEvent.status), { size: MARKER_SIZE });
 
   return (
     <Marker position={[fireEvent.latitude, fireEvent.longitude]} icon={icon}>
       <Popup>
         <strong>Event #{fireEvent.fire_event_id}</strong>
-        <p>Status: {presentation?.label ?? fireEvent.status}</p>
+        <p>Status: {STATUS_LABEL[fireEvent.status] ?? fireEvent.status}</p>
         <p>
           <CoordinateDisplay latitude={fireEvent.latitude} longitude={fireEvent.longitude} />
         </p>

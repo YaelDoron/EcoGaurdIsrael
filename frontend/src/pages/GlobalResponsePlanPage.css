@@ -1,0 +1,87 @@
+/* Breadcrumb-style back link: muted text, no box (same as the other screens). */
+.global-response-plan-page__breadcrumb-nav {
+  margin-bottom: var(--space-2);
+}
+
+.global-response-plan-page__breadcrumb {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
+}
+
+.global-response-plan-page__breadcrumb:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}
+
+.global-response-plan-page__breadcrumb svg {
+  transition: transform 0.15s ease;
+}
+
+.global-response-plan-page__breadcrumb:hover svg {
+  transform: translateX(-2px);
+}
+
+/* One quiet line: when the plan was last generated (plus a badge only when the run was not clean). */
+.global-response-plan-page__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.global-response-plan-page__updated {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.global-response-plan-page__section {
+  margin-bottom: var(--space-5);
+}
+
+.global-response-plan-page__section-title {
+  font-size: 1.125rem;
+  margin-bottom: var(--space-3);
+}
+
+/* Two-column split: response lists on the left, map pinned on the right. */
+.global-response-plan-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.global-response-plan-page__details {
+  min-width: 0;
+}
+
+.global-response-plan-page__section--map {
+  position: sticky;
+  top: var(--space-4);
+  margin-bottom: 0;
+}
+
+.global-response-plan-page__section--map .map-view__container {
+  height: min(78vh, 720px);
+}
+
+@media (max-width: 800px) {
+  .global-response-plan-page__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .global-response-plan-page__section--map {
+    position: static;
+    order: -1;
+  }
+
+  .global-response-plan-page__section--map .map-view__container {
+    height: 450px;
+  }
+}

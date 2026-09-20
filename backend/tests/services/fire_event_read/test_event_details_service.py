@@ -16,6 +16,9 @@ import pytest
 
 from src.models.fire_event import FireEvent
 from src.models.fire_event_status import FireEventStatus
+from src.models.fire_evidence_ref import FireEvidenceRef
+from src.models.fire_evidence_type import FireEvidenceType
+from src.models.fire_report import WildfireReport
 from src.models.fire_severity_assessment import FireSeverityAssessment
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
 from src.models.fire_severity_level import FireSeverityLevel
@@ -30,10 +33,13 @@ from src.models.response_plan_details import (
 from src.models.response_target import ResponseTarget
 from src.models.response_target_set import ResponseTargetSet
 from src.models.response_target_type import ResponseTargetType
+from src.models.satellite_hotspot import SatelliteHotspot
 from src.repositories.fire_event_repository import StoredFireEvent
 from src.repositories.fire_spread_prediction_repository import StoredFireSpreadPrediction
 from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment
+from src.repositories.news_repository import StoredWildfireReport
 from src.repositories.response_target_repository import StoredResponseTarget, StoredResponseTargetSet
+from src.repositories.satellite_hotspot_repository import StoredSatelliteHotspot
 from src.services.fire_event_read.event_details_service import EventDetailsService
 
 DETECTED_AT = datetime(2026, 9, 17, 10, 0, tzinfo=timezone.utc)
@@ -128,6 +134,26 @@ class FakeFirefightingResourceRepository:
         return [resource for resource in self.resources if resource.station_id in station_ids]
 
 
+class FakeSatelliteHotspotRepository:
+    def __init__(self, hotspots_by_id: dict[int, StoredSatelliteHotspot] | None = None):
+        self.hotspots_by_id = dict(hotspots_by_id or {})
+        self.calls: list[int] = []
+
+    def get_by_id(self, hotspot_id: int) -> StoredSatelliteHotspot | None:
+        self.calls.append(hotspot_id)
+        return self.hotspots_by_id.get(hotspot_id)
+
+
+class FakeNewsRepository:
+    def __init__(self, reports_by_id: dict[int, StoredWildfireReport] | None = None):
+        self.reports_by_id = dict(reports_by_id or {})
+        self.calls: list[int] = []
+
+    def get_by_id(self, report_id: int) -> StoredWildfireReport | None:
+        self.calls.append(report_id)
+        return self.reports_by_id.get(report_id)
+
+
 class FakeResponsePlanDetailsService:
     def __init__(self, plan_by_event_id: dict[int, ResponsePlanDetails] | None = None):
         self.plan_by_event_id = dict(plan_by_event_id or {})
@@ -149,6 +175,7 @@ def make_stored_event(
     status: FireEventStatus = FireEventStatus.CONFIRMED,
     latitude: float = 32.731,
     longitude: float = 35.046,
+    supporting_evidence: tuple[FireEvidenceRef, ...] = (),
 ) -> StoredFireEvent:
     return StoredFireEvent(
         id=event_id,
@@ -162,6 +189,64 @@ def make_stored_event(
             methodology="detector",
             methodology_version="1.0",
         ),
+        supporting_evidence=supporting_evidence,
+    )
+
+
+def make_stored_hotspot(
+    hotspot_id: int,
+    *,
+    latitude: float = 32.7,
+    longitude: float = 35.0,
+    confidence: str | None = "high",
+    frp: float | None = 12.5,
+    brightness: float | None = 300.0,
+    satellite: str | None = "Aqua",
+    instrument: str | None = "MODIS",
+    day_night: str | None = "D",
+) -> StoredSatelliteHotspot:
+    return StoredSatelliteHotspot(
+        id=hotspot_id,
+        hotspot=SatelliteHotspot(
+            latitude=latitude,
+            longitude=longitude,
+            detected_at=DETECTED_AT,
+            confidence=confidence,
+            frp=frp,
+            brightness=brightness,
+            satellite=satellite,
+            instrument=instrument,
+            day_night=day_night,
+        ),
+    )
+
+
+def make_stored_report(
+    report_id: int,
+    *,
+    title: str = "Wildfire spreads near Modiin",
+    summary: str = "Firefighters battle a fast-moving blaze.",
+    source_feed: str = "ynet",
+    location_name: str | None = "Modiin",
+    latitude: float | None = 31.9,
+    longitude: float | None = 35.0,
+    published_at: datetime | None = None,
+) -> StoredWildfireReport:
+    published = published_at if published_at is not None else DETECTED_AT
+    return StoredWildfireReport(
+        id=report_id,
+        report=WildfireReport(
+            source_url=f"https://example.com/reports/{report_id}",
+            source_feed=source_feed,
+            title=title,
+            summary=summary,
+            location_name=location_name,
+            latitude=latitude,
+            longitude=longitude,
+            published_at=published,
+            fetched_at=published,
+        ),
+        observed_at=published,
     )
 
 
@@ -307,6 +392,8 @@ def make_service(
     targets_by_event_id: dict[int, StoredResponseTargetSet] | None = None,
     stations: tuple[FakeStationRow, ...] = (),
     resources: tuple[FakeResourceRow, ...] = (),
+    hotspots_by_id: dict[int, StoredSatelliteHotspot] | None = None,
+    reports_by_id: dict[int, StoredWildfireReport] | None = None,
     plan_by_event_id: dict[int, ResponsePlanDetails] | None = None,
 ):
     fire_event_repository = FakeFireEventRepository(events_by_id)
@@ -315,6 +402,8 @@ def make_service(
     target_repository = FakeResponseTargetRepository(targets_by_event_id)
     station_repository = FakeFireStationRepository(stations)
     resource_repository = FakeFirefightingResourceRepository(resources)
+    satellite_hotspot_repository = FakeSatelliteHotspotRepository(hotspots_by_id)
+    news_repository = FakeNewsRepository(reports_by_id)
     plan_details_service = FakeResponsePlanDetailsService(plan_by_event_id)
 
     service = EventDetailsService(
@@ -324,12 +413,16 @@ def make_service(
         response_target_repository=target_repository,
         fire_station_repository=station_repository,
         firefighting_resource_repository=resource_repository,
+        satellite_hotspot_repository=satellite_hotspot_repository,
+        news_repository=news_repository,
         response_plan_details_service=plan_details_service,
     )
     fakes = {
         "fire_event": fire_event_repository,
         "severity": severity_repository,
         "spread": spread_repository,
+        "hotspots": satellite_hotspot_repository,
+        "news": news_repository,
         "targets": target_repository,
         "stations": station_repository,
         "resources": resource_repository,
@@ -391,6 +484,93 @@ def test_danger_is_always_none():
     result = service.get_event_details(1, as_of=AS_OF)
 
     assert result.danger is None
+
+
+# ---------------------------------------------------------------------------
+# Detection evidence
+# ---------------------------------------------------------------------------
+
+
+def test_satellite_evidence_is_resolved_and_mapped():
+    stored_event = make_stored_event(
+        1, supporting_evidence=(FireEvidenceRef(FireEvidenceType.SATELLITE, 501),)
+    )
+    hotspot = make_stored_hotspot(501, confidence="high", frp=15.0, satellite="Terra")
+    service, fakes = make_service(events_by_id={1: stored_event}, hotspots_by_id={501: hotspot})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert len(result.detection_evidence.satellite) == 1
+    assert result.detection_evidence.news == []
+    satellite = result.detection_evidence.satellite[0]
+    assert satellite.id == 501
+    assert satellite.confidence == "high"
+    assert satellite.frp == pytest.approx(15.0)
+    assert satellite.satellite == "Terra"
+    assert fakes["hotspots"].calls == [501]
+
+
+def test_news_evidence_is_resolved_and_mapped():
+    stored_event = make_stored_event(1, supporting_evidence=(FireEvidenceRef(FireEvidenceType.NEWS, 701),))
+    report = make_stored_report(701, title="Blaze reported near reserve", source_feed="haaretz")
+    service, fakes = make_service(events_by_id={1: stored_event}, reports_by_id={701: report})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.detection_evidence.satellite == []
+    assert len(result.detection_evidence.news) == 1
+    news = result.detection_evidence.news[0]
+    assert news.id == 701
+    assert news.title == "Blaze reported near reserve"
+    assert news.source == "haaretz"
+    assert news.observed_at == DETECTED_AT
+    assert fakes["news"].calls == [701]
+
+
+def test_mixed_satellite_and_news_evidence_are_both_mapped():
+    stored_event = make_stored_event(
+        1,
+        supporting_evidence=(
+            FireEvidenceRef(FireEvidenceType.SATELLITE, 501),
+            FireEvidenceRef(FireEvidenceType.NEWS, 701),
+        ),
+    )
+    hotspot = make_stored_hotspot(501)
+    report = make_stored_report(701)
+    service, _ = make_service(
+        events_by_id={1: stored_event}, hotspots_by_id={501: hotspot}, reports_by_id={701: report}
+    )
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert len(result.detection_evidence.satellite) == 1
+    assert len(result.detection_evidence.news) == 1
+
+
+def test_no_supporting_evidence_returns_empty_detection_evidence():
+    stored_event = make_stored_event(1, supporting_evidence=())
+    service, _ = make_service(events_by_id={1: stored_event})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.detection_evidence.satellite == []
+    assert result.detection_evidence.news == []
+
+
+def test_evidence_ref_pointing_to_missing_row_is_omitted_not_errored():
+    stored_event = make_stored_event(
+        1,
+        supporting_evidence=(
+            FireEvidenceRef(FireEvidenceType.SATELLITE, 999),
+            FireEvidenceRef(FireEvidenceType.NEWS, 888),
+        ),
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, hotspots_by_id={}, reports_by_id={})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.detection_evidence.satellite == []
+    assert result.detection_evidence.news == []
 
 
 # ---------------------------------------------------------------------------
@@ -558,6 +738,96 @@ def test_no_stations_or_resources_returns_empty_lists():
 
 
 # ---------------------------------------------------------------------------
+# Station summaries
+# ---------------------------------------------------------------------------
+
+
+def test_station_summary_counts_resources_by_status():
+    stored_event = make_stored_event(1)
+    station = FakeStationRow(id="S1", name="Central Station", latitude=32.0, longitude=34.8)
+    resources = (
+        FakeResourceRow(id="R1", station_id="S1", status=ResourceStatus.AVAILABLE),
+        FakeResourceRow(id="R2", station_id="S1", status=ResourceStatus.AVAILABLE),
+        FakeResourceRow(id="R3", station_id="S1", status=ResourceStatus.ASSIGNED),
+        FakeResourceRow(id="R4", station_id="S1", status=ResourceStatus.UNAVAILABLE),
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, stations=(station,), resources=resources)
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert len(result.station_summaries) == 1
+    summary = result.station_summaries[0]
+    assert summary.station_id == "S1"
+    assert summary.total_resources == 4
+    assert summary.available == 2
+    assert summary.assigned_status == 1
+    assert summary.unavailable == 1
+
+
+def test_station_summary_present_for_station_with_no_resources():
+    stored_event = make_stored_event(1)
+    station = FakeStationRow(id="S1", name="Empty Station", latitude=32.0, longitude=34.8)
+    service, _ = make_service(events_by_id={1: stored_event}, stations=(station,), resources=())
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert len(result.station_summaries) == 1
+    summary = result.station_summaries[0]
+    assert summary.total_resources == 0
+    assert summary.available == 0
+    assert summary.assigned_status == 0
+    assert summary.unavailable == 0
+    assert summary.current_global_plan_allocations == []
+
+
+def test_station_summary_lists_current_plan_allocations_for_its_station():
+    stored_event = make_stored_event(1)
+    station_1 = FakeStationRow(id="S1", name="Station One", latitude=32.0, longitude=34.8)
+    station_2 = FakeStationRow(id="S2", name="Station Two", latitude=32.1, longitude=34.9)
+    resource_1 = FakeResourceRow(id="R1", station_id="S1", status=ResourceStatus.ASSIGNED)
+    resource_2 = FakeResourceRow(id="R2", station_id="S2", status=ResourceStatus.AVAILABLE)
+    plan = make_plan_details(1)  # single action: resource_id="R1", station_id="S1"
+    service, _ = make_service(
+        events_by_id={1: stored_event},
+        stations=(station_1, station_2),
+        resources=(resource_1, resource_2),
+        plan_by_event_id={1: plan},
+    )
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    by_station = {summary.station_id: summary for summary in result.station_summaries}
+    assert len(by_station["S1"].current_global_plan_allocations) == 1
+    allocation = by_station["S1"].current_global_plan_allocations[0]
+    assert allocation.resource_id == "R1"
+    assert allocation.fire_event_id == 1
+    assert allocation.response_plan_id == 77
+    assert by_station["S2"].current_global_plan_allocations == []
+
+
+def test_station_summary_allocations_empty_when_no_current_plan():
+    stored_event = make_stored_event(1)
+    station = FakeStationRow(id="S1", name="Station One", latitude=32.0, longitude=34.8)
+    resource = FakeResourceRow(id="R1", station_id="S1", status=ResourceStatus.AVAILABLE)
+    service, _ = make_service(
+        events_by_id={1: stored_event}, stations=(station,), resources=(resource,), plan_by_event_id={}
+    )
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.station_summaries[0].current_global_plan_allocations == []
+
+
+def test_no_stations_returns_empty_station_summaries():
+    stored_event = make_stored_event(1)
+    service, _ = make_service(events_by_id={1: stored_event})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.station_summaries == []
+
+
+# ---------------------------------------------------------------------------
 # Current response plan (delegated to ResponsePlanDetailsService)
 # ---------------------------------------------------------------------------
 
@@ -671,9 +941,19 @@ def test_fakes_expose_no_write_methods():
         FakeResponseTargetRepository(),
         FakeFireStationRepository(),
         FakeFirefightingResourceRepository(),
+        FakeSatelliteHotspotRepository(),
+        FakeNewsRepository(),
         FakeResponsePlanDetailsService(),
     ):
-        for forbidden in ("save_assessment", "create_event", "update_event", "save_prediction", "save_target_set"):
+        for forbidden in (
+            "save_assessment",
+            "create_event",
+            "update_event",
+            "save_prediction",
+            "save_target_set",
+            "save_hotspot",
+            "save_report",
+        ):
             assert not hasattr(fake, forbidden)
 
 

@@ -89,6 +89,53 @@ export interface FirefightingResource {
   status: ResourceStatus;
 }
 
+export interface SatelliteEvidence {
+  id: number;
+  detected_at: string;
+  latitude: number;
+  longitude: number;
+  confidence: string | null;
+  frp: number | null;
+  brightness: number | null;
+  satellite: string | null;
+  instrument: string | null;
+  day_night: string | null;
+}
+
+export interface NewsEvidence {
+  id: number;
+  title: string;
+  summary: string;
+  source: string;
+  observed_at: string;
+  location_name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/** The direct evidence (satellite + news) that supports the FireEvent's detection. */
+export interface DetectionEvidence {
+  satellite: SatelliteEvidence[];
+  news: NewsEvidence[];
+}
+
+/** One resource from a station allocated to the event's current response plan. */
+export interface StationAllocation {
+  resource_id: string;
+  fire_event_id: number;
+  response_plan_id: number;
+}
+
+/** Per-station resource counts and current-plan allocations, for the station popup. */
+export interface StationSummary {
+  station_id: string;
+  total_resources: number;
+  available: number;
+  assigned_status: number;
+  unavailable: number;
+  current_global_plan_allocations: StationAllocation[];
+}
+
 export interface ResponseAction {
   resource_id: string;
   station_id: string;
@@ -126,9 +173,11 @@ export interface EventDetailsResult {
   fire_event: FireEventSummary;
   severity: SeverityAssessment | null;
   danger: DangerAssessment | null;
+  detection_evidence: DetectionEvidence;
   spread_predictions: SpreadPrediction[];
   targets: ResponseTarget[];
   stations: FireStation[];
   resources: FirefightingResource[];
+  station_summaries: StationSummary[];
   current_response_plan: CurrentResponsePlan | null;
 }

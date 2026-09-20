@@ -38,14 +38,15 @@ describe("FireEventMarker", () => {
   });
 
   it.each([
-    ["suspected", "var(--color-warning)"],
-    ["confirmed", "var(--color-danger)"],
-    ["resolved", "var(--color-success)"],
-    ["dismissed", "var(--color-text-muted)"],
-  ] as const)("colors the marker for status %s using the shared status tone", (status, expectedColor) => {
+    ["suspected", "rgb(255, 69, 0)"],
+    ["confirmed", "rgb(255, 34, 0)"],
+    ["resolved", "rgb(156, 163, 175)"],
+    ["dismissed", "rgb(156, 163, 175)"],
+  ] as const)("draws a fire glyph for status %s (fiery when active, muted when inactive)", (status, expectedColor) => {
     render(<FireEventMarker fireEvent={makeFireEvent({ status })} />);
 
-    const icon = screen.getByTestId("marker-icon").querySelector("span") as HTMLElement;
-    expect(icon.style.background).toBe(expectedColor);
+    const icon = screen.getByTestId("marker-icon").querySelector("[data-fire-icon]") as HTMLElement;
+    expect(icon.querySelector("svg")).not.toBeNull();
+    expect(icon.style.color).toBe(expectedColor);
   });
 });

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { CoordinateDisplay } from "../components/data/CoordinateDisplay";
 import { MetricCard } from "../components/data/MetricCard";
 import { TimestampDisplay } from "../components/data/TimestampDisplay";
+import { DetectionEvidencePanel } from "../components/fire-events/DetectionEvidencePanel";
 import { SEVERITY_STATUS_CAPTION } from "../components/fire-events/severityStatusCaption";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ErrorState } from "../components/feedback/ErrorState";
@@ -11,18 +12,22 @@ import { PageHeader } from "../components/layout/PageHeader";
 import { FireEventMarker } from "../components/map/FireEventMarker";
 import { LayerControls } from "../components/map/LayerControls";
 import { MapView } from "../components/map/MapView";
-import { OperationalLayer, RESOURCE_STATUS_LABEL } from "../components/map/OperationalLayer";
-import { ResponseTargetLayer, TARGET_TYPE_LABEL } from "../components/map/ResponseTargetLayer";
+import { ResponseTargetLayer } from "../components/map/ResponseTargetLayer";
 import { SpreadLayer } from "../components/map/SpreadLayer";
 import { StationLayer } from "../components/map/StationLayer";
 import type { LatLngPoint, LayerToggle, LayerVisibility } from "../components/map/mapTypes";
 import { SeverityBadge } from "../components/status/SeverityBadge";
 import { StatusBadge } from "../components/status/StatusBadge";
 import { useEventDetails } from "../hooks/useEventDetails";
-import type { DangerAssessment, EventDetailsResult } from "../types/eventDetails";
+import { useTargetLocationNames, type GeocodeTarget } from "../hooks/useTargetLocationNames";
+import type { DangerAssessment, EventDetailsResult, SpreadPrediction } from "../types/eventDetails";
 import "./EventDetailsPage.css";
 
-const PAGE_DESCRIPTION = "Full details and interactive map for this wildfire event.";
+// Shown while loading so the header never flashes the raw "Event #id" before the
+// location-based title resolves.
+const LOADING_TITLE = "Loading Event…";
+
+const NO_GEOCODE_TARGETS: GeocodeTarget[] = [];
 
 const DANGER_LEVEL_LABEL: Record<NonNullable<DangerAssessment["level"]>, string> = {
   low: "Low",
@@ -31,6 +36,63 @@ const DANGER_LEVEL_LABEL: Record<NonNullable<DangerAssessment["level"]>, string>
   very_high: "Very high",
   extreme: "Extreme",
 };
+
+const SPREAD_STATUS_LABEL: Record<SpreadPrediction["status"], string> = {
+  valid: "Valid",
+  insufficient_data: "Insufficient data",
+  inactive_event: "Inactive event",
+};
+
+/**
+ * Operational wording for one horizon's spread prediction. A "valid" run with
+ * no predicted cells means the model predicts no spread - shown as such
+ * rather than as a raw "Valid (0 predicted cells)". Other statuses keep
+ * their own (already readable) label.
+ */
+function describeSpread(prediction: SpreadPrediction): { value: string; helperText?: string } {
+  if (prediction.status !== "valid") {
+    return { value: SPREAD_STATUS_LABEL[prediction.status] };
+  }
+  const cells = prediction.cells.length;
+  if (cells === 0) {
+    return { value: "No spread predicted" };
+  }
+  return { value: "Spread predicted", helperText: `${cells} predicted cell${cells === 1 ? "" : "s"}` };
+}
+
+/** A valid run that predicts no spread: a negative/fallback state shown quietly. */
+function isNegativeSpread(prediction: SpreadPrediction): boolean {
+  return prediction.status === "valid" && prediction.cells.length === 0;
+}
+
+function ChevronLeftIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 3 5 8l5 5" />
+    </svg>
+  );
+}
+
+/** Subtle breadcrumb-style link above the title (replaces the boxed Back button). */
+function BackToActiveEvents() {
+  return (
+    <nav aria-label="Breadcrumb" className="event-details-page__breadcrumb-nav">
+      <Link to="/events" className="event-details-page__breadcrumb" aria-label="Back to Active Events">
+        <ChevronLeftIcon />
+        Active Events
+      </Link>
+    </nav>
+  );
+}
+
+function ClipboardIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="2.5" width="10" height="12" rx="1.5" />
+      <path d="M6 1.5h4v2H6zM5.5 7.5h5M5.5 10.5h5" />
+    </svg>
+  );
+}
 
 function parseFireEventId(raw: string | undefined): number {
   return raw ? Number(raw) : Number.NaN;
@@ -42,7 +104,6 @@ function buildLayerToggles(data: EventDetailsResult): LayerToggle[] {
     { id: "spread", label: "Predicted spread", count: spreadCellCount },
     { id: "targets", label: "Response targets", count: data.targets.length },
     { id: "stations", label: "Fire stations", count: data.stations.length },
-    { id: "resources", label: "Resources", count: data.resources.length },
   ];
 }
 
@@ -56,8 +117,21 @@ function buildBoundsPoints(data: EventDetailsResult): LatLngPoint[] {
   for (const target of data.targets) {
     points.push({ lat: target.latitude, lng: target.longitude });
   }
+  // Only stations actually serving this event: framing every known station
+  // would zoom the map out to the whole country.
+  const relevantStationIds = new Set<string>();
+  for (const summary of data.station_summaries) {
+    if (summary.current_global_plan_allocations.length > 0) {
+      relevantStationIds.add(summary.station_id);
+    }
+  }
+  for (const action of data.current_response_plan?.actions ?? []) {
+    relevantStationIds.add(action.station_id);
+  }
   for (const station of data.stations) {
-    points.push({ lat: station.latitude, lng: station.longitude });
+    if (relevantStationIds.has(station.station_id)) {
+      points.push({ lat: station.latitude, lng: station.longitude });
+    }
   }
   return points;
 }
@@ -73,7 +147,14 @@ function buildBoundsPoints(data: EventDetailsResult): LatLngPoint[] {
 export function EventDetailsPage() {
   const { fireEventId: fireEventIdParam } = useParams<{ fireEventId: string }>();
   const fireEventId = parseFireEventId(fireEventIdParam);
-  const { data, isLoading, isRefreshing, loadError, refreshError, notFound, refresh } = useEventDetails(fireEventId);
+  const { data, isLoading, loadError, notFound, refresh } = useEventDetails(fireEventId);
+  // Fallback place name from the fire's own coordinates (used when the event's
+  // news evidence has no location name).
+  const geocodedPlaces = useTargetLocationNames(
+    data
+      ? [{ id: data.fire_event.fire_event_id, latitude: data.fire_event.latitude, longitude: data.fire_event.longitude }]
+      : NO_GEOCODE_TARGETS,
+  );
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({});
 
   const boundsPoints = useMemo(() => (data ? buildBoundsPoints(data) : []), [data]);
@@ -83,18 +164,13 @@ export function EventDetailsPage() {
     setLayerVisibility((previous) => ({ ...previous, [layerId]: !(previous[layerId] ?? true) }));
   };
 
-  const backAction = (
-    <Link to="/events" className="event-details-page__action event-details-page__action--secondary">
-      Back to Active Events
-    </Link>
-  );
-
   const pageTitle = Number.isFinite(fireEventId) ? `Event #${fireEventId}` : "Event Details";
 
   if (notFound) {
     return (
       <section>
-        <PageHeader title={pageTitle} description={PAGE_DESCRIPTION} actions={backAction} />
+        <BackToActiveEvents />
+      <PageHeader title={pageTitle} />
         <ErrorState
           title="Event Not Found"
           message="No wildfire event exists with this ID. It may have been resolved, dismissed, or never existed."
@@ -106,7 +182,8 @@ export function EventDetailsPage() {
   if (isLoading) {
     return (
       <section>
-        <PageHeader title={pageTitle} description={PAGE_DESCRIPTION} actions={backAction} />
+        <BackToActiveEvents />
+      <PageHeader title={LOADING_TITLE} />
         <LoadingState message="Loading event details…" />
       </section>
     );
@@ -115,186 +192,180 @@ export function EventDetailsPage() {
   if (loadError || !data) {
     return (
       <section>
-        <PageHeader title={pageTitle} description={PAGE_DESCRIPTION} actions={backAction} />
+        <BackToActiveEvents />
+      <PageHeader title={pageTitle} />
         <ErrorState title="Unable to load event details." message="Please try again." onRetry={refresh} />
       </section>
     );
   }
 
-  const { fire_event: fireEvent, severity, danger, targets, resources, current_response_plan: currentPlan } = data;
+  const {
+    fire_event: fireEvent,
+    severity,
+    danger,
+    detection_evidence: detectionEvidence,
+    spread_predictions: spreadPredictions,
+    targets,
+    station_summaries: stationSummaries,
+    current_response_plan: currentPlan,
+  } = data;
   const confidencePercent = Math.round(fireEvent.detection_confidence * 100);
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
+  // Title: the event's persisted location name (news evidence), else a place
+  // reverse-geocoded from its coordinates, else a generic title with the id.
+  const placeName =
+    detectionEvidence.news.find((item) => item.location_name)?.location_name ??
+    geocodedPlaces[fireEvent.fire_event_id] ??
+    null;
+  const headerTitle = placeName ? `${placeName} Wildfire Event` : `Wildfire Event #${fireEvent.fire_event_id}`;
+  // A still-unverified event must not read as a confirmed critical one.
+  const isUnverifiedCritical = fireEvent.status === "suspected" && severity?.level === "critical";
 
   return (
-    <section>
-      <PageHeader
-        title={pageTitle}
-        description={PAGE_DESCRIPTION}
-        actions={
-          <>
-            {backAction}
-            {currentPlan ? (
-              <Link
-                to={`/events/${fireEvent.fire_event_id}/plan`}
-                className="event-details-page__action event-details-page__action--primary"
-              >
-                View Current Response Plan
-              </Link>
-            ) : null}
-            <button
-              type="button"
-              className="event-details-page__refresh"
-              onClick={refresh}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? "Refreshing…" : "Refresh"}
-            </button>
-          </>
-        }
-      />
+    <section className="event-details-page">
+      <BackToActiveEvents />
+      <PageHeader title={headerTitle} />
 
       <p className="event-details-page__as-of">
         Data as of: <TimestampDisplay value={data.as_of} />
+        {/* The title already carries the event id when no place name is known. */}
+        {placeName ? <span className="event-details-page__event-badge">Event #{fireEvent.fire_event_id}</span> : null}
       </p>
 
-      {refreshError ? (
-        <p role="alert" className="event-details-page__refresh-error">
-          {refreshError}
-        </p>
-      ) : null}
+      <div className="event-details-page__layout">
+        <section
+          aria-labelledby="map-heading"
+          className="event-details-page__section event-details-page__section--map"
+        >
+          <h2 id="map-heading" className="event-details-page__section-title">
+            Map
+          </h2>
+          <LayerControls layers={layerToggles} visibility={layerVisibility} onToggle={toggleLayer} />
+          <MapView boundsPoints={boundsPoints} ariaLabel={`Map of Event #${fireEvent.fire_event_id}`}>
+            <FireEventMarker fireEvent={fireEvent} />
+            {(layerVisibility.spread ?? true) ? <SpreadLayer predictions={spreadPredictions} /> : null}
+            {(layerVisibility.targets ?? true) ? <ResponseTargetLayer targets={targets} /> : null}
+            {(layerVisibility.stations ?? true) ? (
+              <StationLayer stations={data.stations} stationSummaries={stationSummaries} />
+            ) : null}
+          </MapView>
+        </section>
 
-      <section aria-labelledby="fire-event-heading" className="event-details-page__section">
-        <h2 id="fire-event-heading" className="event-details-page__section-title">
-          Fire Event
-        </h2>
-        <div className="event-details-page__metrics">
-          <MetricCard label="Fire Event ID" value={fireEvent.fire_event_id} />
-          <MetricCard label="Detection Confidence" value={`${confidencePercent}%`} />
-        </div>
-        <dl className="event-details-page__facts">
-          <div className="event-details-page__fact">
-            <dt>Status</dt>
-            <dd>
-              <StatusBadge status={fireEvent.status} />
-            </dd>
-          </div>
-          <div className="event-details-page__fact">
-            <dt>Coordinates</dt>
-            <dd>
-              <CoordinateDisplay latitude={fireEvent.latitude} longitude={fireEvent.longitude} />
-            </dd>
-          </div>
-          <div className="event-details-page__fact">
-            <dt>Detected</dt>
-            <dd>
-              <TimestampDisplay value={fireEvent.detected_at} />
-            </dd>
-          </div>
-          <div className="event-details-page__fact">
-            <dt>Updated</dt>
-            <dd>
-              <TimestampDisplay value={fireEvent.updated_at} />
-            </dd>
-          </div>
-        </dl>
-      </section>
-
-      <section aria-labelledby="assessments-heading" className="event-details-page__section">
-        <h2 id="assessments-heading" className="event-details-page__section-title">
-          Assessments
-        </h2>
-        <dl className="event-details-page__facts">
-          <div className="event-details-page__fact">
-            <dt>Severity</dt>
-            <dd>
-              <SeverityBadge level={severity?.level ?? null} />
-              {severity && severity.status === "valid" && severity.score !== null ? (
-                <span className="event-details-page__note">Severity score: {severity.score.toFixed(1)}</span>
+        <div className="event-details-page__cards">
+          <section aria-labelledby="fire-event-heading" className="event-details-page__section">
+            <div className="event-details-page__card-header">
+              <h2 id="fire-event-heading" className="event-details-page__section-title">
+                Fire Event
+              </h2>
+              {currentPlan ? (
+                <Link
+                  to={`/events/${fireEvent.fire_event_id}/plan`}
+                  className="event-details-page__action event-details-page__action--primary"
+                  aria-label="View Current Response Plan"
+                >
+                  <ClipboardIcon />
+                  Response Plan
+                </Link>
               ) : null}
-              {severityCaption ? <span className="event-details-page__note">{severityCaption}</span> : null}
-            </dd>
-          </div>
-          <div className="event-details-page__fact">
-            <dt>Danger</dt>
-            <dd>
-              {danger ? (
-                <>
-                  <span>{danger.level ? DANGER_LEVEL_LABEL[danger.level] : "Not available"}</span>
-                  {danger.score !== null ? (
-                    <span className="event-details-page__note">Danger score: {danger.score.toFixed(1)}</span>
-                  ) : null}
-                </>
+            </div>
+            <dl className="event-details-page__facts event-details-page__facts--grid">
+              <div className="event-details-page__fact">
+                <dt>Status</dt>
+                <dd>
+                  <StatusBadge status={fireEvent.status} />
+                </dd>
+              </div>
+              <div className="event-details-page__fact">
+                <dt>Coordinates</dt>
+                <dd>
+                  <CoordinateDisplay latitude={fireEvent.latitude} longitude={fireEvent.longitude} />
+                </dd>
+              </div>
+              <div className="event-details-page__fact">
+                <dt>Detected</dt>
+                <dd>
+                  <TimestampDisplay value={fireEvent.detected_at} />
+                </dd>
+              </div>
+              <div className="event-details-page__fact">
+                <dt>Confidence</dt>
+                <dd>{confidencePercent}%</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section aria-labelledby="assessments-heading" className="event-details-page__section">
+            <h2 id="assessments-heading" className="event-details-page__section-title">
+              Assessments
+            </h2>
+            <dl className="event-details-page__facts">
+              <div className="event-details-page__fact">
+                <dt>Severity</dt>
+                <dd>
+                  {isUnverifiedCritical ? (
+                    <>
+                      <span className="badge badge--warning">Pending verification / Critical</span>
+                      <span className="event-details-page__note">
+                        Severity is critical, but this event is still suspected and not yet verified.
+                      </span>
+                    </>
+                  ) : (
+                    <SeverityBadge level={severity?.level ?? null} />
+                  )}
+                  {severityCaption ? <span className="event-details-page__note">{severityCaption}</span> : null}
+                </dd>
+              </div>
+              {danger && (danger.level !== null || danger.score !== null) ? (
+                <div className="event-details-page__fact">
+                  <dt>Danger</dt>
+                  <dd>
+                    <span>{danger.level ? DANGER_LEVEL_LABEL[danger.level] : "Not available"}</span>
+                    {danger.score !== null ? (
+                      <span className="event-details-page__note">Danger score: {danger.score.toFixed(1)}</span>
+                    ) : null}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
+
+          <div className="event-details-page__pair">
+            <section aria-labelledby="detection-evidence-heading" className="event-details-page__section">
+              <h2 id="detection-evidence-heading" className="event-details-page__section-title">
+                Detection Evidence
+              </h2>
+              <DetectionEvidencePanel evidence={detectionEvidence} />
+            </section>
+
+            <section aria-labelledby="spread-heading" className="event-details-page__section">
+              <h2 id="spread-heading" className="event-details-page__section-title">
+                Spread Prediction
+              </h2>
+              {spreadPredictions.length === 0 ? (
+                <EmptyState
+                  title="No spread prediction"
+                  message="No spread prediction has been generated for this event yet."
+                />
               ) : (
-                <span className="event-details-page__not-available">Not available</span>
+                <div className="event-details-page__metrics event-details-page__metrics--stacked">
+                  {spreadPredictions.map((prediction) => (
+                    <div
+                      key={prediction.horizon_minutes}
+                      className={
+                        isNegativeSpread(prediction)
+                          ? "event-details-page__spread-horizon event-details-page__spread-horizon--empty"
+                          : "event-details-page__spread-horizon"
+                      }
+                    >
+                      <MetricCard label={`${prediction.horizon_minutes} min horizon`} {...describeSpread(prediction)} />
+                    </div>
+                  ))}
+                </div>
               )}
-            </dd>
+            </section>
           </div>
-        </dl>
-      </section>
-
-      <section aria-labelledby="targets-heading" className="event-details-page__section">
-        <h2 id="targets-heading" className="event-details-page__section-title">
-          Response Targets
-        </h2>
-        {targets.length === 0 ? (
-          <EmptyState
-            title="No response targets"
-            message="No response targets have been generated for this event yet."
-          />
-        ) : (
-          <ul className="event-details-page__list">
-            {targets.map((target) => (
-              <li key={target.target_order} className="event-details-page__list-item">
-                <span className="event-details-page__list-item-title">
-                  {TARGET_TYPE_LABEL[target.target_type] ?? target.target_type}
-                </span>
-                <span className="event-details-page__note">Priority: {target.priority_score.toFixed(2)}</span>
-                {target.prediction_horizon_minutes !== null ? (
-                  <span className="event-details-page__note">
-                    Horizon: {target.prediction_horizon_minutes} min
-                  </span>
-                ) : null}
-                <CoordinateDisplay latitude={target.latitude} longitude={target.longitude} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="resources-heading" className="event-details-page__section">
-        <h2 id="resources-heading" className="event-details-page__section-title">
-          Firefighting Resources
-        </h2>
-        {resources.length === 0 ? (
-          <EmptyState title="No firefighting resources" message="No firefighting resources are on record." />
-        ) : (
-          <ul className="event-details-page__list">
-            {resources.map((resource) => (
-              <li key={resource.resource_id} className="event-details-page__list-item">
-                <span className="event-details-page__list-item-title">{resource.resource_id}</span>
-                <span className="event-details-page__note">Station: {resource.station_id}</span>
-                <span className="event-details-page__note">{RESOURCE_STATUS_LABEL[resource.status]}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-labelledby="map-heading" className="event-details-page__section">
-        <h2 id="map-heading" className="event-details-page__section-title">
-          Map
-        </h2>
-        <LayerControls layers={layerToggles} visibility={layerVisibility} onToggle={toggleLayer} />
-        <MapView boundsPoints={boundsPoints} ariaLabel={`Map of Event #${fireEvent.fire_event_id}`}>
-          <FireEventMarker fireEvent={fireEvent} />
-          {(layerVisibility.spread ?? true) ? <SpreadLayer predictions={data.spread_predictions} /> : null}
-          {(layerVisibility.targets ?? true) ? <ResponseTargetLayer targets={targets} /> : null}
-          {(layerVisibility.stations ?? true) ? <StationLayer stations={data.stations} /> : null}
-          {(layerVisibility.resources ?? true) ? (
-            <OperationalLayer resources={resources} stations={data.stations} />
-          ) : null}
-        </MapView>
-      </section>
+        </div>
+      </div>
     </section>
   );
 }

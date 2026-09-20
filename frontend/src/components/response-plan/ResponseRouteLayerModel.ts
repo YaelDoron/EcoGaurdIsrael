@@ -1,4 +1,4 @@
-import type { Coordinate, ResponsePlanAction, ResponsePlanRoute } from "../../types/responsePlan";
+import type { Coordinate, ResponsePlanAction, ResponsePlanRoute, ResponseTargetType } from "../../types/responsePlan";
 
 /**
  * Pure, map-framework-agnostic data model for the Response Plan map/route
@@ -39,15 +39,24 @@ export interface ResponseRouteFeature {
 }
 
 export interface ResponseOriginMarker {
+  /** Key of the first action dispatched from this origin (used as the React key). */
   actionKey: string;
+  /** The first resource dispatched from this origin. */
   resourceId: string;
+  /** Every resource dispatched from this origin, in backend order (one marker per origin, not per truck). */
+  resourceIds: string[];
+  /** The action's persisted `resource.station_name`; `null` when the station no longer resolves. */
+  stationName: string | null;
   coordinate: Coordinate;
+  /** True when any action dispatched from this origin is selected. */
   isSelected: boolean;
 }
 
 export interface ResponseTargetMarker {
   actionKey: string;
   targetId: number;
+  /** The target's persisted `target_type`, or `null` when it no longer resolves. */
+  targetType: ResponseTargetType | null;
   coordinate: Coordinate;
   isSelected: boolean;
 }
@@ -83,24 +92,39 @@ export function buildResponseRouteLayer(
   const routes: ResponseRouteFeature[] = [];
   const originMarkers: ResponseOriginMarker[] = [];
   const targetMarkers: ResponseTargetMarker[] = [];
+  const originIndex = new Map<string, ResponseOriginMarker>();
 
   for (const action of actions) {
     const actionKey = getResponseActionKey(action);
     const isSelected = actionKey === selectedActionKey;
 
     if (action.resource.origin !== null) {
-      originMarkers.push({
-        actionKey,
-        resourceId: action.resource.resource_id,
-        coordinate: action.resource.origin,
-        isSelected,
-      });
+      // All trucks leaving the same station share one origin marker.
+      const { latitude, longitude } = action.resource.origin;
+      const originKey = `${action.resource.station_name ?? ""}|${latitude},${longitude}`;
+      const existing = originIndex.get(originKey);
+      if (existing) {
+        existing.resourceIds.push(action.resource.resource_id);
+        existing.isSelected = existing.isSelected || isSelected;
+      } else {
+        const marker: ResponseOriginMarker = {
+          actionKey,
+          resourceId: action.resource.resource_id,
+          resourceIds: [action.resource.resource_id],
+          stationName: action.resource.station_name,
+          coordinate: action.resource.origin,
+          isSelected,
+        };
+        originIndex.set(originKey, marker);
+        originMarkers.push(marker);
+      }
     }
 
     if (action.target.latitude !== null && action.target.longitude !== null) {
       targetMarkers.push({
         actionKey,
         targetId: action.target.response_target_id,
+        targetType: action.target.target_type,
         coordinate: { latitude: action.target.latitude, longitude: action.target.longitude },
         isSelected,
       });

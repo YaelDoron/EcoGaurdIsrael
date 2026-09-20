@@ -1,7 +1,7 @@
 import type { ResponsePlanTarget } from "../../types/responsePlan";
 import { CoordinateDisplay } from "../data/CoordinateDisplay";
 import { EmptyState } from "../feedback/EmptyState";
-import { NOT_AVAILABLE_LABEL } from "./formatting";
+import { formatPriority, NOT_AVAILABLE_LABEL } from "./formatting";
 import { TARGET_TYPE_LABELS } from "./presentation";
 import "./ResponsePlanSummary.css";
 import "./UncoveredTargets.css";
@@ -44,7 +44,7 @@ export function UncoveredTargets({ targets }: UncoveredTargetsProps) {
                 </div>
                 <div className="uncovered-target-list__row">
                   <dt>Priority</dt>
-                  <dd>{target.priority_score !== null ? target.priority_score : NOT_AVAILABLE_LABEL}</dd>
+                  <dd>{target.priority_score !== null ? formatPriority(target.priority_score) : NOT_AVAILABLE_LABEL}</dd>
                 </div>
                 <div className="uncovered-target-list__row">
                   <dt>Coordinates</dt>

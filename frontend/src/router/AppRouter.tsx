@@ -4,6 +4,7 @@ import { ActiveWildfiresPage } from "../pages/ActiveWildfiresPage";
 import { EventDetailsPage } from "../pages/EventDetailsPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ResponsePlanPage } from "../pages/ResponsePlanPage";
+import { GlobalResponsePlanPage } from '../pages/GlobalResponsePlanPage';
 
 /**
  * The application's route table. Generic on purpose (Task 15): it only
@@ -24,6 +25,7 @@ export function AppRouter() {
         <Route path="/events/:fireEventId/plan" element={<ResponsePlanPage />} />
         <Route path="/plans/:planId" element={<ResponsePlanPage />} />
         <Route path="*" element={<NotFoundPage />} />
+        <Route path="/response-plan" element={<GlobalResponsePlanPage />} />
       </Route>
     </Routes>
   );

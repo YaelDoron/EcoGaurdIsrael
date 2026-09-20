@@ -1,0 +1,209 @@
+.response-action-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.response-action-group {
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.response-action-group__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+}
+
+.response-action-group__title {
+  margin: 0;
+  font-size: 1rem;
+  color: #c2410c;
+}
+
+.response-action-group__meta {
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.response-action-group__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.response-action-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-left: 4px solid transparent;
+}
+
+.response-action-row + .response-action-row {
+  border-top: 1px solid var(--color-border);
+}
+
+.response-action-row--selected {
+  border-left-color: var(--color-focus-ring);
+  background: #fdf1ef;
+}
+
+.response-action-row__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The whole header row is the expand/collapse target (no separate arrow). */
+.response-action-row__header {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "index main"
+    "index stats";
+  align-items: center;
+  gap: var(--space-1) var(--space-3);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.response-action-row__header:hover .response-action-row__station {
+  text-decoration: underline;
+}
+
+.response-action-row__index {
+  grid-area: index;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--color-text);
+  color: var(--color-surface);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.response-action-row--selected .response-action-row__index {
+  background: var(--color-focus-ring);
+}
+
+.response-action-row__main {
+  grid-area: main;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Origin station is the primary line; the truck id is a quiet secondary line. */
+.response-action-row__station {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.response-action-row__station-label {
+  font-weight: 400;
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.response-action-row__station-name {
+  font-weight: 700;
+}
+
+.response-action-row__trucks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* Truck ids: small quiet pills under the station name. */
+.response-action-row__truck {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.response-action-row__stats {
+  grid-area: stats;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.response-action-row__chip {
+  padding: 2px var(--space-3);
+  background: var(--color-background);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+}
+
+.response-action-group__priority {
+  font-weight: 700;
+}
+
+.response-action-group__priority--high {
+  color: var(--color-danger);
+}
+
+.response-action-group__priority--medium {
+  color: #d97706;
+}
+
+.response-action-group__priority--low {
+  color: var(--color-success);
+}
+
+
+.response-action-group__meta,
+.response-action-row__main {
+  overflow-wrap: anywhere;
+}
+
+.response-action-row__detail {
+  margin-top: var(--space-1);
+  padding: var(--space-3);
+  background: var(--color-background);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+/* Station phone: muted, small, tap-to-call. Indented to align under the station name. */
+.response-action-row__phone {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  align-self: flex-start;
+  margin-left: calc(24px + var(--space-3));
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+}
+
+.response-action-row__phone:hover {
+  color: var(--color-text);
+  text-decoration: underline;
+}

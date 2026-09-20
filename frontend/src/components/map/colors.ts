@@ -15,7 +15,16 @@ export const TONE_MAP_COLOR: Record<PresentationTone, string> = {
   critical: "var(--color-danger)",
 };
 
-export const STATION_MARKER_COLOR = "var(--color-focus-ring)";
+// Default (unallocated) fire stations are green.
+export const STATION_MARKER_COLOR = "var(--color-success)";
+// A station actively contributing trucks to the current response plan: deep
+// blue "action" color. Deliberately NOT red - red is reserved for active fires.
+export const STATION_ALLOCATED_COLOR = "#1e3a8a";
+
+// Wildfire flame colors: vibrant orange-red so an active fire stands out.
+export const FIRE_ICON_COLOR_ACTIVE = "#ff4500";
+export const FIRE_ICON_COLOR_CONFIRMED = "#ff2200";
+export const FIRE_ICON_COLOR_INACTIVE = "#9ca3af";
 
 const SPREAD_RISK_LOW_RGB = { r: 253, g: 230, b: 138 }; // matches badge warning background (#fde68a)
 const SPREAD_RISK_HIGH_RGB = { r: 185, g: 28, b: 28 }; // matches --color-danger (#b91c1c)

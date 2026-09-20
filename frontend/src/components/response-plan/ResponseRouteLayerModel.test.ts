@@ -34,7 +34,7 @@ function makeAction(overrides: Partial<ResponsePlanAction> = {}): ResponsePlanAc
 
 describe("getResponseActionKey", () => {
   it("uses the resource_id as the stable key", () => {
-    expect(getResponseActionKey(makeAction({ resource: { ...makeAction().resource, resource_id: "engine-9" } }))).toBe(
+    expect(getResponseActionKey(makeAction({ resource: { ...makeAction().resource, resource_id: "engine-9", station_id: "station-engine-9", station_name: "engine-9" } }))).toBe(
       "engine-9",
     );
   });
@@ -189,8 +189,8 @@ describe("buildResponseRouteLayer", () => {
   });
 
   it("marks only the selected action's route/markers as selected", () => {
-    const first = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-1" } });
-    const second = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-2" } });
+    const first = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-1", station_id: "station-engine-1", station_name: "engine-1" } });
+    const second = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-2", station_id: "station-engine-2", station_name: "engine-2" } });
 
     const layer = buildResponseRouteLayer([first, second], "engine-2");
 
@@ -200,9 +200,21 @@ describe("buildResponseRouteLayer", () => {
     expect(layer.originMarkers.find((m) => m.resourceId === "engine-2")?.isSelected).toBe(true);
   });
 
-  it("does not reorder actions based on selection", () => {
+  it("merges trucks from the same origin into one marker listing every resource", () => {
     const first = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-1" } });
     const second = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-2" } });
+
+    const layer = buildResponseRouteLayer([first, second], "engine-2");
+
+    expect(layer.originMarkers).toHaveLength(1);
+    expect(layer.originMarkers[0].resourceIds).toEqual(["engine-1", "engine-2"]);
+    expect(layer.originMarkers[0].isSelected).toBe(true);
+    expect(layer.routes).toHaveLength(2);
+  });
+
+  it("does not reorder actions based on selection", () => {
+    const first = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-1", station_id: "station-engine-1", station_name: "engine-1" } });
+    const second = makeAction({ resource: { ...makeAction().resource, resource_id: "engine-2", station_id: "station-engine-2", station_name: "engine-2" } });
 
     const layer = buildResponseRouteLayer([first, second], "engine-1");
 

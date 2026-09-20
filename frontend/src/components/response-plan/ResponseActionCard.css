@@ -4,19 +4,23 @@
   gap: var(--space-3);
 }
 
+/* Premium card: white, slate border, rounded, soft shadow. */
 .response-action-card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-4);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  background: #ffffff;
+  border: 1px solid #e2e8f0; /* slate-200 */
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08); /* shadow-sm */
 }
 
+/* The highlighted route: accent border + tint, matching its thick map line. */
 .response-action-card--selected {
-  border-color: var(--color-text);
-  box-shadow: 0 0 0 1px var(--color-text);
+  border-color: var(--color-focus-ring);
+  background: #fdf1ef;
+  box-shadow: 0 2px 8px rgba(192, 57, 43, 0.2);
 }
 
 .response-action-card__select {
@@ -32,80 +36,85 @@
 }
 
 .response-action-card__select[aria-pressed="true"] {
-  background: var(--color-text);
-  color: var(--color-surface);
-  border-color: var(--color-text);
+  background: var(--color-focus-ring);
+  color: #ffffff;
+  border-color: var(--color-focus-ring);
 }
 
-.response-action-card__flow {
+/* A ---> B journey on one line; wraps on narrow widths. */
+.response-action-card__journey {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-3);
 }
 
-.response-action-card__party {
-  flex: 1;
+.response-action-card__origin,
+.response-action-card__destination {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
 }
 
-.response-action-card__party-title {
-  margin: 0 0 var(--space-2);
+.response-action-card__station {
+  font-weight: 700;
+}
+
+.response-action-card__label {
+  font-weight: 400;
   font-size: 0.8125rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+.response-action-card__truck {
+  font-size: 0.75rem;
   color: var(--color-text-muted);
 }
 
 .response-action-card__arrow {
   flex-shrink: 0;
   color: var(--color-text-muted);
-  font-size: 1.25rem;
+  font-size: 1.125rem;
 }
 
-.response-action-card__details,
-.response-action-card__route {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.response-action-card__route {
-  border-top: 1px solid var(--color-border);
-  padding-top: var(--space-3);
-  flex-direction: row;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-}
-
-.response-action-card__row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-}
-
-.response-action-card__row dt {
-  color: var(--color-text-muted);
+.response-action-card__target {
+  align-self: flex-start;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--color-background);
   font-size: 0.8125rem;
+  font-weight: 600;
 }
 
-.response-action-card__row dd {
-  margin: 0;
+.response-action-card__target--active_fire {
+  background: #fdebd0;
+  color: #d35400;
 }
 
-.response-action-card__muted {
-  color: var(--color-text-muted);
+.response-action-card__target--predicted_risk {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.response-action-card__stats {
   font-size: 0.8125rem;
+  color: var(--color-text-muted);
 }
 
-@media (max-width: 640px) {
-  .response-action-card__flow {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .response-action-card__arrow {
-    align-self: center;
-    transform: rotate(90deg);
-  }
+/* ETA is the number people scan for - make it pop a little. */
+.response-action-card__eta {
+  color: var(--color-text);
+  font-size: 0.9375rem;
 }
+
+.response-action-card__route-status {
+  align-self: flex-start;
+  padding: 1px var(--space-3);
+  border-radius: 999px;
+  background: var(--color-background);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-danger);
+}
+

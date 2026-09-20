@@ -28,10 +28,12 @@ function makeResult(overrides: Partial<EventDetailsResult> = {}): EventDetailsRe
     },
     severity: null,
     danger: null,
+    detection_evidence: { satellite: [], news: [] },
     spread_predictions: [],
     targets: [],
     stations: [],
     resources: [],
+    station_summaries: [],
     current_response_plan: null,
     ...overrides,
   };

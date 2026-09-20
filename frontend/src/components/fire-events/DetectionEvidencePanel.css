@@ -1,0 +1,104 @@
+.detection-evidence-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.detection-evidence-panel__group-title {
+  font-size: 0.9375rem;
+  margin-bottom: var(--space-3);
+}
+
+.detection-evidence-panel__source {
+  margin: calc(var(--space-2) * -1) 0 var(--space-3);
+  font-size: 0.8125rem;
+  color: var(--color-text-muted);
+}
+
+.detection-evidence-panel__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.detection-evidence-panel__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-md);
+}
+
+.detection-evidence-panel__card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.detection-evidence-panel__card-title {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.detection-evidence-panel__summary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+}
+
+.detection-evidence-panel__facts {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.detection-evidence-panel__fact {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: 0.8125rem;
+}
+
+.detection-evidence-panel__fact dt {
+  color: var(--color-text-muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-caps);
+}
+
+.detection-evidence-panel__fact dd {
+  margin: 0;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: right;
+}
+
+/* Secondary sensor details: small, muted, inline. */
+.detection-evidence-panel__pills {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.detection-evidence-panel__pill {
+  padding: 1px var(--space-2);
+  border-radius: 999px;
+  background: var(--color-background);
+  border: 1px solid var(--color-border);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.detection-evidence-panel__pill-label {
+  margin-right: var(--space-1);
+  opacity: 0.8;
+}

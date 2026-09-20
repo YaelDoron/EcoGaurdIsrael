@@ -264,4 +264,13 @@ describe("ActiveWildfiresPage", () => {
     const time = document.querySelector("time");
     expect(time).toHaveAttribute("dateTime", "2026-09-17T14:00:00Z");
   });
+
+  it("offers a prominent Global Response Plan link to /response-plan with no focus filter", async () => {
+    getActiveFireEventsMock.mockResolvedValue({ as_of: "2026-09-17T14:00:00Z", items: [] });
+
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "Global Response Plan" });
+    expect(link).toHaveAttribute("href", "/response-plan");
+  });
 });

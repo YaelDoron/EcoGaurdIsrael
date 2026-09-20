@@ -51,21 +51,21 @@ describe("AppRouter", () => {
   it("renders the Event Details page at /events/:fireEventId", () => {
     renderAt("/events/123");
 
-    expect(screen.getByRole("heading", { name: "Event #123" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Loading Event…" })).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/loading/i);
   });
 
   it("renders ResponsePlanPage at /events/:fireEventId/plan", () => {
     renderAt("/events/123/plan");
 
-    expect(screen.getByRole("heading", { name: "Response Plan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Loading Response Plan…" })).toBeInTheDocument();
     expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(123);
   });
 
   it("renders ResponsePlanPage at /plans/:planId", () => {
     renderAt("/plans/42");
 
-    expect(screen.getByRole("heading", { name: "Response Plan" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Loading Response Plan…" })).toBeInTheDocument();
     expect(getResponsePlanByIdMock).toHaveBeenCalledWith(42);
   });
 

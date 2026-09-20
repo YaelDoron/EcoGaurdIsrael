@@ -115,6 +115,41 @@ class ResponseTargetResponse(BaseModel):
     prediction_horizon_minutes: Optional[int]
 
 
+class SatelliteEvidenceResponse(BaseModel):
+    """A persisted satellite hotspot detection cited as evidence for the FireEvent."""
+
+    id: int
+    detected_at: datetime
+    latitude: float
+    longitude: float
+    confidence: Optional[str]
+    frp: Optional[float]
+    brightness: Optional[float]
+    satellite: Optional[str]
+    instrument: Optional[str]
+    day_night: Optional[str]
+
+
+class NewsEvidenceResponse(BaseModel):
+    """A persisted wildfire news report cited as evidence for the FireEvent."""
+
+    id: int
+    title: str
+    summary: str
+    source: str
+    observed_at: datetime
+    location_name: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+
+
+class DetectionEvidenceResponse(BaseModel):
+    """The direct evidence (satellite + news) that supports the FireEvent's detection."""
+
+    satellite: list[SatelliteEvidenceResponse]
+    news: list[NewsEvidenceResponse]
+
+
 class FireStationResponse(BaseModel):
     """A known fire station, for map display."""
 
@@ -132,6 +167,25 @@ class FirefightingResourceResponse(BaseModel):
     resource_id: str
     station_id: str
     status: ResourceStatus
+
+
+class StationAllocationResponse(BaseModel):
+    """One resource from a station allocated to the event's current response plan."""
+
+    resource_id: str
+    fire_event_id: int
+    response_plan_id: int
+
+
+class StationSummaryResponse(BaseModel):
+    """Per-station resource counts and current-plan allocations, for the station popup."""
+
+    station_id: str
+    total_resources: int
+    available: int
+    assigned_status: int
+    unavailable: int
+    current_global_plan_allocations: list[StationAllocationResponse]
 
 
 class ResponseActionResponse(BaseModel):
@@ -179,8 +233,10 @@ class EventDetailsResult(BaseModel):
     fire_event: FireEventSummaryResponse
     severity: Optional[SeverityAssessmentResponse]
     danger: Optional[DangerAssessmentResponse]
+    detection_evidence: DetectionEvidenceResponse
     spread_predictions: list[SpreadPredictionResponse]
     targets: list[ResponseTargetResponse]
     stations: list[FireStationResponse]
     resources: list[FirefightingResourceResponse]
+    station_summaries: list[StationSummaryResponse]
     current_response_plan: Optional[CurrentResponsePlanResponse]

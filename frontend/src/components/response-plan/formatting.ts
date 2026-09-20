@@ -72,3 +72,12 @@ export function formatDistanceMeters(value: number): string {
   }
   return `${(value / 1000).toFixed(1)} km`;
 }
+
+/**
+ * `priority_score` is a persisted value that can carry long floating-point
+ * tails (e.g. 179.5600000007). This only rounds for display, to at most two
+ * decimal places, dropping trailing zeros - it never recomputes priority.
+ */
+export function formatPriority(value: number): string {
+  return String(Number(value.toFixed(2)));
+}

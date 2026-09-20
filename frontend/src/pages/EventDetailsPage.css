@@ -1,26 +1,63 @@
-.event-details-page__action {
-  padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  font-weight: 600;
-  text-decoration: none;
+/* Breadcrumb-style back link: muted text, no box. */
+.event-details-page__breadcrumb-nav {
+  margin-bottom: var(--space-2);
+}
+
+.event-details-page__breadcrumb {
   display: inline-flex;
   align-items: center;
+  gap: var(--space-1);
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  transition: color 0.15s ease;
 }
 
-.event-details-page__action--secondary {
-  background: var(--color-surface);
+.event-details-page__breadcrumb:hover {
   color: var(--color-text);
+  text-decoration: underline;
 }
 
-.event-details-page__action--secondary:hover {
-  background: var(--color-background);
+.event-details-page__breadcrumb svg {
+  transition: transform 0.15s ease;
+}
+
+.event-details-page__breadcrumb:hover svg {
+  transform: translateX(-2px);
+}
+
+/* Primary call to action: a rounded pill with a soft shadow. */
+.event-details-page__action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-5);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.15), 0 2px 6px rgba(15, 23, 42, 0.1);
+  transition: box-shadow 0.15s ease, transform 0.15s ease, filter 0.15s ease;
+}
+
+.event-details-page__action:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.18);
+}
+
+.event-details-page__action svg {
+  flex-shrink: 0;
 }
 
 .event-details-page__action--primary {
   background: var(--color-focus-ring);
   border-color: var(--color-focus-ring);
   color: #ffffff;
+}
+
+.event-details-page__action--primary:hover {
+  filter: brightness(1.08);
 }
 
 .event-details-page__refresh {
@@ -61,6 +98,106 @@
   margin-bottom: var(--space-5);
 }
 
+.event-details-page__section--map {
+  margin-bottom: var(--space-6);
+}
+
+/*
+ * The map fills whatever height the row ends up with (the taller of the map's
+ * minimum and the card column), so the map's bottom edge is always flush with
+ * the right column's. MapView's own default height (480px) is untouched for
+ * other pages.
+ */
+.event-details-page__section--map {
+  display: flex;
+  flex-direction: column;
+}
+
+.event-details-page__section--map .map-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  border: 1px solid var(--color-card-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+.event-details-page__section--map .map-view__container {
+  flex: 1;
+  height: auto;
+  min-height: 520px;
+}
+
+/* Map on the left, a vertical column of cards on the right. Stacks (map
+   first) only on genuinely narrow screens - the app shell already takes
+   horizontal space, so the breakpoint is kept low. */
+.event-details-page__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(420px, 1fr);
+  gap: var(--space-5);
+  align-items: stretch;
+}
+
+.event-details-page__layout > .event-details-page__section {
+  margin-bottom: 0;
+}
+
+.event-details-page__cards {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-self: stretch;
+  height: 100%;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+@media (max-width: 800px) {
+  .event-details-page__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .event-details-page__section--map .map-view,
+  .event-details-page__section--map .map-view__container {
+    min-height: 400px;
+  }
+}
+
+/* Floating cards: soft shadow and rounded corners instead of a hard border.
+   They share the column's spare height so its bottom edge lines up with the map. */
+.event-details-page__cards .event-details-page__section {
+  flex: 1 1 auto;
+  margin-bottom: 0;
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid #d1d5db; /* gray-300 */
+  border-radius: 8px;
+  box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.14), 0 2px 4px -2px rgba(15, 23, 42, 0.12); /* shadow-md */
+}
+
+.event-details-page__cards .event-details-page__section-title {
+  font-size: 1rem;
+}
+
+/* Inside a card the facts stack in one column, without a nested box. */
+.event-details-page__cards .event-details-page__facts {
+  grid-template-columns: 1fr;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+}
+
+.event-details-page__cards .event-details-page__metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.event-details-page__cards .metric-card__value {
+  font-size: 1.25rem;
+}
+
+
 .event-details-page__section-title {
   font-size: 1.125rem;
   margin-bottom: var(--space-3);
@@ -92,7 +229,10 @@
 
 .event-details-page__fact dt {
   color: var(--color-text-muted);
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-caps);
 }
 
 .event-details-page__fact dd {
@@ -100,6 +240,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  font-size: 0.9375rem;
+  font-weight: 600;
 }
 
 .event-details-page__note {
@@ -127,11 +269,116 @@
   gap: 2px;
   padding: var(--space-3);
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
   border-radius: var(--radius-md);
 }
 
 .event-details-page__list-item-title {
   font-weight: 600;
   color: var(--color-text);
+}
+
+/* Detection Evidence and Spread Prediction share one row in the right-hand
+   column; Spread sits to the right, narrower. */
+.event-details-page__pair {
+  flex: 1 1 auto; /* the bottom row grows to reach the column's bottom edge */
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(150px, 1fr);
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.event-details-page__pair .event-details-page__section {
+  margin-bottom: 0;
+}
+
+@media (max-width: 1100px) {
+  .event-details-page__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Horizon cards stack vertically, compact. */
+.event-details-page__cards .event-details-page__metrics--stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-2);
+}
+
+.event-details-page__metrics--stacked .metric-card {
+  padding: var(--space-3);
+}
+
+.event-details-page__event-badge {
+  margin-left: var(--space-2);
+  padding: 1px var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  font-size: 0.75rem;
+}
+
+/* Compact 2-column facts inside the Fire Event card. */
+.event-details-page__cards .event-details-page__facts--grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2) var(--space-4);
+}
+
+/* Inner tiles (metric cards, evidence cards): no dark outline, just a faint edge. */
+.event-details-page__cards .metric-card,
+.event-details-page__cards .detection-evidence-panel__card,
+.event-details-page__cards .feedback-state {
+  border-color: #eef0f3;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+/* Status / severity as strong inline pills on this page. */
+.event-details-page .badge {
+  border-radius: 999px;
+  padding: 2px var(--space-3);
+}
+
+.event-details-page .badge--warning {
+  background: #f97316;
+  border-color: #f97316;
+  color: #ffffff;
+}
+
+.event-details-page .badge--critical {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+/* "No spread predicted" is a negative state: smaller and muted. */
+.event-details-page__spread-horizon--empty .metric-card__value {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+/* Fire Event card header: title on one side, the primary CTA pill on the other,
+   so the main action is visible without scrolling. */
+.event-details-page__card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.event-details-page__card-header .event-details-page__section-title {
+  margin-bottom: 0;
+}
+
+/* Status / severity badges hug their text instead of stretching across the row. */
+.event-details-page__fact dd {
+  align-items: flex-start;
+}
+
+.event-details-page .badge {
+  display: inline-flex;
+  width: fit-content;
+  align-self: flex-start;
 }

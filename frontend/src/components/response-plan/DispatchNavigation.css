@@ -1,0 +1,54 @@
+.dispatch-navigation__title {
+  margin: 0 0 var(--space-1);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-caps);
+  color: var(--color-text-muted);
+}
+
+.dispatch-navigation__prompt,
+.dispatch-navigation__note {
+  margin: 0 0 var(--space-2);
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.dispatch-navigation__note {
+  color: var(--color-text-muted);
+  margin-bottom: 0;
+}
+
+.dispatch-navigation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.dispatch-navigation__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.dispatch-navigation__button:hover {
+  background: var(--color-background);
+  border-color: var(--color-text-muted);
+}
+
+.dispatch-navigation__button--waze {
+  border-color: #33ccff;
+  color: #0b6f94;
+}
+
+.dispatch-navigation__button--google {
+  border-color: #34a853;
+  color: #1e7a38;
+}

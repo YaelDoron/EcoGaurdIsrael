@@ -1,0 +1,120 @@
+.event-group-list {
+  margin-bottom: var(--space-5);
+}
+
+.event-group-list__title {
+  font-size: 1.125rem;
+  margin-bottom: var(--space-3);
+}
+
+.event-group-list__groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.event-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  border: 1px solid var(--color-card-border);
+  box-shadow: var(--shadow-card);
+  border-radius: var(--radius-md);
+}
+
+.event-group--focused {
+  border-color: var(--color-focus-ring);
+  box-shadow: 0 0 0 1px var(--color-focus-ring);
+}
+
+.event-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.event-group__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.event-group__focus-button {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-weight: 600;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.event-group__focus-button:hover {
+  background: var(--color-surface);
+  border-color: var(--color-text-muted);
+}
+
+.event-group__focus-button[aria-pressed="true"] {
+  background: var(--color-focus-ring);
+  border-color: var(--color-focus-ring);
+  color: #ffffff;
+}
+
+.event-group__facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+
+.event-group__fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.event-group__fact dt {
+  color: var(--color-text-muted);
+  font-size: 0.8125rem;
+}
+
+.event-group__fact dd {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.event-group__note {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.event-group__resources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.event-group__resources strong {
+  color: var(--color-text);
+}
+
+.event-group__metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3);
+}
+
+.event-group__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}

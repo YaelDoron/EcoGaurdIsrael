@@ -5,6 +5,7 @@ import { LoadingState } from "../components/feedback/LoadingState";
 import { MetricCard } from "../components/data/MetricCard";
 import { TimestampDisplay } from "../components/data/TimestampDisplay";
 import { PageHeader } from "../components/layout/PageHeader";
+import { Link } from "react-router-dom";
 import { useActiveFireEvents } from "../hooks/useActiveFireEvents";
 import "./ActiveWildfiresPage.css";
 
@@ -48,14 +49,19 @@ export function ActiveWildfiresPage() {
         title={PAGE_TITLE}
         description={PAGE_DESCRIPTION}
         actions={
-          <button
-            type="button"
-            className="active-wildfires-page__refresh"
-            onClick={refresh}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? "Refreshing…" : "Refresh"}
-          </button>
+          <>
+            <Link to="/response-plan" className="active-wildfires-page__global-plan">
+              Global Response Plan
+            </Link>
+            <button
+              type="button"
+              className="active-wildfires-page__refresh"
+              onClick={refresh}
+              disabled={isRefreshing}
+            >
+              {isRefreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </>
         }
       />
 
