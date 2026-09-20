@@ -80,6 +80,19 @@ def test_active_fire_generates_valid_satellite_hotspot():
     assert not hasattr(generated.hotspots[0], "fire_probability")
 
 
+def test_generated_hotspot_carries_the_canonical_location_name():
+    """Part G/H: the simulation already knows the canonical location - the
+    generated hotspot must carry it forward as trustworthy provenance for
+    FireEvent creation, never left for a later read-side guess."""
+    generated = SatelliteDataGenerator(seed=42).generate(
+        scenario_type=ScenarioType.ACTIVE_FIRE,
+        timestamp=TIMESTAMP,
+        location=DEFAULT_CARMEL_LOCATION,
+    )
+
+    assert all(hotspot.location_name == DEFAULT_CARMEL_LOCATION.name for hotspot in generated.hotspots)
+
+
 def test_same_seed_and_inputs_generate_same_hotspots_across_instances():
     first = SatelliteDataGenerator(seed=42).generate(
         scenario_type=ScenarioType.ACTIVE_FIRE,

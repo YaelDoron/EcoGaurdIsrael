@@ -83,6 +83,7 @@ class FakeRepository:
             assessment=assessment,
             observation_ids=tuple(observation_ids),
             station_ids=tuple(station_ids),
+            created_at=assessment.assessed_at,
         )
 
 

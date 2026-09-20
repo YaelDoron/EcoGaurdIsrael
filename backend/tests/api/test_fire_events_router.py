@@ -74,6 +74,7 @@ def make_event(**overrides) -> ActiveFireEventSummary:
         detection_confidence=0.91,
         detected_at=DETECTED_AT,
         updated_at=UPDATED_AT,
+        created_at=UPDATED_AT,
         severity=None,
     )
     values.update(overrides)
@@ -115,7 +116,9 @@ def test_happy_path_returns_suspected_and_confirmed_events():
         "detection_confidence": 0.91,
         "detected_at": "2026-09-17T13:20:00Z",
         "updated_at": "2026-09-17T13:28:00Z",
+        "created_at": "2026-09-17T13:28:00Z",
         "severity": None,
+        "location_name": None,
     }
     assert body["items"][1]["fire_event_id"] == 2
     assert body["items"][1]["status"] == "confirmed"
@@ -207,6 +210,7 @@ def test_timestamps_serialize_with_timezone_information():
         body["as_of"],
         body["items"][0]["detected_at"],
         body["items"][0]["updated_at"],
+        body["items"][0]["created_at"],
         body["items"][0]["severity"]["assessed_at"],
     ):
         assert value.endswith("Z") or "+" in value[-6:]
@@ -255,7 +259,9 @@ def test_response_contains_only_defined_dto_fields():
         "detection_confidence",
         "detected_at",
         "updated_at",
+        "created_at",
         "severity",
+        "location_name",
     }
     assert set(body["items"][0]["severity"].keys()) == {
         "assessment_id",

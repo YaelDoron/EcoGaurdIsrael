@@ -7,9 +7,19 @@ persisted severity assessment yet is represented as `severity=None` rather
 than guessed or defaulted, matching the "latest persisted state, honestly
 reported" principle already used for Fire Spread's effective-state reads.
 
-There is deliberately no `area_name` field: FireEvent does not persist a
-trustworthy area/location label (see src/models/fire_event.py), and this
-layer does not fabricate one via geocoding or manual coordinate mapping.
+`location_name` below reflects `FireEvent.location_name` when the persisted
+FireEvent itself carries trustworthy provenance (e.g. a simulation's own
+canonical scenario location - see src/models/fire_event.py and
+FireDetectionAgent._resolve_location_name), falling back to the read-side
+Fire Danger area-containment lookup (same helper satellite hotspots use)
+only for historical FireEvents predating that provenance, and finally to
+`None` - never geocoded, never a coordinate-to-name dictionary, and a
+trusted persisted value is never overwritten by the read-side fallback (see
+ActiveFireEventsService._resolve_location_name for the exact priority).
+
+`created_at` is the FireEvent row's own DB-insert timestamp (when EcoGuard
+actually opened/persisted this event) - distinct from `detected_at` (the
+earliest correlated evidence's own, possibly-earlier, observation time).
 """
 from __future__ import annotations
 
@@ -56,7 +66,9 @@ class ActiveFireEventSummary:
     detection_confidence: float
     detected_at: datetime
     updated_at: datetime
+    created_at: datetime
     severity: ActiveFireEventSeveritySummary | None
+    location_name: str | None = None
 
     def __post_init__(self) -> None:
         validate_positive_int("fire_event_id", self.fire_event_id)
@@ -69,10 +81,13 @@ class ActiveFireEventSummary:
             raise ValueError(f"detection_confidence must be within [0, 1], got {self.detection_confidence!r}")
         _validate_aware_datetime("detected_at", self.detected_at)
         _validate_aware_datetime("updated_at", self.updated_at)
+        _validate_aware_datetime("created_at", self.created_at)
         if self.severity is not None and not isinstance(self.severity, ActiveFireEventSeveritySummary):
             raise ValueError(
                 f"severity must be an ActiveFireEventSeveritySummary or None, got {self.severity!r}"
             )
+        if self.location_name is not None and not isinstance(self.location_name, str):
+            raise ValueError(f"location_name must be a string or None, got {self.location_name!r}")
 
 
 @dataclass(frozen=True)

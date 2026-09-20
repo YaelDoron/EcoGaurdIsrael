@@ -1,13 +1,84 @@
 """Tests for the shared spherical-earth geographic utilities."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import math
 
 import pytest
 
-from src.utils.geo import EARTH_RADIUS_KM, destination_point, haversine_distance_km, initial_bearing_deg
+from src.utils.geo import (
+    EARTH_RADIUS_KM,
+    destination_point,
+    haversine_distance_km,
+    initial_bearing_deg,
+    resolve_nearest_containing_area_name,
+)
 
 ONE_DEGREE_KM = EARTH_RADIUS_KM * math.radians(1.0)
+
+
+@dataclass(frozen=True)
+class _FakeArea:
+    area_id: str
+    area_name: str
+    area_latitude: float
+    area_longitude: float
+    area_radius_km: float
+
+
+# ---------------------------------------------------------------------------
+# resolve_nearest_containing_area_name (shared by satellite hotspots and
+# active FireEvents' own location_name enrichment)
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_area_name_point_inside_one_area():
+    area = _FakeArea(area_id="area-1", area_name="Carmel Demo Area", area_latitude=32.731, area_longitude=35.046, area_radius_km=5.0)
+    result = resolve_nearest_containing_area_name(32.74, 35.05, (area,))
+    assert result == "Carmel Demo Area"
+
+
+def test_resolve_area_name_point_outside_every_area_returns_none():
+    area = _FakeArea(area_id="area-1", area_name="Carmel Demo Area", area_latitude=32.731, area_longitude=35.046, area_radius_km=5.0)
+    # ~60km away - well outside the 5km radius.
+    result = resolve_nearest_containing_area_name(33.2, 35.6, (area,))
+    assert result is None
+
+
+def test_resolve_area_name_no_areas_returns_none():
+    assert resolve_nearest_containing_area_name(32.74, 35.05, ()) is None
+
+
+def test_resolve_area_name_overlapping_areas_pick_nearest_center():
+    near = _FakeArea(area_id="area-near", area_name="Near Area", area_latitude=32.740, area_longitude=35.050, area_radius_km=10.0)
+    far = _FakeArea(area_id="area-far", area_name="Far Area", area_latitude=32.900, area_longitude=35.200, area_radius_km=30.0)
+    # Point sits inside both circles, but is much closer to `near`'s center.
+    result = resolve_nearest_containing_area_name(32.741, 35.051, (far, near))
+    assert result == "Near Area"
+
+
+def test_resolve_area_name_exact_distance_tie_breaks_on_area_id():
+    # Two areas whose centers are equidistant from the point - "area-a" must
+    # win deterministically over "area-b" regardless of input order.
+    point_lat, point_lon = 32.75, 35.0
+    area_a = _FakeArea(area_id="area-a", area_name="Area A", area_latitude=32.80, area_longitude=35.0, area_radius_km=10.0)
+    area_b = _FakeArea(area_id="area-b", area_name="Area B", area_latitude=32.70, area_longitude=35.0, area_radius_km=10.0)
+
+    assert resolve_nearest_containing_area_name(point_lat, point_lon, (area_a, area_b)) == "Area A"
+    assert resolve_nearest_containing_area_name(point_lat, point_lon, (area_b, area_a)) == "Area A"
+
+
+def test_resolve_area_name_being_nearest_is_not_enough_without_containment():
+    # The nearest area's circle does NOT contain the point, but a farther
+    # area's circle does - the farther-but-containing area must win.
+    nearest_but_excludes = _FakeArea(
+        area_id="area-near", area_name="Near But Excluded", area_latitude=32.74, area_longitude=35.05, area_radius_km=0.01
+    )
+    farther_but_contains = _FakeArea(
+        area_id="area-far", area_name="Far But Contains", area_latitude=33.0, area_longitude=35.5, area_radius_km=100.0
+    )
+    result = resolve_nearest_containing_area_name(32.741, 35.051, (nearest_but_excludes, farther_but_contains))
+    assert result == "Far But Contains"
 
 
 # ---------------------------------------------------------------------------

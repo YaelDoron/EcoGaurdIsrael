@@ -10,6 +10,16 @@ export interface MapViewProps {
   boundsPoints: LatLngPoint[];
   children?: ReactNode;
   ariaLabel?: string;
+  /**
+   * Whether the mouse wheel zooms the map. Defaults to `true` - the existing
+   * behavior for Event Details/Response Plan, both unchanged by this prop's
+   * addition. The Operations Overview map passes `false` explicitly (see
+   * OperationsMap.tsx) since it sits inside a normally-scrolling page and a
+   * wheel-zooming map under the cursor makes the page itself impossible to
+   * scroll past. Click-drag panning and the +/- zoom controls are unaffected
+   * either way.
+   */
+  scrollWheelZoom?: boolean;
 }
 
 const TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -28,14 +38,19 @@ const PLACEHOLDER_ZOOM = 2;
  * as `children` (see FireEventMarker, SpreadLayer, etc.) so this same
  * container can be reused by US 6.3's routing map.
  */
-export function MapView({ boundsPoints, children, ariaLabel = "Interactive map" }: MapViewProps) {
+export function MapView({
+  boundsPoints,
+  children,
+  ariaLabel = "Interactive map",
+  scrollWheelZoom = true,
+}: MapViewProps) {
   return (
     <div className="map-view" role="region" aria-label={ariaLabel}>
       <MapContainer
         center={PLACEHOLDER_CENTER}
         zoom={PLACEHOLDER_ZOOM}
         className="map-view__container"
-        scrollWheelZoom
+        scrollWheelZoom={scrollWheelZoom}
       >
         <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
         <FitBoundsToPoints points={boundsPoints} />

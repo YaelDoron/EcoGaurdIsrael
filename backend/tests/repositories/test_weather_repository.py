@@ -3,7 +3,7 @@
 Real PostgreSQL/Neon behavior (as opposed to SQLite's approximation) is
 additionally covered by tests/integration/test_neon_database.py.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -105,6 +105,40 @@ def test_get_all_stations_is_deterministically_ordered(repository):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Timezone fix regression tests: `timestamp` is now DateTime(timezone=True)
+# (applied for consistency with the satellite hotspot fix - see
+# SatelliteHotspotRepository's own equivalent tests - so the new Weather
+# Activity Feed signal never inherits the same class of tz-naive bug).
+# ---------------------------------------------------------------------------
+
+
+def test_observation_timestamp_column_is_declared_timezone_aware():
+    assert WeatherObservationDB.__table__.columns["timestamp"].type.timezone is True
+
+
+def test_aware_observation_timestamp_round_trips_preserving_the_exact_instant(repository):
+    repository.save_station(make_station())
+    aware_instant = datetime(2026, 9, 5, 10, 12, 0, tzinfo=timezone.utc)
+
+    repository.save_observation(make_observation(timestamp=aware_instant))
+
+    stored = repository.get_latest_observation(17)
+    assert stored.timestamp.tzinfo is not None
+    assert stored.timestamp == aware_instant
+
+
+def test_naive_observation_timestamp_is_normalized_to_utc(repository):
+    repository.save_station(make_station())
+    naive_value = datetime(2026, 9, 5, 10, 12, 0)
+
+    repository.save_observation(make_observation(timestamp=naive_value))
+
+    stored = repository.get_latest_observation(17)
+    assert stored.timestamp.tzinfo is not None
+    assert stored.timestamp == naive_value.replace(tzinfo=timezone.utc)
+
+
 def test_save_observation_persists_valid_observation(repository):
     repository.save_station(make_station())
 
@@ -199,7 +233,7 @@ def test_get_latest_observation_returns_newest(repository):
 
     latest = repository.get_latest_observation(17)
 
-    assert latest.timestamp == datetime(2026, 9, 2, 14, 0, 0)
+    assert latest.timestamp == datetime(2026, 9, 2, 14, 0, 0, tzinfo=timezone.utc)
     assert latest.temperature == 30.0
 
 
@@ -218,8 +252,8 @@ def test_get_observations_for_station_respects_limit(repository):
     latest_two = repository.get_observations_for_station(17, limit=2)
 
     assert [o.timestamp for o in latest_two] == [
-        datetime(2026, 9, 2, 14, 0, 0),
-        datetime(2026, 9, 2, 13, 0, 0),
+        datetime(2026, 9, 2, 14, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, 13, 0, 0, tzinfo=timezone.utc),
     ]
 
 
@@ -251,8 +285,8 @@ def test_get_recent_observations_for_area_candidates_returns_persisted_ids_and_b
     assert all(record.station_id > 0 for record in records)
     assert all(record.observation_id > 0 for record in records)
     assert [record.observation.timestamp for record in records] == [
-        datetime(2026, 9, 2, 12, 0, 0),
-        datetime(2026, 9, 2, 12, 5, 0),
+        datetime(2026, 9, 2, 12, 0, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, 12, 5, 0, tzinfo=timezone.utc),
     ]
 
 
@@ -274,8 +308,8 @@ def test_get_recent_observations_for_area_candidates_orders_newest_per_station_f
     )
 
     assert [record.observation.timestamp for record in records] == [
-        datetime(2026, 9, 2, 12, 5, 0),
-        datetime(2026, 9, 2, 12, 0, 0),
+        datetime(2026, 9, 2, 12, 5, 0, tzinfo=timezone.utc),
+        datetime(2026, 9, 2, 12, 0, 0, tzinfo=timezone.utc),
     ]
 
 

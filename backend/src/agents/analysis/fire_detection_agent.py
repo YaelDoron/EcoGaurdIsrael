@@ -16,6 +16,7 @@ from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event import FireEvent
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
+from src.models.fire_evidence_type import FireEvidenceType
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
 from src.repositories.news_repository import NewsRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
@@ -124,6 +125,7 @@ class FireDetectionAgent:
             detection_confidence=decision.confidence,
             methodology=FIRE_DETECTION_METHODOLOGY_NAME,
             methodology_version=FIRE_DETECTION_METHODOLOGY_VERSION,
+            location_name=self._resolve_location_name(candidate_evidence),
         )
         return self._fire_event_repository.create_event(event, supporting_evidence=decision.supporting_evidence)
 
@@ -149,6 +151,10 @@ class FireDetectionAgent:
             detection_confidence=combined_decision.confidence,
             methodology=existing_event.event.methodology,
             methodology_version=existing_event.event.methodology_version,
+            # location_name is set once at creation and never replaced by a
+            # later update (Part H) - carried forward unchanged here so it
+            # is never spuriously cleared/altered by re-evaluation.
+            location_name=existing_event.event.location_name,
         )
 
         newly_added_refs = tuple(ref for ref in combined_refs if ref not in set(existing_refs))
@@ -183,6 +189,31 @@ class FireDetectionAgent:
     @staticmethod
     def _sort_refs(refs: tuple[FireEvidenceRef, ...]) -> tuple[FireEvidenceRef, ...]:
         return tuple(sorted(refs, key=lambda ref: (ref.evidence_type.value, ref.evidence_id)))
+
+    @staticmethod
+    def _resolve_location_name(evidence: tuple[FireDetectionEvidence, ...]) -> str | None:
+        """Pick the candidate's trustworthy location, if any evidence item carries one.
+
+        Only SATELLITE evidence is considered - defense-in-depth alongside
+        FireDetectionEvidenceService._normalize_news, which already never
+        copies WildfireReport.location_name onto NEWS evidence (that field
+        is a best-effort, sometimes-wrong NLP guess for real ingestion, not
+        verified provenance). All evidence in one FireDetectionCandidate is
+        already correlated by distance/time (see FireDetectionCalculator) -
+        i.e. it is understood to describe the SAME incident - so any
+        non-null satellite `location_name` values present are expected to
+        agree. Deterministic pick: sorted by evidence_id ascending, first
+        non-null wins. `None` when no satellite evidence carries one (e.g.
+        real, non-simulation evidence) - never guessed from coordinates here.
+        """
+        satellite_evidence = sorted(
+            (item for item in evidence if item.evidence_type is FireEvidenceType.SATELLITE),
+            key=lambda candidate: candidate.evidence_id,
+        )
+        for item in satellite_evidence:
+            if item.location_name is not None:
+                return item.location_name
+        return None
 
     @staticmethod
     def _earliest_observed_at(evidence: tuple[FireDetectionEvidence, ...]) -> datetime:

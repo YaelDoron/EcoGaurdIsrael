@@ -11,7 +11,18 @@ from src.models.fire_event_status import FireEventStatus
 
 @dataclass(frozen=True)
 class FireEvent:
-    """Internal business representation of a wildfire event."""
+    """Internal business representation of a wildfire event.
+
+    `location_name` is optional, trustworthy provenance - never a read-side
+    geography guess. It is set at creation time (by FireDetectionAgent, from
+    its correlated evidence's own `location_name` - see
+    FireDetectionEvidence) and never changed afterward by
+    FireEventRepository.update_event. `None` means no trustworthy label was
+    available at creation (e.g. real, non-simulation evidence) - callers may
+    still apply a safe read-side fallback (see
+    ActiveFireEventsService/resolve_nearest_containing_area_name), but must
+    never overwrite this persisted value with that fallback.
+    """
 
     latitude: float
     longitude: float
@@ -21,6 +32,7 @@ class FireEvent:
     detection_confidence: float
     methodology: str
     methodology_version: str
+    location_name: str | None = None
 
     def __post_init__(self) -> None:
         self._validate_coordinate("latitude", self.latitude, -90, 90)
@@ -37,6 +49,8 @@ class FireEvent:
             raise ValueError(f"detection_confidence must be finite within [0, 1], got {self.detection_confidence!r}.")
         self._validate_non_empty_string("methodology", self.methodology)
         self._validate_non_empty_string("methodology_version", self.methodology_version)
+        if self.location_name is not None and not isinstance(self.location_name, str):
+            raise ValueError(f"location_name must be a string or None, got {self.location_name!r}.")
 
     @staticmethod
     def _validate_coordinate(field_name: str, value: object, minimum: float, maximum: float) -> None:

@@ -14,6 +14,7 @@ used, just parameterized by bounding box instead of a point + radius.
 from __future__ import annotations
 
 import logging
+import threading
 
 import networkx as nx
 import osmnx as ox
@@ -24,6 +25,17 @@ from src.models.graph_node import GraphNode
 logger = logging.getLogger(__name__)
 
 NETWORK_TYPE = "drive"
+
+# Task A1.5: osmnx's own per-HTTP-request timeout (ox.settings.requests_timeout,
+# 180s by default) does not bound the *overall* call - osmnx can tile a large
+# bbox into several sequential Overpass requests, and its rate-limit handling
+# (ox.settings.overpass_rate_limit) can sleep for an arbitrary, server-reported
+# duration between them. Without an outer bound, a single cache-miss fetch can
+# block the calling thread for tens of minutes with near-zero CPU/network
+# activity in between, which is indistinguishable from a hang. This bound
+# makes the fetch's own documented "degrade gracefully on Overpass timeout"
+# contract actually hold for that case too, not just for outright exceptions.
+OSM_FETCH_TIMEOUT_SECONDS = 60.0
 
 # Used both as OSMnx's own per-edge speed fallback (passed into
 # add_edge_speeds) and as a last-resort manual fallback in
@@ -47,28 +59,13 @@ class RoadNetworkFetcher:
 
         Returns ([], []) - rather than raising - if OSMnx finds no network
         in the bbox or if the fetch fails for any other reason (Overpass
-        timeouts, connectivity issues, etc.). A lazy-loading caller wants
-        "no road data available" to degrade gracefully, not to blow up the
-        request it's serving.
+        timeouts, connectivity issues, an oversized/slow graph to process,
+        etc.). A lazy-loading caller wants "no road data available" to
+        degrade gracefully, not to blow up (or hang) the request it's
+        serving.
         """
         self._validate_bbox(min_lat, max_lat, min_lon, max_lon)
 
-        graph = self._fetch_graph(min_lat, max_lat, min_lon, max_lon)
-        if graph is None:
-            return [], []
-
-        graph = self._add_travel_times(graph)
-        nodes = self._build_nodes(graph)
-        edges = self._build_edges(graph)
-        return nodes, edges
-
-    def _fetch_graph(
-        self,
-        min_lat: float,
-        max_lat: float,
-        min_lon: float,
-        max_lon: float,
-    ) -> nx.MultiDiGraph | None:
         logger.info(
             "Fetching OSM %s network for bbox (min_lat=%.5f, max_lat=%.5f, min_lon=%.5f, max_lon=%.5f)...",
             NETWORK_TYPE,
@@ -78,25 +75,67 @@ class RoadNetworkFetcher:
             max_lon,
         )
         try:
-            # osmnx expects bbox as (left, bottom, right, top) =
-            # (min_lon, min_lat, max_lon, max_lat).
-            graph = ox.graph_from_bbox(
-                bbox=(min_lon, min_lat, max_lon, max_lat),
-                network_type=NETWORK_TYPE,
-            )
-        except Exception:  # noqa: BLE001 - no network found, or any Overpass/OSMnx failure, degrades to empty.
+            nodes, edges = self._fetch_and_convert_bounded(min_lat, max_lat, min_lon, max_lon)
+        except Exception:  # noqa: BLE001 - no network found, timed out, or any Overpass/OSMnx failure, degrades to empty.
             logger.warning(
                 "No OSM road network could be fetched for the requested bounding box.",
                 exc_info=True,
             )
-            return None
+            return [], []
 
-        logger.info(
-            "Fetched %d node(s) and %d edge(s) for the requested bounding box.",
-            graph.number_of_nodes(),
-            graph.number_of_edges(),
-        )
-        return graph
+        logger.info("Fetched %d node(s) and %d edge(s) for the requested bounding box.", len(nodes), len(edges))
+        return nodes, edges
+
+    def _fetch_and_convert_bounded(
+        self,
+        min_lat: float,
+        max_lat: float,
+        min_lon: float,
+        max_lon: float,
+    ) -> tuple[list[GraphNode], list[GraphEdge]]:
+        """Run the full fetch+convert pipeline on a daemon thread, bounded to OSM_FETCH_TIMEOUT_SECONDS.
+
+        Deliberately wraps the *entire* pipeline (Overpass download, OSMnx's
+        speed/travel-time model, and node/edge conversion) in one bound, not
+        just the network call: none of these steps has its own call-level
+        timeout, and OSMnx's speed/travel-time computation over a large
+        graph can itself take as long as - or longer than - the download.
+        Bounding only the download would leave the rest of the pipeline
+        able to reproduce the exact same class of stall.
+
+        Running the pipeline on a `daemon=True` thread and only *waiting* up
+        to OSM_FETCH_TIMEOUT_SECONDS lets this method return (and the caller
+        degrade gracefully) even if the underlying work is still running;
+        the abandoned thread cannot block process exit because it is a
+        daemon thread, and it is never joined.
+        """
+        outcome: dict[str, object] = {}
+
+        def _run() -> None:
+            try:
+                # osmnx expects bbox as (left, bottom, right, top) =
+                # (min_lon, min_lat, max_lon, max_lat).
+                graph = ox.graph_from_bbox(
+                    bbox=(min_lon, min_lat, max_lon, max_lat),
+                    network_type=NETWORK_TYPE,
+                )
+                graph = self._add_travel_times(graph)
+                outcome["nodes"] = self._build_nodes(graph)
+                outcome["edges"] = self._build_edges(graph)
+            except Exception as exc:  # noqa: BLE001 - reported to the joining thread, not raised here.
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=_run, name="osm-fetch", daemon=True)
+        worker.start()
+        worker.join(timeout=OSM_FETCH_TIMEOUT_SECONDS)
+
+        if worker.is_alive():
+            raise TimeoutError(
+                f"OSM fetch/conversion exceeded the {OSM_FETCH_TIMEOUT_SECONDS:.0f}s bound for this bounding box."
+            )
+        if "error" in outcome:
+            raise outcome["error"]  # type: ignore[misc]
+        return outcome["nodes"], outcome["edges"]  # type: ignore[return-value]
 
     def _add_travel_times(self, graph: nx.MultiDiGraph) -> nx.MultiDiGraph:
         """Annotate `graph` edges with a `travel_time` (seconds) attribute.

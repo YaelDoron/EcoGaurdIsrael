@@ -79,5 +79,32 @@ class Settings:
         if origin.strip()
     )
 
+    # Task A1.6: explicit, off-by-default safety gate for DemoStateResetService
+    # (backend/src/simulation/demo_state_reset_service.py). This project has
+    # no general APP_ENV/environment concept yet, so this flag is the sole
+    # gate: reset() refuses to run at all unless the operator has
+    # deliberately set this to true in the environment pointed at by
+    # DATABASE_URL (intended to be a dedicated demo database/Neon branch,
+    # never the shared team development database). Never inferred from the
+    # database name/hostname - that would be a heuristic, not a guarantee.
+    ENABLE_DEMO_DATA_RESET: bool = os.getenv("ENABLE_DEMO_DATA_RESET", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    # Task A3: explicit, off-by-default gate for the Simulation Control API
+    # (POST/GET /api/v1/simulation/...). Deliberately separate from
+    # ENABLE_DEMO_DATA_RESET above - "may invoke simulation-control
+    # endpoints at all" and "may destructively clear demo runtime state" are
+    # two independent permissions a deployment may want to grant separately
+    # (e.g. simulation control enabled without reset permission). Never
+    # implied by the other flag.
+    ENABLE_SIMULATION_CONTROL_API: bool = os.getenv("ENABLE_SIMULATION_CONTROL_API", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
 
 settings = Settings()

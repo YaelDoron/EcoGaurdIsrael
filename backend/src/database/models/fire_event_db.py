@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -33,6 +33,7 @@ class FireEventDB(Base):
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
+    location_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     satellite_evidence: Mapped[list["FireEventSatelliteEvidenceDB"]] = relationship(
         back_populates="fire_event",

@@ -618,3 +618,60 @@ def test_get_latest_for_events_omits_events_with_no_assessment(repository, fire_
 
 def test_get_latest_for_events_returns_empty_dict_for_empty_input(repository):
     assert repository.get_latest_for_events([]) == {}
+
+
+# ---------------------------------------------------------------------------
+# get_recent (Task A6, Activity Feed)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent(10) == ()
+
+
+def test_get_recent_orders_by_assessed_at_desc_across_events(
+    repository, fire_event_repository, weather_repository, satellite_repository
+):
+    first_event_id, first_hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    second_event_id, _ = persist_fire_event(fire_event_repository, satellite_repository)
+    weather_id = persist_weather(weather_repository, station_offset=1)
+
+    older = repository.save_assessment(
+        make_assessment(first_event_id, assessed_at=ASSESSED_AT),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(first_hotspot_id,),
+        selected_frp_hotspot_id=first_hotspot_id,
+    )
+    newer = repository.save_assessment(
+        make_assessment(second_event_id, assessed_at=ASSESSED_AT + timedelta(hours=1)),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(first_hotspot_id,),
+        selected_frp_hotspot_id=first_hotspot_id,
+    )
+
+    recent = repository.get_recent(10)
+
+    assert [stored.assessment_id for stored in recent] == [newer.assessment_id, older.assessment_id]
+
+
+def test_get_recent_does_not_populate_trace_ids(
+    repository, fire_event_repository, weather_repository, satellite_repository
+):
+    fire_event_id, hotspot_id = persist_fire_event(fire_event_repository, satellite_repository)
+    weather_id = persist_weather(weather_repository, station_offset=1)
+    repository.save_assessment(
+        make_assessment(fire_event_id),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(hotspot_id,),
+        selected_frp_hotspot_id=hotspot_id,
+    )
+
+    recent = repository.get_recent(10)
+
+    assert recent[0].weather_observation_ids == ()
+    assert recent[0].satellite_hotspot_ids == ()
+
+
+def test_get_recent_rejects_invalid_limit(repository):
+    with pytest.raises(FireSeverityAssessmentRepositoryError):
+        repository.get_recent(0)

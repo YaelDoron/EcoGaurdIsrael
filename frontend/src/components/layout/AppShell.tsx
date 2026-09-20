@@ -22,18 +22,8 @@ export function AppShell() {
                 to="/events"
                 className={({ isActive }) => `nav-link${isActive ? " nav-link--active" : ""}`}
               >
-                Active Wildfires
+                Operations Overview
               </NavLink>
-            </li>
-            <li>
-              <span className="nav-link nav-link--disabled" aria-disabled="true">
-                History <span className="nav-link__badge">Coming soon</span>
-              </span>
-            </li>
-            <li>
-              <span className="nav-link nav-link--disabled" aria-disabled="true">
-                Monitoring <span className="nav-link__badge">Coming soon</span>
-              </span>
             </li>
           </ul>
         </nav>

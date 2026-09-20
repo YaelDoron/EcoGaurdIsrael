@@ -226,3 +226,54 @@ def test_repository_session_is_usable_after_rolled_back_write(repository, sqlite
     result = repository.save_report(make_report())
 
     assert result.is_duplicate is False
+
+
+# ---------------------------------------------------------------------------
+# get_recent (Task A6, Activity Feed)
+# ---------------------------------------------------------------------------
+
+
+def test_get_recent_empty_database_returns_empty_tuple(repository):
+    assert repository.get_recent(10) == ()
+
+
+def test_get_recent_orders_by_observed_at_desc(repository):
+    older = repository.save_report(
+        make_report(source_url="https://example.com/older", published_at=PUBLISHED_AT)
+    ).report
+    newer = repository.save_report(
+        make_report(source_url="https://example.com/newer", published_at=PUBLISHED_AT + timedelta(hours=1))
+    ).report
+
+    recent = repository.get_recent(10)
+
+    assert [stored.report.source_url for stored in recent] == [newer.source_url, older.source_url]
+
+
+def test_get_recent_falls_back_to_fetched_at_when_unpublished(repository):
+    repository.save_report(
+        make_report(source_url="https://example.com/unpublished", published_at=None, fetched_at=FETCHED_AT)
+    )
+
+    recent = repository.get_recent(10)
+
+    assert recent[0].observed_at == FETCHED_AT
+
+
+def test_get_recent_respects_limit(repository):
+    for index in range(5):
+        repository.save_report(
+            make_report(
+                source_url=f"https://example.com/{index}",
+                published_at=PUBLISHED_AT + timedelta(hours=index),
+            )
+        )
+
+    recent = repository.get_recent(2)
+
+    assert len(recent) == 2
+
+
+def test_get_recent_rejects_invalid_limit(repository):
+    with pytest.raises(NewsRepositoryError):
+        repository.get_recent(0)

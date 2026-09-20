@@ -39,13 +39,13 @@ describe("AppRouter", () => {
   it("redirects / to /events", () => {
     renderAt("/");
 
-    expect(screen.getByRole("heading", { name: "Active Wildfires" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Operations Overview" })).toBeInTheDocument();
   });
 
-  it("renders the Active Wildfires placeholder at /events", () => {
+  it("renders the Operations Overview dashboard at /events", () => {
     renderAt("/events");
 
-    expect(screen.getByRole("heading", { name: "Active Wildfires" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Operations Overview" })).toBeInTheDocument();
   });
 
   it("renders the Event Details page at /events/:fireEventId", () => {
