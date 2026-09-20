@@ -160,6 +160,30 @@ def test_stale_retry_recaptures_active_set_between_attempts():
     assert activation_service.calls == 1
 
 
+@pytest.mark.parametrize("active_fire_event_ids", [(1,), (1, 2), (1, 2, 3), (1, 2, 3, 4)])
+def test_refresh_never_assumes_exactly_two_active_fires(active_fire_event_ids):
+    """The global optimization is over whatever the currently-active set
+    is - one, two, three, or four FireEvents - never a hardcoded pair.
+    Uses the always-stale activation fake (same as
+    test_stale_retries_are_bounded_and_exhausted) purely so the cycle
+    completes deterministically without needing a real optimizer; what
+    matters here is that the coordinator runs a full cycle (creates a run,
+    calls activation) regardless of the active set's size."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+    activation_service = _AlwaysStaleActivationService()
+    coordinator = _make_coordinator(
+        (active_fire_event_ids,) * (MAX_GLOBAL_STALE_RETRIES + 1),
+        activation_service=activation_service,
+        run_repository=run_repository,
+    )
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.STALE_RETRY_EXHAUSTED
+    assert len(run_repository.created_runs) == MAX_GLOBAL_STALE_RETRIES + 1
+    assert activation_service.calls == MAX_GLOBAL_STALE_RETRIES + 1
+
+
 def test_invalid_trigger_rejected():
     coordinator = _make_coordinator(((1,),))
     with pytest.raises(ValueError):

@@ -50,6 +50,7 @@ def make_event(**overrides) -> ActiveFireEventSummary:
         detection_confidence=0.91,
         detected_at=DETECTED_AT,
         updated_at=UPDATED_AT,
+        created_at=UPDATED_AT,
         severity=None,
     )
     values.update(overrides)
@@ -81,6 +82,7 @@ def test_maps_event_fields_one_to_one():
     assert item.detection_confidence == event.detection_confidence
     assert item.detected_at == event.detected_at
     assert item.updated_at == event.updated_at
+    assert item.created_at == event.created_at
 
 
 def test_maps_severity_fields_one_to_one():
@@ -151,3 +153,21 @@ def test_no_area_name_field_on_response():
     response = to_active_fire_events_response(result)
 
     assert "area_name" not in response.items[0].model_dump()
+
+
+def test_maps_location_name_when_present():
+    event = make_event(location_name="Carmel Demo Area")
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+
+    response = to_active_fire_events_response(result)
+
+    assert response.items[0].location_name == "Carmel Demo Area"
+
+
+def test_maps_location_name_none_when_absent():
+    event = make_event(location_name=None)
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+
+    response = to_active_fire_events_response(result)
+
+    assert response.items[0].location_name is None

@@ -14,10 +14,13 @@ from scripts.run_demo_simulation import (
     build_scenario_from_args,
     execute_and_report_event,
     format_execution_result,
+    main,
     parse_args,
     run_automatic,
     run_manual,
 )
+from src.simulation.demo_simulation_runner import DemoSimulationRunner
+from src.simulation.demo_state_reset_service import DemoStateResetResult
 from src.agents.analysis.fire_danger_assessment_result import FireDangerAssessmentResult
 from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.agents.analysis.response_target_generation_result import (
@@ -72,7 +75,10 @@ from src.simulation.analysis.simulation_fire_spread_result import SimulationFire
 from src.simulation.analysis.simulation_response_target_result import SimulationResponseTargetResult
 from src.simulation import (
     CARMEL_LOCATION,
+    GALILEE_LOCATION,
     GOLAN_LOCATION,
+    JERUSALEM_FOREST_LOCATION,
+    JUDEAN_HILLS_LOCATION,
     ScenarioType,
     SimulationEventExecutionResult,
     SimulationEventType,
@@ -551,6 +557,17 @@ def test_build_high_risk_golan_single_incident_scenario():
     assert scenario.incidents[0].location == GOLAN_LOCATION
 
 
+def test_build_moderate_risk_judean_hills_single_incident_scenario():
+    args = Namespace(scenario="moderate_risk_no_fire", location="judean_hills", preset=None, seed=99)
+
+    scenario = build_scenario_from_args(args)
+
+    assert scenario.seed == 99
+    assert len(scenario.incidents) == 1
+    assert scenario.incidents[0].scenario_type is ScenarioType.MODERATE_RISK_NO_FIRE
+    assert scenario.incidents[0].location == JUDEAN_HILLS_LOCATION
+
+
 def test_build_preset_creates_carmel_golan_scenario():
     args = Namespace(scenario=None, location=None, preset="carmel_golan_active_fire", seed=42)
 
@@ -561,6 +578,34 @@ def test_build_preset_creates_carmel_golan_scenario():
         "incident-golan-01",
     ]
     assert [incident.location for incident in scenario.incidents] == [CARMEL_LOCATION, GOLAN_LOCATION]
+
+
+def test_parse_valid_operations_demo_preset_args():
+    args = parse_args(["--preset", "operations_demo", "--mode", "automatic", "--seed", "42"])
+
+    assert args.preset == "operations_demo"
+    assert args.scenario is None
+    assert args.location is None
+    assert args.mode == "automatic"
+    assert args.seed == 42
+
+
+def test_build_preset_creates_operations_demo_scenario():
+    """operations_demo is now a seeded family (see
+    tests/simulation/test_simulation_scenario.py for the full property
+    coverage) - this test only proves the CLI wiring itself: an explicit
+    --seed reaches the real builder and produces a valid, non-empty,
+    reproducible scenario."""
+    args = Namespace(scenario=None, location=None, preset="operations_demo", seed=42)
+
+    scenario = build_scenario_from_args(args)
+    scenario_again = build_scenario_from_args(args)
+
+    assert scenario.seed == 42
+    assert len(scenario.incidents) == 5  # every canonical location gets an incident (active-fire or risk-only)
+    assert any(incident.scenario_type is ScenarioType.ACTIVE_FIRE for incident in scenario.incidents)
+    assert scenario.incidents == scenario_again.incidents
+    assert scenario.events == scenario_again.events
 
 
 def test_manual_mode_executes_events_in_order_with_expected_timestamps():
@@ -1407,3 +1452,108 @@ def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_withou
     assert "coverage_score=0.75" in text
     assert "average_eta_seconds=642.0" in text
     assert "response_actions=0" in text
+
+
+# ---------------------------------------------------------------------------
+# Task A2: reusable-runner refactor - CLI stays a thin adapter
+# ---------------------------------------------------------------------------
+
+
+def test_reset_demo_state_flag_invokes_service_before_running(monkeypatch):
+    order = []
+
+    class _FakeResetService:
+        def reset_demo_state(self):
+            order.append("reset")
+            return DemoStateResetResult(deleted_counts={"fire_events": 1}, resources_restored=5)
+
+    def fake_run_manual(scenario):
+        order.append("run")
+
+    monkeypatch.setattr("scripts.run_demo_simulation.initialize_database", lambda: None)
+    monkeypatch.setattr("scripts.run_demo_simulation.DemoStateResetService", lambda: _FakeResetService())
+    monkeypatch.setattr("scripts.run_demo_simulation.run_manual", fake_run_manual)
+
+    exit_code = main(["--preset", "operations_demo", "--reset-demo-state"])
+
+    assert exit_code == 0
+    assert order == ["reset", "run"]
+
+
+def test_reset_demo_state_flag_refusal_stops_before_running(monkeypatch, capsys):
+    from src.simulation.demo_state_reset_service import DemoStateResetDisabledError
+
+    order = []
+
+    class _DisabledResetService:
+        def reset_demo_state(self):
+            raise DemoStateResetDisabledError("ENABLE_DEMO_DATA_RESET is not enabled.")
+
+    def fake_run_manual(scenario):
+        order.append("run")
+
+    monkeypatch.setattr("scripts.run_demo_simulation.initialize_database", lambda: None)
+    monkeypatch.setattr("scripts.run_demo_simulation.DemoStateResetService", lambda: _DisabledResetService())
+    monkeypatch.setattr("scripts.run_demo_simulation.run_manual", fake_run_manual)
+
+    exit_code = main(["--preset", "operations_demo", "--reset-demo-state"])
+
+    assert exit_code == 2
+    assert order == []
+    assert "Refused" in capsys.readouterr().err
+
+
+def test_run_manual_delegates_to_a_single_runner_call(monkeypatch):
+    scenario = build_active_fire_scenario(seed=42)
+    call_count = {"n": 0}
+    original_run = DemoSimulationRunner.run
+
+    def spy_run(self, *args, **kwargs):
+        call_count["n"] += 1
+        return original_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(DemoSimulationRunner, "run", spy_run)
+
+    run_manual(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
+        scenario_started_at=STARTED_AT,
+        input_func=lambda prompt: "",
+        output=StringIO(),
+    )
+
+    assert call_count["n"] == 1
+
+
+def test_run_automatic_delegates_to_a_single_runner_call(monkeypatch):
+    scenario = build_active_fire_scenario(seed=42)
+    first_event, second_event = scenario.events[:2]
+    service = FakeAutomaticService(due_batches=[[first_event], [second_event]])
+    call_count = {"n": 0}
+    original_run = DemoSimulationRunner.run
+
+    def spy_run(self, *args, **kwargs):
+        call_count["n"] += 1
+        return original_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(DemoSimulationRunner, "run", spy_run)
+
+    run_automatic(
+        scenario=scenario,
+        executor=FakeExecutor(),
+        fire_danger_coordinator=FakeFireDangerCoordinator(),
+        fire_detection_coordinator=FakeFireDetectionCoordinator(),
+        operational_coordinator=FakeOperationalCoordinator(),
+        fire_severity_coordinator=FakeFireSeverityCoordinator(mode="none"),
+        service=service,
+        scenario_started_at=STARTED_AT,
+        sleep_func=lambda seconds: None,
+        poll_interval_seconds=0.25,
+        output=StringIO(),
+    )
+
+    assert call_count["n"] == 1

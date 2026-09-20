@@ -36,7 +36,7 @@ class WeatherObservationDB(Base):
     station_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("weather_stations.id"), nullable=False, index=True
     )
-    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
     temperature: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     relative_humidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

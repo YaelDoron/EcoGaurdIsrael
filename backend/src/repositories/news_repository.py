@@ -142,6 +142,38 @@ class NewsRepository:
                 for db_report, row_observed_at in rows
             ]
 
+    def get_recent(self, limit: int) -> tuple[StoredWildfireReport, ...]:
+        """Return the `limit` most recent reports by observed_at, newest first.
+
+        Task A6: a bounded "recent across all reports" read for the
+        Activity Feed - distinct from get_recent_reports's time-windowed
+        query. Same observed_at computed-column semantics (published_at,
+        falling back to fetched_at) and the same deterministic tie-break
+        (observed_at desc, id desc) as get_recent_reports/get_by_id.
+        """
+        self._validate_limit(limit)
+        observed_at = case(
+            (WildfireReportDB.published_at.is_not(None), WildfireReportDB.published_at),
+            else_=WildfireReportDB.fetched_at,
+        )
+        with self._session_scope() as session:
+            rows = (
+                session.execute(
+                    select(WildfireReportDB, observed_at.label("observed_at"))
+                    .order_by(observed_at.desc(), WildfireReportDB.id.desc())
+                    .limit(limit)
+                )
+                .all()
+            )
+            return tuple(
+                StoredWildfireReport(
+                    id=db_report.id,
+                    report=self._to_domain_report(db_report),
+                    observed_at=self._ensure_aware_datetime(row_observed_at),
+                )
+                for db_report, row_observed_at in rows
+            )
+
     def get_by_id(self, report_id: int) -> StoredWildfireReport | None:
         """Return a persisted wildfire report by database id, or None if absent."""
         self._validate_report_id(report_id)
@@ -224,3 +256,8 @@ class NewsRepository:
     def _validate_report_id(report_id: int) -> None:
         if isinstance(report_id, bool) or not isinstance(report_id, int) or report_id <= 0:
             raise NewsRepositoryError(f"report_id must be a positive integer, got {report_id!r}.")
+
+    @staticmethod
+    def _validate_limit(limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            raise NewsRepositoryError(f"Invalid limit: {limit!r}. Must be a positive integer.")

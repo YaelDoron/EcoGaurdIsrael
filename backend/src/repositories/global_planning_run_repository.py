@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.connection import get_session_factory
@@ -37,10 +37,16 @@ from src.repositories.exceptions import GlobalPlanningRunRepositoryError
 
 @dataclass(frozen=True)
 class StoredGlobalPlanningRun:
-    """Persisted GlobalPlanningRun plus database identity."""
+    """Persisted GlobalPlanningRun plus database identity.
+
+    `created_at` is the row's own DB-insert timestamp (server-assigned once,
+    at creation - see GlobalPlanningRunDB.created_at), distinct from
+    `run.started_at`/`run.completed_at` (the domain run lifecycle times).
+    """
 
     id: int
     run: GlobalPlanningRun
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -458,6 +464,54 @@ class GlobalPlanningRunRepository:
             db_run = session.execute(statement).scalars().one_or_none()
             return self._to_stored_run(db_run) if db_run is not None else None
 
+    def get_recent(self, limit: int) -> tuple[StoredGlobalPlanningRun, ...]:
+        """Return the `limit` most recently started runs, newest first.
+
+        Task A6: a bounded read for the Activity Feed. Ordered by
+        started_at desc, id desc - a cheap, deterministic candidate
+        ordering (a run that started later has also completed later or is
+        still running); the query service computes each run's true
+        occurred_at (completed_at, falling back to started_at, matching A5)
+        for the final feed sort, so this candidate ordering only needs to
+        be a reasonable proxy, not the final display order.
+        """
+        self._validate_positive_int("limit", limit)
+        with self._session_scope() as session:
+            db_runs = (
+                session.execute(
+                    select(GlobalPlanningRunDB)
+                    .order_by(GlobalPlanningRunDB.started_at.desc(), GlobalPlanningRunDB.id.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(self._to_stored_run(db_run) for db_run in db_runs)
+
+    def get_member_counts(self, global_planning_run_ids: Iterable[int]) -> dict[int, int]:
+        """Return each run's membership row count, batched in one query.
+
+        Task A6: the Activity Feed's GlobalPlanningRun preview needs
+        `fire_event_count` for every candidate run returned by get_recent -
+        calling get_members() once per run would be an N+1 (and, against a
+        remote Postgres/Neon connection, was measured to materially inflate
+        Operations Overview latency). Ids with no membership rows are
+        simply absent from the returned mapping (0, not an error).
+        """
+        ids = self._normalize_fire_event_ids(global_planning_run_ids)
+        if not ids:
+            return {}
+        with self._session_scope() as session:
+            rows = session.execute(
+                select(
+                    GlobalPlanningRunEventDB.global_planning_run_id,
+                    func.count(GlobalPlanningRunEventDB.id),
+                )
+                .where(GlobalPlanningRunEventDB.global_planning_run_id.in_(ids))
+                .group_by(GlobalPlanningRunEventDB.global_planning_run_id)
+            ).all()
+            return {run_id: count for run_id, count in rows}
+
     def get_members(self, global_planning_run_id: int) -> tuple[StoredGlobalPlanningRunEvent, ...]:
         """Return every membership row for a run, ordered by event_order (Task 9's snapshot order)."""
         self._validate_positive_int("global_planning_run_id", global_planning_run_id)
@@ -515,6 +569,7 @@ class GlobalPlanningRunRepository:
                 shortage_unavailable_resource_count=db_run.shortage_unavailable_resource_count,
                 shortage_locked_resources_preserved=db_run.shortage_locked_resources_preserved,
             ),
+            created_at=GlobalPlanningRunRepository._ensure_aware_datetime(db_run.created_at),
         )
 
     @staticmethod

@@ -92,6 +92,7 @@ class SatelliteDataGenerator:
             satellite=SIMULATED_SATELLITE,
             instrument=SIMULATED_INSTRUMENT,
             day_night=self._day_night(timestamp),
+            location_name=location.name,
         )
 
     def _derive_hotspot_seed(

@@ -8,8 +8,52 @@ module's extraction, so existing distance behavior is preserved exactly.
 from __future__ import annotations
 
 import math
+from typing import Iterable, Protocol
 
 EARTH_RADIUS_KM = 6371.0088
+
+
+class NamedCircularArea(Protocol):
+    """Structural shape shared by any persisted circular area with a name.
+
+    `FireDangerAreaSnapshot` already has exactly these fields; this Protocol
+    lets `resolve_nearest_containing_area_name` stay a pure-math helper with
+    no dependency on that (or any other) concrete model.
+    """
+
+    area_id: str
+    area_name: str
+    area_latitude: float
+    area_longitude: float
+    area_radius_km: float
+
+
+def resolve_nearest_containing_area_name(
+    latitude: float,
+    longitude: float,
+    areas: Iterable[NamedCircularArea],
+) -> str | None:
+    """Return the name of the nearest area whose circle actually contains the point.
+
+    Only areas whose circle (center + radius_km) contains (latitude,
+    longitude) are candidates; among those, the nearest center wins, with
+    `area_id` as a deterministic tiebreaker for an exact distance tie.
+    Returns `None` when no area's circle contains the point - being merely
+    the geographically nearest area is not enough. Shared by every read-side
+    "resolve a presentation-only area label for a coordinate" use (satellite
+    hotspots, active FireEvents) so this logic is never duplicated.
+    """
+    best_area_name: str | None = None
+    best_key: tuple[float, str] | None = None
+    for area in areas:
+        distance_km = haversine_distance_km(latitude, longitude, area.area_latitude, area.area_longitude)
+        if distance_km > area.area_radius_km:
+            continue
+        key = (distance_km, area.area_id)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_area_name = area.area_name
+    return best_area_name
 
 
 def haversine_distance_km(

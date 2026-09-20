@@ -30,7 +30,7 @@ LATITUDE = 32.731
 LONGITUDE = 35.046
 
 
-def satellite(evidence_id=1, confidence="nominal", observed_at=OBSERVED_AT, latitude=LATITUDE):
+def satellite(evidence_id=1, confidence="nominal", observed_at=OBSERVED_AT, latitude=LATITUDE, location_name=None):
     return FireDetectionEvidence(
         evidence_id=evidence_id,
         evidence_type=FireEvidenceType.SATELLITE,
@@ -38,16 +38,18 @@ def satellite(evidence_id=1, confidence="nominal", observed_at=OBSERVED_AT, lati
         longitude=LONGITUDE,
         observed_at=observed_at,
         satellite_confidence=confidence,
+        location_name=location_name,
     )
 
 
-def news(evidence_id=2, observed_at=OBSERVED_AT, latitude=LATITUDE):
+def news(evidence_id=2, observed_at=OBSERVED_AT, latitude=LATITUDE, location_name=None):
     return FireDetectionEvidence(
         evidence_id=evidence_id,
         evidence_type=FireEvidenceType.NEWS,
         latitude=latitude,
         longitude=LONGITUDE,
         observed_at=observed_at,
+        location_name=location_name,
     )
 
 
@@ -74,7 +76,7 @@ def decision(status=FireDetectionStatus.SUSPECTED, confidence=0.6, evidence_refs
     )
 
 
-def event(status=FireEventStatus.SUSPECTED, confidence=0.6, detected_at=OBSERVED_AT, updated_at=OBSERVED_AT):
+def event(status=FireEventStatus.SUSPECTED, confidence=0.6, detected_at=OBSERVED_AT, updated_at=OBSERVED_AT, location_name=None):
     return FireEvent(
         latitude=LATITUDE,
         longitude=LONGITUDE,
@@ -84,6 +86,7 @@ def event(status=FireEventStatus.SUSPECTED, confidence=0.6, detected_at=OBSERVED
         detection_confidence=confidence,
         methodology=FIRE_DETECTION_METHODOLOGY_NAME,
         methodology_version=FIRE_DETECTION_METHODOLOGY_VERSION,
+        location_name=location_name,
     )
 
 
@@ -249,6 +252,92 @@ def test_created_event_content_comes_from_decision_and_evidence_timestamps():
     assert created_event.detected_at == early.observed_at
     assert created_event.updated_at == late.observed_at
     assert refs == (news_ref(2), sat_ref(1))
+
+
+# ---------------------------------------------------------------------------
+# location_name provenance (Part F/G/H): trustworthy evidence-carried
+# location survives into the persisted FireEvent, never guessed here.
+# ---------------------------------------------------------------------------
+
+
+def test_created_event_inherits_location_name_from_satellite_evidence():
+    sat = satellite(location_name="Galilee Demo Area")
+    service = FakeEvidenceService(candidates=[candidate(sat)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    created_event, _, _ = repository.created[0]
+    assert created_event.location_name == "Galilee Demo Area"
+
+
+def test_created_event_location_name_is_none_when_no_evidence_carries_one():
+    """Real, non-simulation evidence never carries location_name - the
+    created FireEvent must not fabricate one."""
+    sat = satellite()
+    n = news()
+    service = FakeEvidenceService(candidates=[candidate(sat, n)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(1), news_ref(2)))])
+    repository = FakeFireEventRepository()
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    created_event, _, _ = repository.created[0]
+    assert created_event.location_name is None
+
+
+def test_created_event_location_name_ignores_news_evidence_location():
+    """Defense-in-depth: even if a NEWS FireDetectionEvidence somehow carried
+    a location_name (it shouldn't - see FireDetectionEvidenceService.
+    _normalize_news's own docstring), the agent must only trust SATELLITE
+    evidence for FireEvent provenance."""
+    sat = satellite(location_name=None)
+    n = news(location_name="Some NLP-Guessed Place")
+    service = FakeEvidenceService(candidates=[candidate(sat, n)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(1), news_ref(2)))])
+    repository = FakeFireEventRepository()
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    created_event, _, _ = repository.created[0]
+    assert created_event.location_name is None
+
+
+def test_different_incidents_get_their_own_distinct_location_names_no_cross_contamination():
+    galilee_sat = satellite(evidence_id=101, location_name="Galilee Demo Area")
+    carmel_sat = satellite(evidence_id=102, latitude=32.7, location_name="Carmel Demo Area")
+    service = FakeEvidenceService(candidates=[candidate(galilee_sat), candidate(carmel_sat)])
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (ref(FireEvidenceType.SATELLITE, 101),)),
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (ref(FireEvidenceType.SATELLITE, 102),), latitude=32.7),
+    ])
+    repository = FakeFireEventRepository()
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    location_names = {fire_event.location_name for fire_event, _, _ in repository.created}
+    assert location_names == {"Galilee Demo Area", "Carmel Demo Area"}
+
+
+def test_existing_event_update_preserves_its_original_location_name():
+    existing = StoredFireEvent(7, event(location_name="Galilee Demo Area"), (sat_ref(1),), created_at=OBSERVED_AT)
+    new_evidence = news()
+    combined_evidence = (satellite(), new_evidence)
+    service = FakeEvidenceService(
+        candidates=[candidate(new_evidence)],
+        resolved={(news_ref(2), sat_ref(1)): combined_evidence},
+    )
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.5, (news_ref(2),)),
+        decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1), news_ref(2))),
+    ])
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    assert repository.updated[0][1].location_name == "Galilee Demo Area"
 
 
 def test_matching_active_event_is_updated_not_recreated():

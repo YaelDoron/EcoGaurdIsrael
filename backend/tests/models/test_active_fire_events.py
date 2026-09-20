@@ -50,6 +50,7 @@ def event(**overrides) -> ActiveFireEventSummary:
         "detection_confidence": 0.6,
         "detected_at": DETECTED_AT,
         "updated_at": UPDATED_AT,
+        "created_at": UPDATED_AT,
         "severity": None,
     }
     values.update(overrides)

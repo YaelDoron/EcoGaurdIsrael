@@ -1,0 +1,77 @@
+.operations-activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.operations-activity-feed__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/*
+ * One unified panel containing the header, rows, and footer - rather than
+ * a bare list floating on the page background.
+ */
+.operations-activity-feed__panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.operations-activity-feed__panel-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.operations-activity-feed__count {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/*
+ * True vertical list - one activity per row, not a multi-column card grid.
+ * No max-height/overflow here: with only 5 rows visible by default (see
+ * Load more), the feed does not need an inner scrollbar - the page just
+ * grows naturally, like the rest of the dashboard, if the operator loads
+ * more.
+ */
+.operations-activity-feed__list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0 var(--space-4);
+}
+
+.operations-activity-feed__footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-2) var(--space-4) var(--space-3);
+}
+
+.operations-activity-feed__load-more {
+  padding: var(--space-1) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-background);
+  color: var(--color-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.operations-activity-feed__load-more:hover {
+  background: var(--color-surface);
+  border-color: var(--color-text-muted);
+}
+
+.operations-activity-feed__load-more:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}

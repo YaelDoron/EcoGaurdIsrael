@@ -6,7 +6,16 @@ from src.models.active_fire_events import (
     ActiveFireEventsResult,
 )
 from src.models.assessment_area import AssessmentArea
+from src.models.fire_danger_areas import (
+    FireDangerAreaAssessmentSummary,
+    FireDangerAreaSnapshot,
+    FireDangerAreasResult,
+)
 from src.models.fire_danger_assessment import FireDangerAssessment
+from src.models.fire_danger_assessment_detail import (
+    FireDangerAssessmentDetail,
+    FireDangerAssessmentWeatherInputSummary,
+)
 from src.models.fire_danger_assessment_status import FireDangerAssessmentStatus
 from src.models.fire_danger_calculation import FireDangerCalculation
 from src.models.fire_danger_input import FireDangerInput
@@ -61,6 +70,35 @@ from src.models.global_route_option import GlobalRouteOption
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
 from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
+from src.models.operations_overview import (
+    FireDangerActivityPreview,
+    FireEventActivityPreview,
+    FireSeverityActivityPreview,
+    GlobalPlanningRunActivityPreview,
+    NewsReportActivityPreview,
+    OperationsActivityFeed,
+    OperationsActivityFeedItem,
+    OperationsOverviewSnapshot,
+    OperationsSimulationSummary,
+    SatelliteHotspotActivityPreview,
+)
+from src.models.operations_activity import (
+    FireDangerActivityDetail,
+    FireEventActivityDetail,
+    FireEventActivityDetails,
+    FireEventEvidenceRefs,
+    FireEventSeverityReference,
+    FireSeverityActivityDetail,
+    FireSeverityActivityDetails,
+    GlobalPlanningRunActivityDetail,
+    GlobalPlanningRunActivityDetails,
+    GlobalPlanningRunMemberSummary,
+    NewsReportActivityDetail,
+    OperationsActivityDetail,
+    OperationsActivityLocation,
+    OperationsActivityType,
+    SatelliteHotspotActivityDetail,
+)
 from src.models.optimization_resource import OptimizationResource
 from src.models.optimization_route_option import OptimizationRouteOption
 from src.models.optimization_target import OptimizationTarget
@@ -117,6 +155,11 @@ __all__ = [
     "FireDangerAssessmentStatus",
     "FireDangerCalculation",
     "FireDangerLevel",
+    "FireDangerAreaAssessmentSummary",
+    "FireDangerAreaSnapshot",
+    "FireDangerAreasResult",
+    "FireDangerAssessmentDetail",
+    "FireDangerAssessmentWeatherInputSummary",
     "AssessmentArea",
     "FireDangerInputResult",
     "FireDangerInputStatus",
@@ -176,6 +219,31 @@ __all__ = [
     "GraphNode",
     "GraphEdge",
     "OperationalRefreshTriggerType",
+    "OperationsActivityType",
+    "OperationsActivityLocation",
+    "OperationsActivityDetail",
+    "FireDangerActivityDetail",
+    "SatelliteHotspotActivityDetail",
+    "NewsReportActivityDetail",
+    "FireEventEvidenceRefs",
+    "FireEventSeverityReference",
+    "FireEventActivityDetails",
+    "FireEventActivityDetail",
+    "FireSeverityActivityDetails",
+    "FireSeverityActivityDetail",
+    "GlobalPlanningRunMemberSummary",
+    "GlobalPlanningRunActivityDetails",
+    "GlobalPlanningRunActivityDetail",
+    "OperationsSimulationSummary",
+    "FireDangerActivityPreview",
+    "SatelliteHotspotActivityPreview",
+    "NewsReportActivityPreview",
+    "FireEventActivityPreview",
+    "FireSeverityActivityPreview",
+    "GlobalPlanningRunActivityPreview",
+    "OperationsActivityFeedItem",
+    "OperationsActivityFeed",
+    "OperationsOverviewSnapshot",
     "RouteStatus",
     "RoutingResource",
     "RoutingTarget",

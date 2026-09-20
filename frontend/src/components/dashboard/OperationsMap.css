@@ -1,0 +1,16 @@
+/* Task A8: the map is the dominant element of the Operations Overview - a
+   taller viewport than MapView's shared 480px default, scoped to this page
+   only via a wrapper class (MapView.css itself is left untouched). */
+.operations-map {
+  position: relative;
+}
+
+.operations-map .map-view__container {
+  height: min(70vh, 640px);
+}
+
+@media (max-width: 960px) {
+  .operations-map .map-view__container {
+    height: 360px;
+  }
+}

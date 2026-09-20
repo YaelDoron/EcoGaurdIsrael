@@ -11,7 +11,16 @@ from datetime import datetime
 
 @dataclass
 class SatelliteHotspot:
-    """A satellite-detected thermal anomaly / active-fire detection."""
+    """A satellite-detected thermal anomaly / active-fire detection.
+
+    `location_name` is optional, trustworthy provenance: it is set ONLY by
+    the demo simulation's own SatelliteDataGenerator, to the exact canonical
+    SimulationLocation name that produced this hotspot - never a guess, and
+    never set by real FIRMS ingestion (SatelliteHotspotMapper never
+    populates it, so a real detection's value is always None). This lets a
+    FireDetectionAgent-created FireEvent inherit a reliable location without
+    any read-side geography guessing.
+    """
 
     latitude: float
     longitude: float
@@ -24,6 +33,7 @@ class SatelliteHotspot:
     satellite: str | None = None
     instrument: str | None = None
     day_night: str | None = None
+    location_name: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -57,7 +67,7 @@ class SatelliteHotspot:
                 f"brightness must be a non-negative number or None, got {self.brightness!r}"
             )
 
-        for field_name in ("confidence", "satellite", "instrument", "day_night"):
+        for field_name in ("confidence", "satellite", "instrument", "day_night", "location_name"):
             value = getattr(self, field_name)
             if value is not None and not isinstance(value, str):
                 raise ValueError(f"{field_name} must be a string or None, got {value!r}")

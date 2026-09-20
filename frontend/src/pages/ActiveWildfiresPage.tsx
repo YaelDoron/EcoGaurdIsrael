@@ -1,99 +1,105 @@
-import { ActiveFireEventCard } from "../components/fire-events/ActiveFireEventCard";
-import { EmptyState } from "../components/feedback/EmptyState";
+import { useState } from "react";
+import { ActiveFiresPanel } from "../components/dashboard/ActiveFiresPanel";
+import { OperationsActivityDrawer } from "../components/dashboard/OperationsActivityDrawer";
+import { OperationsActivityFeed } from "../components/dashboard/OperationsActivityFeed";
+import { OperationsMap } from "../components/dashboard/OperationsMap";
+import { OperationsStatusHeader } from "../components/dashboard/OperationsStatusHeader";
 import { ErrorState } from "../components/feedback/ErrorState";
 import { LoadingState } from "../components/feedback/LoadingState";
-import { MetricCard } from "../components/data/MetricCard";
-import { TimestampDisplay } from "../components/data/TimestampDisplay";
 import { PageHeader } from "../components/layout/PageHeader";
-import { useActiveFireEvents } from "../hooks/useActiveFireEvents";
+import { useOperationsOverview } from "../hooks/useOperationsOverview";
+import type { OperationsActivityFeedItem } from "../types/operationsOverview";
 import "./ActiveWildfiresPage.css";
 
-const PAGE_TITLE = "Active Wildfires";
-const PAGE_DESCRIPTION = "Current suspected and confirmed wildfire events.";
+const PAGE_TITLE = "Operations Overview";
 
 /**
- * The real US 6.1 dashboard: fetches GET /api/v1/fire-events/active via
- * useActiveFireEvents() and renders summary metrics + a card per event.
- * Counting confirmed/suspected here is presentation aggregation over the
- * API response - it never calculates severity or FireEvent status.
+ * The dashboard/Operations screen (US 6.1, wired to A6/A7 in Task A7,
+ * redesigned map-first in Task A8): a single call to
+ * `useOperationsOverview()` remains the sole data source for the whole
+ * page - no direct polling of any sub-endpoint, and Activity Detail (A5)
+ * is only fetched for the one item the operator selects
+ * (`useOperationsActivityDetail`, inside `OperationsActivityDrawer`).
+ *
+ * Loading/error/empty states follow A7's contract: `isLoading` blanks the
+ * page once (first load only); `loadError` is a page-level failure with
+ * retry; a background `refreshError` keeps the last good snapshot visible
+ * with a subtle inline warning, never blanking the map/panel/feed.
+ *
+ * Task A9: `OperationsStatusHeader` now also owns the one Start
+ * Simulation/Run Again action. `refresh` (this same hook's own manual
+ * refetch) is handed down as `onRequestOverviewRefresh` so a successful
+ * start - or a 409/403 rejection - nudges one immediate overview refetch;
+ * this page never starts a second polling loop or mirrors simulation state
+ * itself.
+ *
+ * Layout polish: the top row keeps the map dominant with Active Fires to
+ * its right (both equally tall, no forced inner scrolling on Active Fires
+ * for the normal 1-2 fire demo case); the Activity Feed moves to its own
+ * full-width row below, since a tall right-hand column made the page feel
+ * asymmetric and cramped the feed's preview text.
  */
 export function ActiveWildfiresPage() {
-  const { data, isLoading, isRefreshing, loadError, refreshError, refresh } = useActiveFireEvents();
+  const { data, isLoading, loadError, refreshError, refresh } = useOperationsOverview();
+  const [selectedActivity, setSelectedActivity] = useState<OperationsActivityFeedItem | null>(null);
 
   if (isLoading) {
     return (
       <section>
-        <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
-        <LoadingState message="Loading active wildfire events…" />
+        <PageHeader title={PAGE_TITLE} />
+        <LoadingState message="Loading operations overview…" />
       </section>
     );
   }
 
-  if (loadError) {
+  if (loadError || !data) {
     return (
       <section>
-        <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
-        <ErrorState title="Unable to load active wildfire events." message="Please try again." onRetry={refresh} />
+        <PageHeader title={PAGE_TITLE} />
+        <ErrorState title="Unable to load the operations overview." message="Please try again." onRetry={refresh} />
       </section>
     );
   }
 
-  const items = data?.items ?? [];
-  const confirmedCount = items.filter((event) => event.status === "confirmed").length;
-  const suspectedCount = items.filter((event) => event.status === "suspected").length;
+  // Server order is newest-first, so the first global_planning_run item
+  // (if any) is the newest persisted GlobalPlanningRun - this is the only
+  // use this page makes of that activity type now that it no longer
+  // renders as a feed row (see OperationsActivityFeed).
+  const latestGlobalPlanningRunId =
+    data.activity_feed.items.find((item) => item.activity_type === "global_planning_run")?.entity_id ?? null;
 
   return (
     <section>
-      <PageHeader
-        title={PAGE_TITLE}
-        description={PAGE_DESCRIPTION}
-        actions={
-          <button
-            type="button"
-            className="active-wildfires-page__refresh"
-            onClick={refresh}
-            disabled={isRefreshing}
-          >
-            {isRefreshing ? "Refreshing…" : "Refresh"}
-          </button>
-        }
+      <PageHeader title={PAGE_TITLE} />
+
+      <OperationsStatusHeader
+        simulation={data.simulation}
+        generatedAt={data.generated_at}
+        refreshError={refreshError}
+        onRequestOverviewRefresh={refresh}
       />
 
-      {data ? (
-        <p className="active-wildfires-page__as-of">
-          Data as of: <TimestampDisplay value={data.as_of} />
-        </p>
-      ) : null}
+      <div className="active-wildfires-page__top-row">
+        <div className="active-wildfires-page__map-column">
+          <OperationsMap fireDangerAreas={data.fire_danger_areas} activeFires={data.active_fires} />
+        </div>
 
-      {refreshError ? (
-        <p role="alert" className="active-wildfires-page__refresh-error">
-          {refreshError}
-        </p>
-      ) : null}
-
-      <div className="active-wildfires-page__metrics">
-        <MetricCard label="Active Events" value={items.length} />
-        <MetricCard label="Confirmed" value={confirmedCount} />
-        <MetricCard label="Suspected" value={suspectedCount} />
+        <div className="active-wildfires-page__fires-column">
+          <ActiveFiresPanel activeFires={data.active_fires} globalPlanningRunId={latestGlobalPlanningRunId} />
+        </div>
       </div>
 
-      {items.length === 0 ? (
-        <EmptyState
-          title="No active wildfire events"
-          message="There are currently no suspected or confirmed wildfire events."
+      <div className="active-wildfires-page__feed-row">
+        <OperationsActivityFeed
+          items={data.activity_feed.items}
+          selectedActivityId={selectedActivity?.activity_id ?? null}
+          onSelectItem={(item) =>
+            setSelectedActivity((current) => (current?.activity_id === item.activity_id ? null : item))
+          }
         />
-      ) : (
-        <section aria-labelledby="active-incidents-heading">
-          <h2 id="active-incidents-heading" className="active-wildfires-page__section-title">
-            Active incidents
-          </h2>
-          <div className="active-wildfires-page__grid">
-            {items.map((event) => (
-              <ActiveFireEventCard key={event.fire_event_id} event={event} />
-            ))}
-          </div>
-        </section>
-      )}
+      </div>
+
+      <OperationsActivityDrawer selectedItem={selectedActivity} onClose={() => setSelectedActivity(null)} />
     </section>
   );
 }

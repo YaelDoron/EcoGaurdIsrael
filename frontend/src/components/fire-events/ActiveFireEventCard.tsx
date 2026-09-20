@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { CoordinateDisplay } from "../data/CoordinateDisplay";
 import { TimestampDisplay } from "../data/TimestampDisplay";
 import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
@@ -13,19 +12,54 @@ export interface ActiveFireEventCardProps {
 
 /**
  * One active FireEvent's presentation card. Pure display: formats the
- * fields it is given (confidence as a percentage, coordinates, timestamps)
- * but never recalculates status/severity - those always come straight
- * from the API response.
+ * fields it is given (confidence as a percentage, timestamps) but never
+ * recalculates status/severity - those always come straight from the API
+ * response.
+ *
+ * This card is a DASHBOARD SUMMARY only - full detail (coordinates,
+ * updated time, evidence, etc.) already lives on Event Details
+ * (`/events/:fireEventId`, unchanged by this component). Keeping only the
+ * most operationally useful fields here (status, severity, confidence,
+ * opened time, View Event) is what lets the Active Fires column sit
+ * beside the map without forcing a large blank area under it in the
+ * normal 1-2 fire demo case.
+ *
+ * "Opened" shows `created_at` (when EcoGuard actually persisted this
+ * FireEvent), NOT `detected_at` (the earliest correlated evidence's own,
+ * possibly-earlier, source observation time) - showing the evidence time
+ * here previously made a fire that became visible at e.g. 11:46 appear to
+ * say "Detected: 11:44", implying an apparent creation time that was
+ * actually just older evidence. The full evidence-vs-opened distinction
+ * remains available on Event Details.
+ *
+ * Task A8, Part 9: a CONFIRMED fire with the latest persisted Severity at
+ * HIGH or CRITICAL gets a stronger visual border/emphasis - pure
+ * presentation over two already-persisted facts (`event.status` +
+ * `event.severity?.level`), never a new business score, and never applied
+ * merely from a SUSPECTED event's severity (status must also be confirmed).
  */
 export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
   const confidencePercent = Math.round(event.detection_confidence * 100);
   const severity = event.severity;
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
+  const emphasize = event.status === "confirmed" && (severity?.level === "high" || severity?.level === "critical");
+  const cardClassName = emphasize ? "fire-event-card fire-event-card--emphasized" : "fire-event-card";
 
   return (
-    <article className="fire-event-card">
+    <article className={cardClassName} data-emphasized={emphasize}>
       <div className="fire-event-card__header">
-        <h3 className="fire-event-card__title">Event #{event.fire_event_id}</h3>
+        <div>
+          <h3 className="fire-event-card__title">Event #{event.fire_event_id}</h3>
+          <p
+            className={
+              event.location_name !== null
+                ? "fire-event-card__location"
+                : "fire-event-card__location fire-event-card__location--unavailable"
+            }
+          >
+            {event.location_name !== null ? event.location_name : "Location unavailable"}
+          </p>
+        </div>
         <StatusBadge status={event.status} />
       </div>
 
@@ -34,9 +68,6 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
           <dt>Severity</dt>
           <dd>
             <SeverityBadge level={severity?.level ?? null} />
-            {severity && severity.status === "valid" && severity.score !== null ? (
-              <span className="fire-event-card__severity-score">Severity score: {severity.score.toFixed(1)}</span>
-            ) : null}
             {severityCaption ? <span className="fire-event-card__severity-caption">{severityCaption}</span> : null}
           </dd>
         </div>
@@ -47,23 +78,9 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
         </div>
 
         <div className="fire-event-card__row">
-          <dt>Coordinates</dt>
+          <dt>Opened</dt>
           <dd>
-            <CoordinateDisplay latitude={event.latitude} longitude={event.longitude} />
-          </dd>
-        </div>
-
-        <div className="fire-event-card__row">
-          <dt>Detected</dt>
-          <dd>
-            <TimestampDisplay value={event.detected_at} />
-          </dd>
-        </div>
-
-        <div className="fire-event-card__row">
-          <dt>Updated</dt>
-          <dd>
-            <TimestampDisplay value={event.updated_at} />
+            <TimestampDisplay value={event.created_at} />
           </dd>
         </div>
       </dl>

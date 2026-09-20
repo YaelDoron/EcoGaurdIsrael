@@ -11,8 +11,12 @@ from collections.abc import Iterator
 from sqlalchemy.orm import Session
 
 from src.database.connection import get_session_factory
+from src.services.fire_danger.fire_danger_query_service import FireDangerQueryService
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.fire_event_read.event_details_service import EventDetailsService
+from src.services.operations.operations_activity_query_service import OperationsActivityQueryService
+from src.services.operations.operations_overview_query_service import OperationsOverviewQueryService
+from src.services.simulation_control.simulation_run_manager import SimulationRunManager
 
 
 def get_db_session() -> Iterator[Session]:
@@ -63,3 +67,79 @@ def get_event_details_service() -> EventDetailsService:
     request-scoped Session.
     """
     return EventDetailsService()
+
+
+def get_fire_danger_query_service() -> FireDangerQueryService:
+    """FastAPI dependency providing a fully-wired FireDangerQueryService (Task A4).
+
+    Same sessionmaker-per-call rationale as get_active_fire_events_service
+    above: FireDangerAssessmentRepository/WeatherRepository each default to
+    the process-wide session factory when constructed with no arguments.
+    Unlike get_simulation_run_manager below, this service holds no in-memory
+    state of its own, so a fresh instance per request is correct - no
+    singleton is needed here.
+    """
+    return FireDangerQueryService()
+
+
+def get_operations_activity_query_service() -> OperationsActivityQueryService:
+    """FastAPI dependency providing a fully-wired OperationsActivityQueryService (Task A5).
+
+    Same fresh-instance-per-request rationale as get_fire_danger_query_service
+    above: this service holds no in-memory state of its own, and each
+    repository/collaborator it composes defaults to the process-wide session
+    factory when constructed with no arguments.
+    """
+    return OperationsActivityQueryService()
+
+
+_simulation_run_manager: SimulationRunManager | None = None
+
+
+def get_simulation_run_manager() -> SimulationRunManager:
+    """FastAPI dependency providing the process-local SimulationRunManager singleton (Task A3).
+
+    Unlike the services above, this deliberately is NOT a fresh instance per
+    request: SimulationRunManager owns in-memory run state (single-active-run
+    enforcement, the current run's snapshot) that must be shared across every
+    request in this process for that state to mean anything. The instance is
+    created lazily on first use and then reused for the lifetime of the
+    process - it is lost on restart, and running more than one Uvicorn worker
+    would give each worker its own independent instance (see the module
+    docstring of src/services/simulation_control/simulation_run_manager.py;
+    this MVP requires `--workers 1`).
+
+    Tests should call `set_simulation_run_manager_for_tests` rather than
+    relying on this module-level singleton directly, so each test can start
+    from a known-fresh manager (e.g. one built with a fake runner/executor)
+    without leaking state into other tests.
+    """
+    global _simulation_run_manager
+    if _simulation_run_manager is None:
+        _simulation_run_manager = SimulationRunManager()
+    return _simulation_run_manager
+
+
+def set_simulation_run_manager_for_tests(manager: SimulationRunManager | None) -> None:
+    """Test-only hook to replace or clear the process-local singleton above.
+
+    Pass a purpose-built SimulationRunManager (e.g. with a fake runner_factory
+    and a synchronous executor) to make it the one `get_simulation_run_manager`
+    returns, or `None` to force the next call to build a fresh default
+    instance. Never used by production code.
+    """
+    global _simulation_run_manager
+    _simulation_run_manager = manager
+
+
+def get_operations_overview_query_service() -> OperationsOverviewQueryService:
+    """FastAPI dependency providing a fully-wired OperationsOverviewQueryService (Task A6).
+
+    Same fresh-instance-per-request rationale as get_fire_danger_query_service
+    for every collaborator except `simulation_run_manager`: that one MUST be
+    the process-local singleton `get_simulation_run_manager()` returns, never
+    a fresh `SimulationRunManager()` (which would always report IDLE,
+    silently hiding a real running simulation) - see
+    OperationsOverviewQueryService.__init__'s own docstring for why.
+    """
+    return OperationsOverviewQueryService(simulation_run_manager=get_simulation_run_manager())
