@@ -445,8 +445,12 @@ describe("ActiveWildfiresPage (Task A8 Operations Overview)", () => {
     renderPage();
     await screen.findByText("Northern District - Very high fire danger");
 
-    expect(screen.queryByText(/global response plan/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/2 active fires/)).not.toBeInTheDocument();
+    // Scoped to the Activity Feed itself: the page header's own static
+    // "Global Response Plan" navigation link is a separate, legitimate
+    // element and must not make this assertion false-positive.
+    const feed = screen.getByRole("region", { name: /activity/i });
+    expect(within(feed).queryByText(/global response plan/i)).not.toBeInTheDocument();
+    expect(within(feed).queryByText(/2 active fires/)).not.toBeInTheDocument();
   });
 
   it("does not show View Response Plan when no global planning run has ever been persisted", async () => {
@@ -684,7 +688,7 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
   });
 
   it("offers a prominent Global Response Plan link to /response-plan with no focus filter", async () => {
-    getActiveFireEventsMock.mockResolvedValue({ as_of: "2026-09-17T14:00:00Z", items: [] });
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([]));
 
     renderPage();
 

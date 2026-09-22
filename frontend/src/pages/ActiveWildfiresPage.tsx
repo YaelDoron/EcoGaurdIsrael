@@ -8,7 +8,6 @@ import { ErrorState } from "../components/feedback/ErrorState";
 import { LoadingState } from "../components/feedback/LoadingState";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Link } from "react-router-dom";
-import { useActiveFireEvents } from "../hooks/useActiveFireEvents";
 import { useOperationsOverview } from "../hooks/useOperationsOverview";
 import type { OperationsActivityFeedItem } from "../types/operationsOverview";
 import "./ActiveWildfiresPage.css";
@@ -42,7 +41,7 @@ const PAGE_TITLE = "Operations Overview";
  * asymmetric and cramped the feed's preview text.
  */
 export function ActiveWildfiresPage() {
-  const { data, isLoading, loadError, refreshError, refresh } = useOperationsOverview();
+  const { data, isLoading, isRefreshing, loadError, refreshError, refresh } = useOperationsOverview();
   const [selectedActivity, setSelectedActivity] = useState<OperationsActivityFeedItem | null>(null);
 
   if (isLoading) {
@@ -74,7 +73,6 @@ export function ActiveWildfiresPage() {
     <section>
       <PageHeader
         title={PAGE_TITLE}
-        description={PAGE_DESCRIPTION}
         actions={
           <>
             <Link to="/response-plan" className="active-wildfires-page__global-plan">
@@ -91,7 +89,6 @@ export function ActiveWildfiresPage() {
           </>
         }
       />
-      <PageHeader title={PAGE_TITLE} />
 
       <OperationsStatusHeader
         simulation={data.simulation}
