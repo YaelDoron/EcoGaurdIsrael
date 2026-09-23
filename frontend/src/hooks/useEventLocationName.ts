@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getEventDetails } from "../api/eventDetails";
+import { translateIfUntranslated } from "../components/map/stationTranslations";
 
 /**
  * The persisted location name for a FireEvent (the first news-evidence
@@ -19,7 +20,7 @@ export function useEventLocationName(fireEventId: number | null): string | null 
       .then((details) => {
         if (cancelled) return;
         const name = details.detection_evidence.news.find((item) => item.location_name)?.location_name ?? null;
-        setState({ id: fireEventId, name });
+        setState({ id: fireEventId, name: translateIfUntranslated(name) });
       })
       .catch(() => {
         if (!cancelled) setState({ id: fireEventId, name: null });

@@ -8,6 +8,7 @@ test's own precedent.
 """
 from __future__ import annotations
 
+import random
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -98,7 +99,7 @@ def _persist_road_network(sqlite_session_factory, nodes, edges) -> None:
     session.close()
 
 
-def _make_coordinator(sqlite_session_factory) -> GlobalPlanningRefreshCoordinator:
+def _make_coordinator(sqlite_session_factory, road_network_fetcher=None) -> GlobalPlanningRefreshCoordinator:
     fire_station_repository = FireStationRepository(sqlite_session_factory)
     firefighting_resource_repository = FirefightingResourceRepository(sqlite_session_factory)
     resource_commitment_repository = ResourceCommitmentRepository(sqlite_session_factory)
@@ -117,7 +118,7 @@ def _make_coordinator(sqlite_session_factory) -> GlobalPlanningRefreshCoordinato
         ),
         resource_commitment_repository=resource_commitment_repository,
     )
-    input_builder = GlobalPlanningInputBuilder(
+    input_builder_kwargs = dict(
         global_planning_run_repository=GlobalPlanningRunRepository(sqlite_session_factory),
         response_target_repository=ResponseTargetRepository(sqlite_session_factory),
         candidate_collector=candidate_collector,
@@ -129,6 +130,9 @@ def _make_coordinator(sqlite_session_factory) -> GlobalPlanningRefreshCoordinato
         road_network_repository=RoadNetworkRepository(),
         session_factory=sqlite_session_factory,
     )
+    if road_network_fetcher is not None:
+        input_builder_kwargs["road_network_fetcher"] = road_network_fetcher
+    input_builder = GlobalPlanningInputBuilder(**input_builder_kwargs)
     activation_service = GlobalResponsePlanActivationService(
         response_plan_repository=ResponsePlanRepository(sqlite_session_factory),
         response_plan_planning_state_repository=ResponsePlanPlanningStateRepository(sqlite_session_factory),
@@ -500,3 +504,144 @@ def test_farther_station_reinforces_when_the_local_station_cannot(sqlite_session
     assert readback_action.eta_seconds == 400.0
     assert readback_action.route_distance_meters == 5000.0
     assert readback_action.node_path == (3, 4, 2)
+
+
+# ---------------------------------------------------------------------------
+# Proactive stress test: 3-4 concurrent, geographically dispersed FireEvents
+# with a large accumulated road network, through the FULL refresh cycle.
+#
+# Motivation: a real production incident (3 concurrent events across Israel;
+# one, Golan Heights, never appeared in the Global Response Plan) traced to
+# a PostgreSQL 65535-bind-parameter crash in RoadNetworkRepository once the
+# combined bounding box's node count grew large - already fixed via batching
+# (see RoadNetworkRepository._BULK_OPERATION_BATCH_SIZE) plus an outer
+# safety net in GlobalPlanningInputBuilder._load_road_network. The exact
+# live run that exposed it was lost to a subsequent demo state reset before
+# its stack trace could be captured, so this test reconstructs the same
+# CLASS of stress synthetically and deterministically instead of waiting to
+# hit the live edge case again.
+# ---------------------------------------------------------------------------
+
+# This environment's SQLite build enforces its own bind-parameter limit
+# (32766 - see sqlite3.Connection.getlimit(SQLITE_LIMIT_VARIABLE_NUMBER),
+# lower than PostgreSQL's 65535 but the same class of limit) - large enough
+# filler counts trip it too, so this test exercises the real failure
+# mechanism without needing a live Postgres connection. 17,000 nodes:
+#   - _upsert_nodes (3 params/row, unbatched): 51,000 params > both engines'
+#     limits.
+#   - _edges_touching (was 2 IN(...) clauses over the same node_ids,
+#     unbatched): 34,000 params > SQLite's 32766 too.
+# Comfortably exceeds both pre-fix crash thresholds on this exact
+# environment's SQLite build, while completing in a few seconds thanks to
+# the batching fix.
+_STRESS_FILLER_NODE_COUNT = 17_000
+
+
+def _make_filler_nodes(
+    count: int, *, id_offset: int, min_lat: float, max_lat: float, min_lon: float, max_lon: float, seed: int = 7
+) -> list[GraphNode]:
+    """Deterministic stand-in for 'a lot of accumulated real-world OSM
+    coverage across a wide combined bounding box' - the actual mechanism
+    that grew the live combined bbox's node count large enough to crash.
+    These nodes deliberately carry NO edges: NodeMappingService only
+    considers nodes with an edge in the needed direction (see its own
+    _nodes_with_outgoing_edges/_nodes_with_incoming_edges), so an edgeless
+    filler node can never be selected as a route endpoint regardless of how
+    close it happens to land to a real station/target - they exist purely
+    to inflate the node COUNT that RoadNetworkRepository must batch, never
+    to influence which route gets chosen.
+    """
+    rng = random.Random(seed)
+    return [
+        GraphNode(id=id_offset + index, latitude=rng.uniform(min_lat, max_lat), longitude=rng.uniform(min_lon, max_lon))
+        for index in range(count)
+    ]
+
+
+class _FailIfCalledRoadNetworkFetcher:
+    """Every event's own anchor is deliberately pre-covered by this test's
+    seeded network, so a live OSM fetch should never be attempted. Raising
+    (rather than silently degrading, the way the real fetcher would) turns
+    an accidental live network call in a test run into an immediate, loud
+    failure instead of a slow/flaky one."""
+
+    def fetch_network_in_bbox(self, min_lat, max_lat, min_lon, max_lon, **_kwargs):
+        raise AssertionError(
+            "RoadNetworkFetcher.fetch_network_in_bbox should never be called in this test - "
+            "every event's anchor is pre-covered by the seeded road network."
+        )
+
+    def fetch_network_in_bbox_tiled(self, min_lat, max_lat, min_lon, max_lon, **_kwargs):
+        return self.fetch_network_in_bbox(min_lat, max_lat, min_lon, max_lon)
+
+
+def test_stress_four_dispersed_concurrent_fires_through_the_full_refresh_cycle(sqlite_session_factory):
+    """Forces 4 concurrent, geographically dispersed FireEvents (Carmel,
+    Jerusalem Forest, Golan Heights, Judean Hills - spanning nearly the full
+    length of Israel, matching the real incident's scale) through the REAL
+    GlobalPlanningRefreshCoordinator cycle (FireEvent capture ->
+    GlobalPlanningRun -> GlobalPlanningInputBuilder, including its road-
+    network loading and per-anchor coverage check -> Global GA -> atomic
+    activation), with enough accumulated road-network coverage in the
+    combined bounding box to exceed this environment's real bind-parameter
+    limits under the pre-fix, unbatched RoadNetworkRepository code.
+
+    This is the proactive alternative to waiting for the live incident to
+    recur: if either batching fix (_upsert_nodes or _edges_touching) were
+    ever reverted or the outer safety net removed, this test fails loudly
+    and immediately, at a scale and through the exact code path the real
+    incident used - not a synthetic unit-level parameter count.
+    """
+    regions = {
+        "carmel": (32.7295, 35.0477),
+        "jerusalem_forest": (31.7716, 35.1503),
+        "golan_heights": (33.0000, 35.7500),
+        "judean_hills": (31.6674, 35.0405),
+    }
+
+    session = sqlite_session_factory()
+    fire_event_ids: dict[str, int] = {}
+    real_nodes: list[GraphNode] = []
+    real_edges: list[GraphEdge] = []
+    next_node_id = 1
+    for name, (latitude, longitude) in regions.items():
+        fire_event_id = _persist_fire_event(session, latitude, longitude)
+        fire_event_ids[name] = fire_event_id
+        _persist_target_set(session, fire_event_id, latitude, longitude)
+        station_id, resource_id = f"STATION-{name.upper()}", f"R-{name.upper()}"
+        _persist_station_and_resources(session, station_id, latitude, longitude, [resource_id])
+
+        station_node_id, target_node_id = next_node_id, next_node_id + 1
+        next_node_id += 2
+        real_nodes.append(GraphNode(id=station_node_id, latitude=latitude, longitude=longitude))
+        real_nodes.append(GraphNode(id=target_node_id, latitude=latitude, longitude=longitude))
+        real_edges.append(
+            GraphEdge(
+                source_node_id=station_node_id, target_node_id=target_node_id,
+                distance_meters=50.0, travel_time_seconds=10.0,
+            )
+        )
+    session.commit()
+    session.close()
+
+    filler_nodes = _make_filler_nodes(
+        _STRESS_FILLER_NODE_COUNT, id_offset=1_000_000, min_lat=31.5, max_lat=33.1, min_lon=34.9, max_lon=35.85
+    )
+    _persist_road_network(sqlite_session_factory, nodes=real_nodes + filler_nodes, edges=real_edges)
+
+    coordinator = _make_coordinator(sqlite_session_factory, road_network_fetcher=_FailIfCalledRoadNetworkFetcher())
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.ACTIVATED
+    # The central assertion: every event survives the full cycle - none
+    # silently vanishes from the Global Response Plan the way Golan Heights
+    # did in the real incident.
+    assert set(result.response_plan_ids_by_event) == set(fire_event_ids.values())
+
+    session = sqlite_session_factory()
+    for name, fire_event_id in fire_event_ids.items():
+        plan = session.get(ResponsePlanDB, result.response_plan_ids_by_event[fire_event_id])
+        assert len(plan.actions) == 1, f"{name} (event {fire_event_id}) got {len(plan.actions)} actions, expected 1"
+        assert plan.actions[0].resource_id == f"R-{name.upper()}"
+    session.close()

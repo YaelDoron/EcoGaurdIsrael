@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { StationLayer, dynamicAvailableCount } from "./StationLayer";
+import { StationLayer, dynamicAvailableCount, dynamicUnavailableCount } from "./StationLayer";
 import type { FireStation, StationSummary } from "../../types/eventDetails";
 
 vi.mock("react-leaflet", async () => import("../../test/reactLeafletStub"));
@@ -55,20 +55,23 @@ describe("StationLayer", () => {
     expect(screen.queryByText("1 Main St")).not.toBeInTheDocument();
   });
 
-  it("shows total/available/unavailable counts from the matching station summary", () => {
-    render(
+  it("shows total/available/unavailable counts strictly derived from the matching station summary", () => {
+    const { container } = render(
       <StationLayer
         stations={[makeStation()]}
-        stationSummaries={[makeStationSummary({ total_resources: 4, available: 2, unavailable: 1 })]}
+        stationSummaries={[
+          makeStationSummary({ total_resources: 4, assigned_status: 1, unavailable: 1, current_global_plan_allocations: [] }),
+        ]}
       />,
     );
 
     expect(screen.getByText("Total")).toBeInTheDocument();
     expect(screen.getByText("4")).toBeInTheDocument();
     expect(screen.getByText("Available")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
     expect(screen.getByText("Unavailable")).toBeInTheDocument();
-    expect(screen.getByText("1")).toBeInTheDocument();
+    // assigned_status(1) + unavailable(1) = 2 unavailable; Available = Total(4) - Allocated(0) - Unavailable(2) = 2.
+    expect(container.querySelector(".station-popup__stat--available dd")).toHaveTextContent("2");
+    expect(container.querySelector(".station-popup__stat--unavailable dd")).toHaveTextContent("2");
   });
 
   it("lists allocated resource ids from the current global plan", () => {
@@ -190,7 +193,10 @@ describe("StationLayer", () => {
 
   it("mutes a zero unavailable count instead of coloring it as a problem", () => {
     const { container } = render(
-      <StationLayer stations={[makeStation()]} stationSummaries={[makeStationSummary({ unavailable: 0 })]} />,
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[makeStationSummary({ assigned_status: 0, unavailable: 0 })]}
+      />,
     );
 
     expect(container.querySelector(".station-popup__stat--unavailable")).toBeNull();
@@ -226,8 +232,8 @@ describe("StationLayer", () => {
         stations={[makeStation()]}
         stationSummaries={[
           makeStationSummary({
-            total_resources: 3,
-            available: 2,
+            total_resources: 2,
+            assigned_status: 0,
             unavailable: 0,
             current_global_plan_allocations: [
               { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
@@ -244,13 +250,13 @@ describe("StationLayer", () => {
     expect(zero).toHaveTextContent("0");
   });
 
-  it("never shows a negative available count when allocations exceed the raw available count", () => {
+  it("never shows a negative available count even when allocations exceed the station's total resources", () => {
     const { container } = render(
       <StationLayer
         stations={[makeStation()]}
         stationSummaries={[
           makeStationSummary({
-            available: 1,
+            total_resources: 2,
             current_global_plan_allocations: [
               { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
               { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
@@ -262,10 +268,18 @@ describe("StationLayer", () => {
     );
 
     expect(container.textContent).not.toContain("-");
-    expect(dynamicAvailableCount(makeStationSummary({ available: 1, current_global_plan_allocations: [
-      { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
-      { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
-    ] }))).toBe(0);
+    expect(
+      dynamicAvailableCount(
+        makeStationSummary({
+          total_resources: 2,
+          current_global_plan_allocations: [
+            { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+            { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+            { resource_id: "R3", fire_event_id: 12, response_plan_id: 77 },
+          ],
+        }),
+      ),
+    ).toBe(0);
   });
 
   it("marks a station that contributes trucks to the current plan deep blue - never red, never inactive grey", () => {
@@ -336,6 +350,77 @@ describe("StationLayer", () => {
     const [, total] = stats[0] as [string, number];
     const sum = (stats[1][1] as number) + (stats[2][1] as number) + (stats[3][1] as number);
     expect(sum).toBe(total);
+  });
+
+  it("counts a truck assigned outside the current plan as unavailable, so Total still balances (Nesher-style bug)", () => {
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            total_resources: 2,
+            available: 1,
+            assigned_status: 1,
+            unavailable: 0,
+            current_global_plan_allocations: [],
+          }),
+        ]}
+      />,
+    );
+
+    const stats = Array.from(container.querySelectorAll(".station-popup__stat")).map((el) => [
+      el.querySelector("dt")?.textContent,
+      Number(el.querySelector("dd")?.textContent),
+    ]);
+    expect(stats).toEqual([
+      ["Total", 2],
+      ["Available", 1],
+      ["Allocated", 0],
+      ["Unavailable", 1],
+    ]);
+  });
+
+  it("never double-counts a truck as both Allocated and Unavailable when its DB status already flipped to assigned", () => {
+    // Total 2, both trucks allocated to THIS event's plan; one of them already
+    // shows as raw `assigned` in the DB (status updates can land before or
+    // after a plan is generated). Before the strict Total-based formula this
+    // produced Total 2 / Allocated 2 / Unavailable 1 (summing to 3).
+    const { container } = render(
+      <StationLayer
+        stations={[makeStation()]}
+        stationSummaries={[
+          makeStationSummary({
+            total_resources: 2,
+            assigned_status: 1,
+            unavailable: 0,
+            current_global_plan_allocations: [
+              { resource_id: "R1", fire_event_id: 12, response_plan_id: 77 },
+              { resource_id: "R2", fire_event_id: 12, response_plan_id: 77 },
+            ],
+          }),
+        ]}
+      />,
+    );
+
+    const stats = Array.from(container.querySelectorAll(".station-popup__stat")).map((el) => [
+      el.querySelector("dt")?.textContent,
+      Number(el.querySelector("dd")?.textContent),
+    ]);
+    expect(stats).toEqual([
+      ["Total", 2],
+      ["Available", 0],
+      ["Allocated", 2],
+      ["Unavailable", 0],
+    ]);
+    const sum = (stats[1][1] as number) + (stats[2][1] as number) + (stats[3][1] as number);
+    expect(sum).toBe(stats[0][1]);
+  });
+
+  it("dynamicUnavailableCount folds assigned-elsewhere trucks into the unavailable bucket, defensively treating missing counts as zero", () => {
+    expect(dynamicUnavailableCount(makeStationSummary({ unavailable: 1, assigned_status: 1 }))).toBe(2);
+    expect(
+      dynamicUnavailableCount({ ...makeStationSummary(), unavailable: null as unknown as number, assigned_status: 2 }),
+    ).toBe(2);
   });
 
   it("styles the Allocated number with the operational orange used by the allocated truck pills", () => {

@@ -1,6 +1,6 @@
 import type { Coordinate, ResponsePlanTarget } from "../../types/responsePlan";
 import type { GlobalEventPlan } from "../../types/globalResponsePlan";
-import { isDrawableRoute } from "../response-plan/ResponseRouteLayerModel";
+import { coordinatesEqual, isDrawableRoute } from "../response-plan/ResponseRouteLayerModel";
 
 /**
  * Pure, map-framework-agnostic data model for the Global Response Map layer
@@ -27,6 +27,11 @@ export interface GlobalRouteFeature {
   targetId: number;
   /** The exact persisted `route.path_coordinates`, in backend order. */
   path: Coordinate[];
+  /** Visual-only connector bridging `path`'s last (snapped-to-road) point to
+   * the target's own coordinate - see ResponseRouteLayerModel's
+   * `ResponseRouteFeature.lastMileGap` for the full rationale, mirrored here
+   * for the Global Response Map's own route feature type. */
+  lastMileGap: [Coordinate, Coordinate] | null;
   isFocused: boolean;
 }
 
@@ -159,13 +164,24 @@ export function buildGlobalResponseMapLayer(
       pushTargetMarker(event.fire_event_id, action.target, isFocused, fireMarkers, targetMarkers);
 
       if (isDrawableRoute(action.route)) {
+        // isDrawableRoute already confirmed path_coordinates is non-null and has >=2 points.
+        const path = action.route.path_coordinates as Coordinate[];
+        const lastPoint = path[path.length - 1];
+        const targetCoordinate = hasCoordinate(action.target)
+          ? { latitude: action.target.latitude, longitude: action.target.longitude }
+          : null;
+        const lastMileGap: [Coordinate, Coordinate] | null =
+          targetCoordinate !== null && !coordinatesEqual(lastPoint, targetCoordinate)
+            ? [lastPoint, targetCoordinate]
+            : null;
+
         routes.push({
           actionKey,
           fireEventId: event.fire_event_id,
           resourceId: action.resource.resource_id,
           targetId: action.target.response_target_id,
-          // isDrawableRoute already confirmed path_coordinates is non-null.
-          path: action.route.path_coordinates as Coordinate[],
+          path,
+          lastMileGap,
           isFocused,
         });
       }

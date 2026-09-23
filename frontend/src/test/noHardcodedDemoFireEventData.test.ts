@@ -49,7 +49,6 @@ const PRODUCTION_FILES = [
   // Visual polish pass
   "src/components/dashboard/ActivityTimestamp.tsx",
   // Interaction polish pass
-  "src/components/dashboard/ViewResponsePlanAction.tsx",
   "src/components/map/DisableScrollWheelZoom.tsx",
 ];
 
@@ -220,11 +219,6 @@ describe("Interaction polish pass architecture guards", () => {
     for (const forbidden of ["fabricatePlanId", "response_plan_ids[0] +", "response_plan_ids[0]+"]) {
       expect(combinedSource).not.toContain(forbidden);
     }
-  });
-
-  it("never polls A5 GlobalPlanningRun detail on a timer - only a click can trigger it", () => {
-    const viewResponsePlanSource = readFileSync("src/components/dashboard/ViewResponsePlanAction.tsx", "utf-8");
-    expect(viewResponsePlanSource).not.toMatch(/setInterval|setTimeout/);
   });
 
   it("never renders a fire_severity item in the Activity Feed (Severity already lives on Active Fires cards)", () => {

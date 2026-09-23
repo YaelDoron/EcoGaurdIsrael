@@ -98,6 +98,22 @@ class OperationalContextService:
         self._cross_event_reserved_resource_resolver = (
             cross_event_reserved_resource_resolver or CrossEventReservedResourceResolver()
         )
+        # Infrastructure-only optimization (Global Optimizer performance
+        # fix): GlobalCandidateCollector.collect() calls
+        # get_stations_in_operational_area once per active fire-event anchor
+        # against this SAME OperationalContextService instance, and each
+        # such call independently re-fetched the entire station table via
+        # _stations_with_distance. The full station table never changes
+        # mid-build, so it is now fetched once and cached for this
+        # instance's lifetime. Safe for the same reason as
+        # DijkstraCalculator's adjacency-list cache: every production
+        # construction site (global_planning_production_factory,
+        # response_planning_production_factory, and their test
+        # equivalents) builds a fresh OperationalContextService per
+        # planning run rather than reusing one across requests, so the
+        # cache can never observe a station added/removed after this
+        # instance was built.
+        self._all_stations_cache: list[FireStationDB] | None = None
 
     def get_stations_in_operational_area(
         self,
@@ -346,9 +362,11 @@ class OperationalContextService:
     def _stations_with_distance(
         self, latitude: float, longitude: float
     ) -> list[tuple[FireStationDB, float]]:
+        if self._all_stations_cache is None:
+            self._all_stations_cache = self._fire_station_repository.get_all_stations()
         return [
             (station, haversine_distance_km(latitude, longitude, station.latitude, station.longitude))
-            for station in self._fire_station_repository.get_all_stations()
+            for station in self._all_stations_cache
         ]
 
     @staticmethod

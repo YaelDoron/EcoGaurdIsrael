@@ -26,6 +26,12 @@ const NEUTRAL_ROUTE_WEIGHT = 4;
 
 const TARGET_FIRE_COLOR = "#ff4500";
 const ORIGIN_MARKER_COLOR = "var(--color-info)";
+// "Last mile" connector: bridges the routed path's snapped-to-road end
+// point to the target's own (off-road) coordinate. Always dashed and thin,
+// regardless of selection state - it is a visual bridge, never mistaken for
+// part of the actual computed route.
+const LAST_MILE_GAP_DASH = "5, 10";
+const LAST_MILE_GAP_WEIGHT = 2;
 
 const MARKER_SIZE = 16;
 const MARKER_SIZE_SELECTED = 22;
@@ -111,6 +117,21 @@ export function ResponsePlanMapLayer({
           pathOptions={routePathOptions(route.isSelected, hasSelection)}
         />
       ))}
+
+      {layer.routes.map((route) =>
+        route.lastMileGap ? (
+          <Polyline
+            key={`last-mile-${route.actionKey}`}
+            positions={route.lastMileGap.map((point): [number, number] => [point.latitude, point.longitude])}
+            pathOptions={{
+              color: route.isSelected ? SELECTED_ROUTE_COLOR : OTHER_ROUTE_COLOR,
+              weight: LAST_MILE_GAP_WEIGHT,
+              dashArray: LAST_MILE_GAP_DASH,
+              opacity: dimmedOpacity(route.isSelected) ?? (route.isSelected ? 1 : 0.85),
+            }}
+          />
+        ) : null,
+      )}
 
       {layer.originMarkers.map((origin) => (
         <Marker

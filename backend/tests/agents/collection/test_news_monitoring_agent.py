@@ -48,9 +48,16 @@ def make_agent(
 
 def _wire_success(text_processor: Mock, geocoder: Mock, news_repository: Mock) -> None:
     text_processor.is_relevant.return_value = True
-    text_processor.analyze.return_value = NewsTextAnalysis(
-        location_name="Haifa",
-        wildfire_signal_strength=NewsWildfireSignalStrength.STRONG,
+    text_processor.extract_location.return_value = "Haifa"
+    # translate_report's default double is a passthrough (returns its own
+    # arguments unchanged) so tests that don't care about translation still
+    # see the same title/summary/location_name they set up on the entry -
+    # matching TextProcessor's real "fall back to the original on failure"
+    # contract, not a fabricated English string.
+    text_processor.translate_report.side_effect = lambda title, summary, location_name: (
+        title,
+        summary,
+        location_name,
     )
     geocoder.geocode.return_value = (32.794, 34.9896)
     news_repository.exists_by_source_url.return_value = False
@@ -138,6 +145,41 @@ def test_unavailable_analysis_saves_report_with_unknown_signal():
     assert report.wildfire_signal_strength is None
 
 
+def test_saved_report_uses_the_translated_text_not_the_raw_hebrew_entry():
+    """The persisted report must be TextProcessor.translate_report's output,
+    not entry["title"]/entry["summary"] passed straight through - this is
+    the dynamic-translation-pipeline behavior (news items must not reach
+    the database, and therefore the frontend, still in Hebrew)."""
+    rss_fetcher = Mock()
+    text_processor = Mock()
+    geocoder = Mock()
+    news_repository = Mock(spec=NewsRepository)
+    rss_fetcher.fetch_all.return_value = [
+        make_entry(title="שריפה גדולה בכרמל", summary="כוחות כיבוי בדרך למקום.")
+    ]
+    _wire_success(text_processor, geocoder, news_repository)
+    text_processor.extract_location.return_value = "כרמל"
+    # Overrides _wire_success's passthrough double: side_effect (not just
+    # return_value) must be cleared, or Mock would keep using it.
+    text_processor.translate_report.side_effect = None
+    text_processor.translate_report.return_value = ("Large fire in Carmel", "Firefighters en route.", "Carmel")
+    agent = make_agent(rss_fetcher, text_processor, geocoder, news_repository)
+
+    saved_count = agent.run_once()
+
+    assert saved_count == 1
+    text_processor.translate_report.assert_called_once_with(
+        "שריפה גדולה בכרמל", "כוחות כיבוי בדרך למקום.", "כרמל"
+    )
+    report = news_repository.save_report.call_args.args[0]
+    assert report.title == "Large fire in Carmel"
+    assert report.summary == "Firefighters en route."
+    assert report.location_name == "Carmel"
+    # Geocoding still used the ORIGINAL (Hebrew) location name, extracted
+    # before translation - translation must never change what got geocoded.
+    geocoder.geocode.assert_called_once_with("כרמל")
+
+
 def test_irrelevant_article_is_not_saved():
     rss_fetcher = Mock()
     text_processor = Mock()
@@ -152,7 +194,8 @@ def test_irrelevant_article_is_not_saved():
     assert saved_count == 0
     news_repository.exists_by_source_url.assert_not_called()
     news_repository.save_report.assert_not_called()
-    text_processor.analyze.assert_not_called()
+    text_processor.extract_location.assert_not_called()
+    text_processor.translate_report.assert_not_called()
     geocoder.geocode.assert_not_called()
 
 
@@ -170,7 +213,8 @@ def test_duplicate_article_is_skipped_before_external_processing():
 
     assert saved_count == 0
     news_repository.save_report.assert_not_called()
-    text_processor.analyze.assert_not_called()
+    text_processor.extract_location.assert_not_called()
+    text_processor.translate_report.assert_not_called()
     geocoder.geocode.assert_not_called()
 
 

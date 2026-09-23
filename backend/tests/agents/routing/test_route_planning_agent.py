@@ -12,6 +12,10 @@ from src.calculators.response_target.response_target_config import (
     RESPONSE_TARGET_METHODOLOGY_VERSION,
 )
 from src.calculators.routing.dijkstra_calculator import DijkstraResult
+from src.calculators.routing.haversine_fallback_calculator import (
+    DEFAULT_OFF_ROAD_SPEED_KMH,
+    estimate_off_road_distance_and_eta,
+)
 from src.calculators.routing.routing_config import ROUTING_METHODOLOGY_NAME, ROUTING_METHODOLOGY_VERSION
 from src.models import GraphEdge, GraphNode, ResponseTarget, ResponseTargetSet, ResponseTargetType, RouteStatus
 from src.models.routing import StoredRouteResult
@@ -298,6 +302,131 @@ def test_reachable_dijkstra_result_fields_are_mapped_onto_route_result():
     assert route.node_path == (1001, 1500, 1002)
     assert route.distance_meters == 2500.0
     assert route.travel_time_seconds == 180.0
+
+
+# ---------------------------------------------------------------------------
+# Degenerate 0m/0s REACHABLE result -> straight-line off-road fallback
+# (sparse/coarse road-network graph snaps a distant station and target to
+# the SAME nearest node, so Dijkstra's own same-node shortcut reports 0m/0s
+# even though the real coordinates are genuinely far apart).
+# ---------------------------------------------------------------------------
+
+
+def test_degenerate_zero_result_is_replaced_by_a_haversine_off_road_estimate():
+    # Resource is the default station (32.700, 35.000), target is
+    # ACTIVE_TARGET (32.731, 35.046) - genuinely ~5.5km apart in reality,
+    # even though a sparse/coarse graph maps BOTH to the same nearest node
+    # (1001), so Dijkstra's own same-node shortcut reports 0m/0s.
+    node_mapping_service = FakeNodeMappingService(resource_map={"truck-1": 1001}, target_map={900: 1001})
+    dijkstra_calculator = FakeDijkstraCalculator(
+        results={
+            (1001, 1001): DijkstraResult(
+                status=RouteStatus.REACHABLE,
+                node_path=(1001,),
+                distance_meters=0.0,
+                travel_time_seconds=0.0,
+            )
+        }
+    )
+    route_planning_repository = FakeRoutePlanningRepository()
+
+    make_agent(
+        node_mapping_service=node_mapping_service,
+        dijkstra_calculator=dijkstra_calculator,
+        route_planning_repository=route_planning_repository,
+    ).plan(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    route = route_planning_repository.calls[0].routes[0]
+    expected_distance_meters, expected_travel_time_seconds = estimate_off_road_distance_and_eta(
+        32.700, 35.000, ACTIVE_TARGET.latitude, ACTIVE_TARGET.longitude
+    )
+
+    assert route.status is RouteStatus.REACHABLE
+    # node_path/source/target are Dijkstra's own (degenerate) answer,
+    # unchanged - only distance/time are substituted.
+    assert route.node_path == (1001,)
+    assert route.distance_meters == pytest.approx(expected_distance_meters)
+    assert route.travel_time_seconds == pytest.approx(expected_travel_time_seconds)
+    assert route.distance_meters > 0
+    assert route.travel_time_seconds > 0
+
+
+def test_degenerate_zero_result_fallback_uses_the_documented_default_off_road_speed():
+    node_mapping_service = FakeNodeMappingService(resource_map={"truck-1": 1001}, target_map={900: 1001})
+    dijkstra_calculator = FakeDijkstraCalculator(
+        results={
+            (1001, 1001): DijkstraResult(
+                status=RouteStatus.REACHABLE, node_path=(1001,), distance_meters=0.0, travel_time_seconds=0.0
+            )
+        }
+    )
+    route_planning_repository = FakeRoutePlanningRepository()
+
+    make_agent(
+        node_mapping_service=node_mapping_service,
+        dijkstra_calculator=dijkstra_calculator,
+        route_planning_repository=route_planning_repository,
+    ).plan(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    route = route_planning_repository.calls[0].routes[0]
+    implied_speed_kmh = (route.distance_meters / 1000.0) / (route.travel_time_seconds / 3600.0)
+    assert implied_speed_kmh == pytest.approx(DEFAULT_OFF_ROAD_SPEED_KMH)
+
+
+def test_degenerate_zero_result_is_left_alone_when_coordinates_are_practically_identical():
+    # The target sits at the exact same coordinates as the default station
+    # (32.700, 35.000) - a genuine 0m/0s here is correct, not degenerate, so
+    # the fallback must not substitute anything.
+    same_location_target = ResponseTarget(
+        fire_event_id=FIRE_EVENT_ID,
+        target_type=ResponseTargetType.ACTIVE_FIRE,
+        latitude=32.700,
+        longitude=35.000,
+        priority_score=150.0,
+    )
+    node_mapping_service = FakeNodeMappingService(resource_map={"truck-1": 1001}, target_map={900: 1001})
+    dijkstra_calculator = FakeDijkstraCalculator(
+        results={
+            (1001, 1001): DijkstraResult(
+                status=RouteStatus.REACHABLE, node_path=(1001,), distance_meters=0.0, travel_time_seconds=0.0
+            )
+        }
+    )
+    route_planning_repository = FakeRoutePlanningRepository()
+
+    make_agent(
+        response_target_repository=FakeResponseTargetRepository(make_target_set((same_location_target,))),
+        node_mapping_service=node_mapping_service,
+        dijkstra_calculator=dijkstra_calculator,
+        route_planning_repository=route_planning_repository,
+    ).plan(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    route = route_planning_repository.calls[0].routes[0]
+    assert route.status is RouteStatus.REACHABLE
+    assert route.distance_meters == 0.0
+    assert route.travel_time_seconds == 0.0
+
+
+def test_a_genuine_nonzero_reachable_result_is_never_touched_by_the_fallback():
+    # Sanity companion to test_reachable_dijkstra_result_fields_are_mapped_onto_route_result:
+    # a real, nonzero routed result must come through byte-for-byte
+    # unchanged, never "corrected" by the off-road estimate.
+    dijkstra_calculator = FakeDijkstraCalculator(
+        results={
+            (1001, 1002): DijkstraResult(
+                status=RouteStatus.REACHABLE, node_path=(1001, 1002), distance_meters=3456.0, travel_time_seconds=210.0
+            )
+        }
+    )
+    route_planning_repository = FakeRoutePlanningRepository()
+
+    make_agent(dijkstra_calculator=dijkstra_calculator, route_planning_repository=route_planning_repository).plan(
+        fire_event_id=FIRE_EVENT_ID, as_of=AS_OF
+    )
+
+    route = route_planning_repository.calls[0].routes[0]
+    assert route.distance_meters == 3456.0
+    assert route.travel_time_seconds == 210.0
 
 
 def test_dijkstra_unreachable_result_produces_unreachable_route():

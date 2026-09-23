@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.agents.routing.route_planning_result import RoutePlanningResult, RoutePlanningStatus
 from src.calculators.routing.dijkstra_calculator import DijkstraCalculator
+from src.calculators.routing.haversine_fallback_calculator import (
+    MIN_DISTINCT_DISTANCE_METERS,
+    estimate_off_road_distance_and_eta,
+    is_degenerate_zero_result,
+)
 from src.calculators.routing.routing_config import ROUTING_METHODOLOGY_NAME, ROUTING_METHODOLOGY_VERSION
 from src.database.connection import get_session_factory
 from src.models.graph_edge import GraphEdge
@@ -29,6 +34,7 @@ from src.repositories.response_target_repository import (
 from src.repositories.route_planning_repository import RoutePlanningRepository
 from src.services.operational.operational_context_service import OperationalContext, OperationalContextService
 from src.services.routing.node_mapping_service import NodeMappingService
+from src.utils.geo import haversine_distance_km
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +211,10 @@ class RoutePlanningAgent:
                 travel_time_seconds=None,
             )
 
+        distance_meters, travel_time_seconds = self._resolve_reachable_distance_and_eta(
+            resource, target, dijkstra_result.distance_meters, dijkstra_result.travel_time_seconds
+        )
+
         return RouteResult(
             resource_id=resource.resource_id,
             response_target_id=target.response_target_id,
@@ -212,8 +222,47 @@ class RoutePlanningAgent:
             source_node_id=source_node_id,
             target_node_id=target_node_id,
             node_path=dijkstra_result.node_path,
-            distance_meters=dijkstra_result.distance_meters,
-            travel_time_seconds=dijkstra_result.travel_time_seconds,
+            distance_meters=distance_meters,
+            travel_time_seconds=travel_time_seconds,
+        )
+
+    @staticmethod
+    def _resolve_reachable_distance_and_eta(
+        resource: RoutingResource,
+        target: RoutingTarget,
+        distance_meters: float | None,
+        travel_time_seconds: float | None,
+    ) -> tuple[float | None, float | None]:
+        """Substitute a straight-line (Haversine) off-road estimate for a
+        REACHABLE result that graph-Dijkstra reports as exactly 0m/0s (see
+        haversine_fallback_calculator's module docstring: this happens when
+        the resource's and target's nearest mapped graph nodes coincide,
+        which a sparse/coarse fetched road-network graph can produce even
+        when the two real-world coordinates are far apart). Left completely
+        untouched otherwise - including a genuine 0m/0s where the two
+        coordinates really are the same point.
+        """
+        if distance_meters is None or travel_time_seconds is None:
+            return distance_meters, travel_time_seconds
+        if not is_degenerate_zero_result(distance_meters, travel_time_seconds):
+            return distance_meters, travel_time_seconds
+
+        real_distance_km = haversine_distance_km(
+            resource.latitude, resource.longitude, target.latitude, target.longitude
+        )
+        if real_distance_km * 1000.0 <= MIN_DISTINCT_DISTANCE_METERS:
+            return distance_meters, travel_time_seconds
+
+        logger.warning(
+            "Route %s -> target %s: graph Dijkstra reported a degenerate 0m/0s result "
+            "(source/target nodes coincide) while the real coordinates are %.2f km apart - "
+            "substituting a straight-line off-road estimate.",
+            resource.resource_id,
+            target.response_target_id,
+            real_distance_km,
+        )
+        return estimate_off_road_distance_and_eta(
+            resource.latitude, resource.longitude, target.latitude, target.longitude
         )
 
     @staticmethod

@@ -112,9 +112,3 @@
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: var(--space-3);
 }
-
-.event-group__actions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}

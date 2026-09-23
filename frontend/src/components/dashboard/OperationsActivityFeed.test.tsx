@@ -266,13 +266,20 @@ describe("OperationsActivityFeed final visible-type semantics (news_report/satel
     expect(button).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("gives the news headline dir=auto so Hebrew text renders safely without forcing the row RTL", () => {
+  it("falls back to a best-effort romanized headline (dir=auto, never raw Hebrew) when backend translation failed", () => {
+    // A backend LLM translation failure at ingestion is best-effort and can
+    // leave the original Hebrew persisted (see news_client.py's
+    // "TRANSLATION FALLBACK TRIGGERED") - stationTranslations.ts's
+    // translateIfUntranslated is the frontend's own safety net for exactly
+    // that case, so the row never shows raw, untouched Hebrew. dir="auto"
+    // is still set unconditionally (defensive regardless of content).
     const hebrewItem = makeItem(7, "news_report", {
       preview: { source: "Ynet", headline: "האש ממשיכה להיראות באזור הכרמל" },
     });
     render(<OperationsActivityFeed items={[hebrewItem]} selectedActivityId={null} onSelectItem={vi.fn()} />);
 
-    const main = screen.getByText("האש ממשיכה להיראות באזור הכרמל", { exact: false });
+    expect(screen.queryByText("האש ממשיכה להיראות באזור הכרמל", { exact: false })).not.toBeInTheDocument();
+    const main = screen.getByText(/HaEsh/, { exact: false });
     expect(main).toHaveAttribute("dir", "auto");
     expect(document.querySelector(".operations-activity-feed")).not.toHaveAttribute("dir", "rtl");
   });

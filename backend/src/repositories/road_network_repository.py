@@ -78,15 +78,21 @@ class RoadNetworkRepository:
 
     def _upsert_nodes(self, db: Session, nodes: list[GraphNode]) -> None:
         values = [{"id": node.id, "latitude": node.latitude, "longitude": node.longitude} for node in nodes]
-        insert_stmt = self._dialect_insert(db)(GraphNodeDB).values(values)
-        upsert_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[GraphNodeDB.id],
-            set_={
-                "latitude": insert_stmt.excluded.latitude,
-                "longitude": insert_stmt.excluded.longitude,
-            },
-        )
-        db.execute(upsert_stmt)
+        # Batched for the same reason as _edges_touching: a single combined
+        # multi-row VALUES INSERT passes 3 bind parameters per node in ONE
+        # statement, which can exceed PostgreSQL's 65535-parameter limit on
+        # its own for a large OSM fetch (see _BULK_OPERATION_BATCH_SIZE).
+        for start in range(0, len(values), _BULK_OPERATION_BATCH_SIZE):
+            chunk = values[start : start + _BULK_OPERATION_BATCH_SIZE]
+            insert_stmt = self._dialect_insert(db)(GraphNodeDB).values(chunk)
+            upsert_stmt = insert_stmt.on_conflict_do_update(
+                index_elements=[GraphNodeDB.id],
+                set_={
+                    "latitude": insert_stmt.excluded.latitude,
+                    "longitude": insert_stmt.excluded.longitude,
+                },
+            )
+            db.execute(upsert_stmt)
 
     def _insert_edges(self, db: Session, edges: list[GraphEdge]) -> None:
         values = [

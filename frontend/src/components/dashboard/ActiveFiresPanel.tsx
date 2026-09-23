@@ -1,13 +1,10 @@
 import { ActiveFireEventCard } from "../fire-events/ActiveFireEventCard";
 import { EmptyState } from "../feedback/EmptyState";
-import { ViewResponsePlanAction } from "./ViewResponsePlanAction";
 import type { ActiveFireEvent } from "../../types/activeFireEvents";
 import "./ActiveFiresPanel.css";
 
 export interface ActiveFiresPanelProps {
   activeFires: ActiveFireEvent[];
-  /** The newest persisted GlobalPlanningRun's id (from A6's activity feed), or `null` when none exists yet - drives the header's "View Response Plan" action. */
-  globalPlanningRunId: number | null;
 }
 
 /**
@@ -17,11 +14,12 @@ export interface ActiveFiresPanelProps {
  * ActiveFireEventCard unchanged (including its Task A8 emphasis styling and
  * its existing navigation to Event Details).
  *
- * The header also carries the one "View Response Plan" action - Global
- * Planning is no longer an Activity Feed row (see OperationsActivityFeed),
- * so this is now the operator's route to it.
+ * Production polish pass: this panel no longer carries its own "View
+ * Response Plan" action - the page header's "Global Response Plan" link
+ * (ActiveWildfiresPage) is the one route to it, so this panel does not
+ * duplicate that navigation.
  */
-export function ActiveFiresPanel({ activeFires, globalPlanningRunId }: ActiveFiresPanelProps) {
+export function ActiveFiresPanel({ activeFires }: ActiveFiresPanelProps) {
   return (
     <section aria-labelledby="active-fires-panel-heading" className="active-fires-panel">
       <div className="active-fires-panel__header">
@@ -31,7 +29,6 @@ export function ActiveFiresPanel({ activeFires, globalPlanningRunId }: ActiveFir
             <span className="active-fires-panel__count">{activeFires.length}</span>
           ) : null}
         </h2>
-        <ViewResponsePlanAction globalPlanningRunId={globalPlanningRunId} />
       </div>
       {activeFires.length === 0 ? (
         <EmptyState

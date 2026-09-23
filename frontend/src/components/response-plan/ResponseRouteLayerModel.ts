@@ -33,9 +33,30 @@ export interface ResponseRouteFeature {
   actionKey: string;
   resourceId: string;
   targetId: number;
-  /** The exact persisted `route.path_coordinates`, in backend order. */
+  /** The exact persisted `route.path_coordinates`, in backend order - never
+   * modified or extended (see this module's docstring: every coordinate is
+   * copied unchanged). */
   path: Coordinate[];
+  /**
+   * A visual-only 2-point connector from `path`'s last (snapped-to-road)
+   * point to the target's own `[latitude, longitude]`, when the two differ -
+   * bridges the "last mile" gap between where the routed path physically
+   * ends (the nearest road node) and the fire icon itself, which is
+   * otherwise off-road and can sit a visible distance from the line's end.
+   * `null` when the route already ends exactly at the target (nothing to
+   * bridge) or the target's own coordinate isn't known. This is presentation
+   * only - not a routed/computed path segment, and not part of `path`
+   * itself - the renderer is expected to draw it visually distinct (e.g.
+   * dashed) from the real route.
+   */
+  lastMileGap: [Coordinate, Coordinate] | null;
   isSelected: boolean;
+}
+
+/** Exported for reuse by GlobalResponseMapLayerModel, which computes the
+ * same "last mile" gap for its own, separately-typed route features. */
+export function coordinatesEqual(a: Coordinate, b: Coordinate): boolean {
+  return a.latitude === b.latitude && a.longitude === b.longitude;
 }
 
 export interface ResponseOriginMarker {
@@ -131,12 +152,24 @@ export function buildResponseRouteLayer(
     }
 
     if (isDrawableRoute(action.route)) {
+      // isDrawableRoute already confirmed path_coordinates is non-null and has >=2 points.
+      const path = action.route.path_coordinates as Coordinate[];
+      const lastPoint = path[path.length - 1];
+      const targetCoordinate =
+        action.target.latitude !== null && action.target.longitude !== null
+          ? { latitude: action.target.latitude, longitude: action.target.longitude }
+          : null;
+      const lastMileGap: [Coordinate, Coordinate] | null =
+        targetCoordinate !== null && !coordinatesEqual(lastPoint, targetCoordinate)
+          ? [lastPoint, targetCoordinate]
+          : null;
+
       routes.push({
         actionKey,
         resourceId: action.resource.resource_id,
         targetId: action.target.response_target_id,
-        // isDrawableRoute already confirmed path_coordinates is non-null.
-        path: action.route.path_coordinates as Coordinate[],
+        path,
+        lastMileGap,
         isSelected,
       });
     }

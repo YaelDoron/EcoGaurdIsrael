@@ -29,6 +29,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+import logging
 import time
 from typing import Callable
 
@@ -44,6 +45,8 @@ from src.calculators.fire_detection.fire_detection_calculator import FireDetecti
 from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
 from src.calculators.fire_spread import FireSpreadCalculator
 from src.calculators.response_target import ResponseTargetCalculator
+from src.config.config import load_config
+from src.external.news.news_client import TextProcessor
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
@@ -88,7 +91,33 @@ from src.simulation.simulation_event_executor import (
 from src.simulation.simulation_scenario import SimulationScenario
 from src.simulation.simulation_scenario_service import SimulationMode, SimulationScenarioService
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_POLL_INTERVAL_SECONDS = 0.5
+
+
+def _build_simulation_text_processor() -> TextProcessor | None:
+    """Build the LLM TextProcessor simulated news/satellite events are
+    translated through, or `None` if the LLM isn't configured here.
+
+    Reuses NewsMonitoringAgent's exact config (news_config.yaml's `keywords`/
+    `llm` blocks) - one shared LLM setup for both real RSS ingestion and
+    simulated demo events, never a second config to keep in sync. Missing
+    config or API key degrades gracefully to `None` (simulated text is then
+    persisted exactly as generated, in Hebrew) rather than failing the whole
+    demo scenario over a translation setup problem - translation is a
+    presentation concern, never a hard dependency for the simulation to run.
+    """
+    try:
+        config = load_config()
+        return TextProcessor(config["keywords"], config["llm"])
+    except Exception:
+        logger.warning(
+            "Simulation text translation is unavailable (LLM not configured) - "
+            "simulated news/satellite location names will be persisted in their original language.",
+            exc_info=True,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +603,7 @@ class DemoSimulationRunner:
         clock_fn: Callable[[], float] = time.monotonic,
         wall_clock_now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
     ) -> None:
-        self._executor = executor or SimulationEventExecutor()
+        self._executor = executor or SimulationEventExecutor(text_processor=_build_simulation_text_processor())
         self._fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
         self._fire_detection_coordinator = fire_detection_coordinator or build_fire_detection_coordinator()
         self._operational_coordinator = operational_coordinator or build_operational_coordinator()

@@ -107,6 +107,34 @@ def test_save_network_does_not_issue_one_round_trip_per_row(sqlite_session_facto
     )
 
 
+def test_save_network_and_lookup_are_correct_across_a_batch_boundary(sqlite_session_factory, monkeypatch):
+    """Regression guard for the PostgreSQL 65535-bind-parameter crash
+    (observed live on a real 4-concurrent-event bbox once accumulated OSM
+    coverage grew large): _upsert_nodes and _edges_touching now chunk their
+    queries at _BULK_OPERATION_BATCH_SIZE. Forces a tiny batch size so a
+    modest node/edge set spans multiple batches, and asserts every node and
+    edge - including one whose source is in one batch and target in
+    another - still round-trips correctly, not just that saving succeeds."""
+    monkeypatch.setattr(road_network_repository_module, "_BULK_OPERATION_BATCH_SIZE", 3)
+
+    repository = RoadNetworkRepository()
+    nodes = make_nodes(10, id_offset=9000)
+    node_ids = [node.id for node in nodes]
+    edges = make_edges(node_ids)  # chains node i -> node i+1, so edges straddle every batch boundary.
+
+    session = sqlite_session_factory()
+    repository.save_network(session, nodes, edges)
+
+    stored_nodes, stored_edges = repository.get_network_in_bbox(session, 32.0, 33.0, 34.0, 36.0)
+    session.close()
+
+    assert {node.id for node in stored_nodes} == set(node_ids)
+    assert len(stored_edges) == len(edges)
+    stored_pairs = {(edge.source_node_id, edge.target_node_id) for edge in stored_edges}
+    expected_pairs = {(edge.source_node_id, edge.target_node_id) for edge in edges}
+    assert stored_pairs == expected_pairs
+
+
 def test_save_network_handles_empty_nodes_and_edges(sqlite_session_factory):
     repository = RoadNetworkRepository()
     session = sqlite_session_factory()

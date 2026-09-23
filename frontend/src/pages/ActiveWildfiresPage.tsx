@@ -41,7 +41,7 @@ const PAGE_TITLE = "Operations Overview";
  * asymmetric and cramped the feed's preview text.
  */
 export function ActiveWildfiresPage() {
-  const { data, isLoading, isRefreshing, loadError, refreshError, refresh } = useOperationsOverview();
+  const { data, isLoading, loadError, refreshError, refresh } = useOperationsOverview();
   const [selectedActivity, setSelectedActivity] = useState<OperationsActivityFeedItem | null>(null);
 
   if (isLoading) {
@@ -62,31 +62,14 @@ export function ActiveWildfiresPage() {
     );
   }
 
-  // Server order is newest-first, so the first global_planning_run item
-  // (if any) is the newest persisted GlobalPlanningRun - this is the only
-  // use this page makes of that activity type now that it no longer
-  // renders as a feed row (see OperationsActivityFeed).
-  const latestGlobalPlanningRunId =
-    data.activity_feed.items.find((item) => item.activity_type === "global_planning_run")?.entity_id ?? null;
-
   return (
     <section>
       <PageHeader
         title={PAGE_TITLE}
         actions={
-          <>
-            <Link to="/response-plan" className="active-wildfires-page__global-plan">
-              Global Response Plan
-            </Link>
-            <button
-              type="button"
-              className="active-wildfires-page__refresh"
-              onClick={refresh}
-              disabled={isRefreshing}
-            >
-              {isRefreshing ? "Refreshing…" : "Refresh"}
-            </button>
-          </>
+          <Link to="/response-plan" className="active-wildfires-page__global-plan">
+            Global Response Plan
+          </Link>
         }
       />
 
@@ -103,7 +86,7 @@ export function ActiveWildfiresPage() {
         </div>
 
         <div className="active-wildfires-page__fires-column">
-          <ActiveFiresPanel activeFires={data.active_fires} globalPlanningRunId={latestGlobalPlanningRunId} />
+          <ActiveFiresPanel activeFires={data.active_fires} />
         </div>
       </div>
 

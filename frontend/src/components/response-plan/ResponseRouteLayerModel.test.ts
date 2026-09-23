@@ -239,3 +239,41 @@ describe("buildResponseRouteLayer", () => {
     expect(layer).toEqual({ routes: [], originMarkers: [], targetMarkers: [] });
   });
 });
+
+describe("buildResponseRouteLayer lastMileGap ('last mile' visual bridge)", () => {
+  it("bridges the gap between the route's last snapped point and the target's own coordinate", () => {
+    const action = makeAction({
+      target: { ...makeAction().target, latitude: 32.6, longitude: 35.6 },
+      route: {
+        ...makeAction().route,
+        path_coordinates: [
+          { latitude: 32.0, longitude: 35.0 },
+          { latitude: 32.5, longitude: 35.5 }, // snapped road node - not the same as the target above.
+        ],
+      },
+    });
+
+    const layer = buildResponseRouteLayer([action], null);
+
+    expect(layer.routes[0].lastMileGap).toEqual([
+      { latitude: 32.5, longitude: 35.5 },
+      { latitude: 32.6, longitude: 35.6 },
+    ]);
+    // The bridge is purely additive presentation data - the real path is never touched.
+    expect(layer.routes[0].path).toEqual(action.route.path_coordinates);
+  });
+
+  it("is null when the route already ends exactly at the target", () => {
+    const layer = buildResponseRouteLayer([makeAction()], null); // default fixture: path ends at (32.5, 35.5) == target.
+
+    expect(layer.routes[0].lastMileGap).toBeNull();
+  });
+
+  it("is null when the target's own coordinate is unknown", () => {
+    const action = makeAction({ target: { ...makeAction().target, latitude: null, longitude: null } });
+
+    const layer = buildResponseRouteLayer([action], null);
+
+    expect(layer.routes[0].lastMileGap).toBeNull();
+  });
+});

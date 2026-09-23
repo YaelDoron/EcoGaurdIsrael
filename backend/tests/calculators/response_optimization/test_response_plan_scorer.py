@@ -79,9 +79,15 @@ def score(input_data: ResponseOptimizationInput, actions: tuple[ResponseAction, 
 
 
 def test_eta_factor_reference_points_and_monotonicity():
+    # Quadratic in (eta / eta_reference_seconds): eta_factor(0) == 1 and
+    # eta_factor(eta_reference_seconds) == 0.5 are unchanged, but it falls
+    # off much faster beyond the reference point than a linear factor would
+    # (1/(1+2**2) == 0.2, not the old linear formula's 1/3) - this is what
+    # heavily penalizes travel time/distance so the closest available
+    # resources are favored over farther ones.
     assert eta_factor(0.0) == pytest.approx(1.0)
     assert eta_factor(ETA_REFERENCE_SECONDS) == pytest.approx(0.5)
-    assert eta_factor(1800.0) == pytest.approx(1.0 / 3.0)
+    assert eta_factor(1800.0) == pytest.approx(0.2)
     assert eta_factor(300.0) > eta_factor(900.0) > eta_factor(1800.0)
 
 
@@ -179,6 +185,35 @@ def test_eta_influence_shorter_eta_scores_higher_for_same_target_priority():
     assert short.total_score > long.total_score
 
 
+def test_quadratic_eta_penalty_prefers_closer_lower_priority_target_over_farther_higher_priority_target():
+    """Regression test for the dispatch-priority bug: a target with 2x the
+    priority but 4x the ETA must no longer outscore a closer, lower-priority
+    target - this is what makes the closest available resources get
+    exhausted before farther ones are considered.
+
+    Under the old linear-in-eta formula this pair would have scored
+    100 * eta_factor(300) == 75.0 for the near/low-priority target vs
+    200 * eta_factor(1200) == 85.71 for the far/high-priority one - i.e. the
+    far target would have won, favoring distance-blind priority chasing. The
+    quadratic formula flips it to 90.0 vs 72.0.
+    """
+    near_low_priority = optimization_input(
+        targets=(target(10, 0, 100.0),),
+        route_options=(route(100, "R1", 10, 300.0),),
+    )
+    far_high_priority = optimization_input(
+        targets=(target(20, 0, 200.0),),
+        route_options=(route(200, "R1", 20, 1200.0),),
+    )
+
+    near_result = score(near_low_priority, (action("R1", 10, 100),))
+    far_result = score(far_high_priority, (action("R1", 20, 200),))
+
+    assert near_result.raw_fitness == pytest.approx(90.0)
+    assert far_result.raw_fitness == pytest.approx(72.0)
+    assert near_result.raw_fitness > far_result.raw_fitness
+
+
 def test_resource_conflict_rejected():
     input_data = optimization_input(
         targets=(target(10, 0, 100.0), target(20, 1, 50.0)),
@@ -268,6 +303,52 @@ def test_zero_total_priority_no_division_by_zero_or_non_finite_results():
     assert result.coverage_score == pytest.approx(0.0)
     assert math.isfinite(result.total_score)
     assert math.isfinite(result.coverage_score)
+    assert result.status is ResponsePlanStatus.COMPLETE
+
+
+def test_full_coverage_clamps_floating_point_drift_instead_of_raising():
+    """Regression test: raw_fitness/covered_priority sum over actions sorted
+    by resource_id (see _normalize_actions), while total_priority sums over
+    targets in input order - a different addition order for the same
+    underlying values. Float addition is not associative, so a fully
+    covering plan can land a few ULPs above the mathematical ceiling of 100
+    (e.g. 100.00000000000003) instead of exactly 100.0. Before the clamp in
+    ResponsePlanScorer.evaluate, this raised inside PlanScoreBreakdown's
+    range validation and crashed the whole GA run for an otherwise-valid,
+    fully-covering candidate - this exact priority/eta data set (found via a
+    realistic-scale GA run) reproduced that crash pre-fix.
+    """
+    targets = (
+        target(100, 0, 85.99796663725434),
+        target(101, 1, 78.21589626462722),
+        target(102, 2, 47.85144227477605),
+        target(103, 3, 33.302507526366696),
+        target(104, 4, 56.01472492317477),
+        target(105, 5, 46.444072370537285),
+    )
+    resources = tuple(resource(f"R{i}") for i in range(8))
+    route_options = (
+        route(1, "R0", 100, 131.3519435613909),
+        route(2, "R6", 101, 112.4059027727733),
+        route(3, "R5", 102, 2104.435478937752),
+        route(4, "R2", 103, 590.4196924156784),
+        route(5, "R4", 104, 1514.7041110197113),
+        route(6, "R7", 105, 292.80218418690185),
+    )
+    input_data = optimization_input(targets=targets, resources=resources, route_options=route_options)
+    actions = (
+        action("R0", 100, 1),
+        action("R6", 101, 2),
+        action("R5", 102, 3),
+        action("R2", 103, 4),
+        action("R4", 104, 5),
+        action("R7", 105, 6),
+    )
+
+    result = score(input_data, actions)
+
+    assert result.coverage_score == 100.0
+    assert result.total_score <= 100.0
     assert result.status is ResponsePlanStatus.COMPLETE
 
 

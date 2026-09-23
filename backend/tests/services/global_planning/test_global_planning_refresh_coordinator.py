@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from src.calculators.global_response_optimization.global_hard_dispatch_lock import GlobalHardDispatchLockInfeasible
 from src.models.global_planning_run_event_status import GlobalPlanningRunEventStatus
 from src.services.global_planning.global_planning_input_unstable import GlobalPlanningInputUnstable
 from src.services.global_planning.global_planning_refresh_coordinator import (
@@ -120,12 +121,45 @@ class _FakeOptimizationService:
         return _FakeResult()
 
 
-def _make_coordinator(fire_event_ids_sequence, activation_service=None, run_repository=None):
+class _AlwaysHardLockInfeasibleOptimizationService:
+    """Every optimize() call raises GlobalHardDispatchLockInfeasible - the
+    stale-road-network-coverage scenario reported live: a hard-dispatched
+    resource's only feasible route to its locked FireEvent disappeared in
+    this cycle's freshly-fetched road network."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def optimize(self, global_planning_input, config, demand_scoring_policy, severity_demand_policy, stability_policy):
+        self.calls += 1
+        raise GlobalHardDispatchLockInfeasible("simulated stale hard lock")
+
+
+class _AlwaysSucceedsActivationService:
+    """Every activate() call succeeds trivially - used to prove the
+    coordinator reaches and completes a normal cycle once optimize() stops
+    raising, not just that it fails gracefully."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def activate(self, *, global_planning_input, global_optimization_result, as_of, run_history=None):
+        self.calls += 1
+
+        class _FakeActivation:
+            response_plan_ids_by_event: dict[int, int] = {}
+
+        return _FakeActivation()
+
+
+def _make_coordinator(
+    fire_event_ids_sequence, activation_service=None, run_repository=None, optimization_service=None
+):
     return GlobalPlanningRefreshCoordinator(
         fire_event_repository=_FakeFireEventRepository(fire_event_ids_sequence),
         global_planning_run_repository=run_repository or _FakeGlobalPlanningRunRepository(),
         input_builder=_FakeInputBuilder(),
-        optimization_service=_FakeOptimizationService(),
+        optimization_service=optimization_service or _FakeOptimizationService(),
         activation_service=activation_service or _AlwaysStaleActivationService(),
     )
 
@@ -176,6 +210,74 @@ def test_stale_retry_recaptures_active_set_between_attempts():
     assert result.status is GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS
     # Only the first attempt actually ran a cycle before the set emptied out.
     assert activation_service.calls == 1
+
+
+def test_hard_dispatch_lock_infeasible_retries_and_exhausts_without_crashing():
+    """A hard-dispatched resource losing its only feasible route to its
+    locked FireEvent (e.g. a transient road-network coverage gap on a
+    later cycle) must never propagate out of refresh() and crash the
+    caller - it is exactly the same bounded-retry shape as a stale
+    activation input: retried up to MAX_GLOBAL_STALE_RETRIES times, then
+    reported as STALE_RETRY_EXHAUSTED with every attempted run marked
+    failed, never an uncaught exception."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+    optimization_service = _AlwaysHardLockInfeasibleOptimizationService()
+    coordinator = _make_coordinator(
+        ((1,), (1,), (1,)), run_repository=run_repository, optimization_service=optimization_service
+    )
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.STALE_RETRY_EXHAUSTED
+    assert result.retry_count == MAX_GLOBAL_STALE_RETRIES + 1
+    assert optimization_service.calls == MAX_GLOBAL_STALE_RETRIES + 1
+    assert len(run_repository.created_runs) == MAX_GLOBAL_STALE_RETRIES + 1
+    for run_id in run_repository.created_runs:
+        assert run_repository.completed[run_id].value == "failed"
+
+
+def test_hard_dispatch_lock_infeasible_recovers_once_a_later_cycle_finds_a_feasible_route():
+    """If the FIRST cycle's optimize() raises GlobalHardDispatchLockInfeasible
+    but a retried cycle's (freshly-rebuilt GlobalPlanningInput) optimize()
+    succeeds, refresh() must complete normally as ACTIVATED - proving this
+    is a genuine retry-and-recover path, not merely "fails without
+    crashing"."""
+
+    class _FailsOnceThenSucceeds:
+        def __init__(self):
+            self.calls = 0
+
+        def optimize(self, global_planning_input, config, demand_scoring_policy, severity_demand_policy, stability_policy):
+            self.calls += 1
+            if self.calls == 1:
+                raise GlobalHardDispatchLockInfeasible("simulated stale hard lock")
+
+            class _FakeResult:
+                actions = ()
+                assignment_changes = ()
+                shortage = None
+                event_results = ()
+
+            return _FakeResult()
+
+    run_repository = _FakeGlobalPlanningRunRepository()
+    optimization_service = _FailsOnceThenSucceeds()
+    activation_service = _AlwaysSucceedsActivationService()
+    coordinator = _make_coordinator(
+        ((1,), (1,)),
+        run_repository=run_repository,
+        optimization_service=optimization_service,
+        activation_service=activation_service,
+    )
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert optimization_service.calls == 2
+    assert activation_service.calls == 1
+    # First (failed) run stays FAILED; only the second cycle's run is left active/untouched-by-failure.
+    assert run_repository.completed[run_repository.created_runs[0]].value == "failed"
+    assert run_repository.created_runs[1] not in run_repository.completed
 
 
 @pytest.mark.parametrize("active_fire_event_ids", [(1,), (1, 2), (1, 2, 3), (1, 2, 3, 4)])

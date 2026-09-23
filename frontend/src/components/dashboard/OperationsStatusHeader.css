@@ -22,11 +22,6 @@
   color: var(--color-text);
 }
 
-.operations-status-header__progress {
-  margin: 0;
-  font-size: 0.8125rem;
-}
-
 .operations-status-header__run-error {
   margin: 0;
   color: var(--color-danger);

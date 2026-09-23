@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useOperationsActivityDetail } from "../../hooks/useOperationsActivityDetail";
+import { translateIfUntranslated } from "../map/stationTranslations";
 import { CoordinateDisplay } from "../data/CoordinateDisplay";
 import { TimestampDisplay } from "../data/TimestampDisplay";
 import { ErrorState } from "../feedback/ErrorState";
@@ -49,7 +50,7 @@ export function OperationsActivityDrawer({ selectedItem, onClose }: OperationsAc
     <div className="operations-activity-drawer" role="dialog" aria-labelledby="operations-activity-drawer-title">
       <div className="operations-activity-drawer__header">
         <h2 id="operations-activity-drawer-title" className="operations-activity-drawer__title">
-          {selectedItem.title}
+          {translateIfUntranslated(selectedItem.title)}
         </h2>
         <button
           type="button"
@@ -143,12 +144,12 @@ function NewsReportDetailView({ detail }: { detail: NewsReportDetails }) {
   return (
     <dl className="operations-activity-drawer__fields">
       <DetailRow label="Source">{detail.source_feed}</DetailRow>
-      <DetailRow label="Headline">{detail.title}</DetailRow>
-      <DetailRow label="Summary">{detail.summary}</DetailRow>
+      <DetailRow label="Headline">{translateIfUntranslated(detail.title)}</DetailRow>
+      <DetailRow label="Summary">{translateIfUntranslated(detail.summary)}</DetailRow>
       <DetailRow label="Published">
         <TimestampDisplay value={detail.published_at} />
       </DetailRow>
-      <DetailRow label="Location">{detail.location_name ?? "Not available"}</DetailRow>
+      <DetailRow label="Location">{translateIfUntranslated(detail.location_name) ?? "Not available"}</DetailRow>
     </dl>
   );
 }
@@ -156,7 +157,7 @@ function NewsReportDetailView({ detail }: { detail: NewsReportDetails }) {
 function FireEventDetailView({ detail }: { detail: FireEventActivityDetails }) {
   return (
     <dl className="operations-activity-drawer__fields">
-      <DetailRow label="Location">{detail.location_name ?? "Location unavailable"}</DetailRow>
+      <DetailRow label="Location">{translateIfUntranslated(detail.location_name) ?? "Location unavailable"}</DetailRow>
       <DetailRow label="Status">
         <StatusBadge status={detail.status} />
       </DetailRow>

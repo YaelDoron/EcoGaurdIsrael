@@ -87,6 +87,16 @@ class GlobalCandidateCollector:
         problem-builder surfaces that honestly (GlobalHardDispatchLockInfeasible
         or, if it already went UNAVAILABLE, simple exclusion from supply).
         """
+        # Infrastructure-only optimization (Global Optimizer performance
+        # fix): the full station table never changes mid-build, so it is
+        # fetched exactly ONCE here and threaded through every helper below
+        # - previously each helper (including _next_nearest_stations, called
+        # once per station _expand_for_demand adds) re-queried
+        # get_all_stations() independently, an N+1-style pattern that grew
+        # directly with active-event/demand-driven-station count. Same
+        # station data, same selection logic, just no longer refetched.
+        all_stations = self._fire_station_repository.get_all_stations()
+
         anchor_list = list(anchors)
         stations_by_id: dict[str, FireStationDB] = {}
         for _fire_event_id, latitude, longitude in anchor_list:
@@ -97,15 +107,17 @@ class GlobalCandidateCollector:
 
         if self._config.max_fallback_stations is not None and len(stations_by_id) < self._config.max_fallback_stations:
             self._top_up_with_nearest_stations(
-                stations_by_id, anchor_list, target_station_count=self._config.max_fallback_stations
+                stations_by_id, anchor_list, all_stations, target_station_count=self._config.max_fallback_stations
             )
 
-        self._ensure_required_resource_stations(stations_by_id, required_resource_ids)
+        self._ensure_required_resource_stations(stations_by_id, all_stations, required_resource_ids)
 
         resources = self._collect_resources(stations_by_id)
 
         if desired_assignable_supply is not None:
-            resources = self._expand_for_demand(stations_by_id, anchor_list, resources, desired_assignable_supply)
+            resources = self._expand_for_demand(
+                stations_by_id, anchor_list, all_stations, resources, desired_assignable_supply
+            )
 
         commitments = self._resource_commitment_repository.get_for_resource_ids(
             [resource.id for resource in resources]
@@ -121,7 +133,10 @@ class GlobalCandidateCollector:
         return self._firefighting_resource_repository.get_resources_for_stations(sorted(stations_by_id))
 
     def _ensure_required_resource_stations(
-        self, stations_by_id: dict[str, FireStationDB], required_resource_ids: Iterable[str] | None
+        self,
+        stations_by_id: dict[str, FireStationDB],
+        all_stations: list[FireStationDB],
+        required_resource_ids: Iterable[str] | None,
     ) -> None:
         if not required_resource_ids:
             return
@@ -135,7 +150,7 @@ class GlobalCandidateCollector:
                 missing_station_ids.add(station_id)
         if not missing_station_ids:
             return
-        for station in self._fire_station_repository.get_all_stations():
+        for station in all_stations:
             if station.id in missing_station_ids:
                 stations_by_id[station.id] = station
 
@@ -143,6 +158,7 @@ class GlobalCandidateCollector:
         self,
         stations_by_id: dict[str, FireStationDB],
         anchors: list[tuple[int, float, float]],
+        all_stations: list[FireStationDB],
         resources: list,
         desired_assignable_supply: int,
     ) -> list:
@@ -157,7 +173,7 @@ class GlobalCandidateCollector:
         while _assignable_count(resources) < desired_assignable_supply:
             if max_additional is not None and stations_added >= max_additional:
                 break
-            remaining = self._next_nearest_stations(stations_by_id, anchors)
+            remaining = self._next_nearest_stations(stations_by_id, anchors, all_stations)
             if not remaining:
                 break
             next_station = remaining[0]
@@ -166,28 +182,28 @@ class GlobalCandidateCollector:
             resources = self._collect_resources(stations_by_id)
         return resources
 
+    @staticmethod
     def _next_nearest_stations(
-        self,
         stations_by_id: dict[str, FireStationDB],
         anchors: list[tuple[int, float, float]],
+        all_stations: list[FireStationDB],
     ) -> list[FireStationDB]:
-        remaining = [
-            station for station in self._fire_station_repository.get_all_stations() if station.id not in stations_by_id
-        ]
+        remaining = [station for station in all_stations if station.id not in stations_by_id]
         if not remaining:
             return []
-        remaining.sort(key=lambda station: self._min_distance_to_any_anchor(station, anchors))
+        remaining.sort(key=lambda station: GlobalCandidateCollector._min_distance_to_any_anchor(station, anchors))
         return remaining
 
     def _top_up_with_nearest_stations(
         self,
         stations_by_id: dict[str, FireStationDB],
         anchors: list[tuple[int, float, float]],
+        all_stations: list[FireStationDB],
         target_station_count: int,
     ) -> None:
         if not anchors:
             return
-        remaining = self._next_nearest_stations(stations_by_id, anchors)
+        remaining = self._next_nearest_stations(stations_by_id, anchors, all_stations)
         if not remaining:
             return
         needed = target_station_count - len(stations_by_id)

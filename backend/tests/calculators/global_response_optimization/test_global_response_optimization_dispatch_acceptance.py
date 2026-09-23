@@ -247,6 +247,33 @@ def test_planned_resource_is_preserved_when_alternative_improvement_is_trivial()
     assert resource_ids == {"R1"}
 
 
+def test_planned_resource_is_replaced_when_a_genuinely_closer_resource_is_available():
+    """Regression test for the reported dispatch bug: a resource already
+    PLANNED to a target from far away (20 minutes) must lose its slot to a
+    genuinely closer free resource (13 minutes - a real ~7-minute advantage,
+    not the trivial ~1-minute gap covered by the test above). The soft
+    stability bonus exists only to damp flickering between near-identical
+    candidates, never to entrench a materially farther one over a closer
+    available alternative."""
+    demand_a = make_demand(1, minimum_resources=1, desired_resources=1)
+    global_input = make_input(
+        active_fire_event_ids=(1,),
+        targets=(make_target(1, 10, priority_score=100.0),),
+        resources=(make_resource("R1"), make_resource("R2")),
+        routes=(
+            make_route("R1", 1, 10, eta_seconds=1200.0),  # 20 min - already PLANNED here
+            make_route("R2", 1, 10, eta_seconds=780.0),  # 13 min - free, genuinely closer
+        ),
+        incident_demands=(demand_a,),
+        current_assignments=(make_assignment("R1", 1, 10, dispatch_state=DispatchState.PLANNED),),
+    )
+
+    result = _service().optimize(global_input, RELIABLE_CONFIG)
+
+    resource_ids = {action.resource_id for action in result.actions}
+    assert resource_ids == {"R2"}
+
+
 def test_planned_resource_moves_when_improvement_is_a_genuine_emergency():
     """A PLANNED (soft) commitment must NEVER outrank Stage 5's own
     required-suppression-under-severity-shortage hierarchy."""

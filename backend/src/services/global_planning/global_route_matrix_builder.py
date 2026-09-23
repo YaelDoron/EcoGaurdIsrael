@@ -16,6 +16,33 @@ touching DijkstraCalculator's own algorithm.
 
 Unreachable/unmappable pairs (Task 15) simply produce no GlobalRouteOption
 - never a failure of the whole build.
+
+First-Mile Heuristic Fallback (see _first_mile_penalty): even with
+GlobalPlanningInputBuilder's retrying, persistent-cache-backed station-micro
+fetch (Step 4), Overpass can still exhaust every retry for a given station in
+a given cycle, leaving NodeMappingService no choice but to snap that
+resource's origin to whatever real node IS in the fetched graph - which can
+be a real but non-trivial distance from the station's true coordinate. This
+is NOT the banned "Haversine air-distance routing" pattern (see
+test_input_builder_never_imports_the_haversine_route_fallback, which this
+file is also covered by): it never invents a route, never runs when Dijkstra
+found no REACHABLE path, and never replaces a single meter of the real,
+road-network-derived path Dijkstra returns. It only adds a small, bounded
+correction on TOP OF an already-real Dijkstra route, honestly reflecting the
+one un-routable stretch (station door -> nearest fetched road node) that no
+road-network fetch can ever eliminate from ANY routing system, real or
+simulated - the same reason Google/Waze-class routers always add their own
+short "walk/drive to the road" estimate for an origin that isn't already
+sitting on a mapped road. HaversineFallbackCalculator (the per-event route
+SUBSTITUTE for a missing route entirely) is never imported here or anywhere
+in the global planning path - see the same guard test.
+
+FIRST_MILE_PENALTY_THRESHOLD_KM lives in src/utils/geo.py, not here - it is
+shared with ResponsePlanPresenter, which bridges this same gap visually in
+`path_coordinates` (one honest straight-line segment from the station's real
+coordinate, never touching node_path itself) using the identical threshold,
+so the two layers can never independently drift out of agreement about
+which routes need a correction.
 """
 from __future__ import annotations
 
@@ -30,6 +57,15 @@ from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
 from src.models.routing import RouteStatus, RoutingResource, RoutingTarget
 from src.services.routing.node_mapping_service import NodeMappingService
+from src.utils.geo import FIRST_MILE_PENALTY_THRESHOLD_KM, haversine_distance_km
+
+# Conservative (i.e. SLOW) on purpose: a real first/last-mile stretch (a
+# station forecourt, a short unclassified access road) is driven far below
+# highway speed, and Dijkstra's own edge speeds already handle everything
+# ONCE a vehicle reaches a mapped road - this constant only ever covers the
+# one un-routable stretch outside the fetched graph. Erring slow means this
+# never UNDERSTATES the true cost of a real gap.
+FIRST_MILE_FALLBACK_SPEED_KMH = 30.0
 
 
 @dataclass(frozen=True)
@@ -98,6 +134,7 @@ class GlobalRouteMatrixBuilder:
 
         resource_node_map = self._node_mapping_service.map_resources(routing_resources, road_nodes, road_edges)
         target_node_map = self._node_mapping_service.map_targets(routing_targets, road_nodes, road_edges)
+        nodes_by_id = {node.id: node for node in road_nodes}
 
         # Optimization 1: one adjacency-list build for the whole matrix,
         # not one per (source, target) search - road_edges never changes
@@ -112,6 +149,9 @@ class GlobalRouteMatrixBuilder:
             source_node_id = resource_node_map.get(resource.resource_id)
             if source_node_id is None:
                 continue
+            extra_distance_meters, extra_seconds = self._first_mile_penalty(
+                resource.station_latitude, resource.station_longitude, nodes_by_id.get(source_node_id)
+            )
             for target in targets:
                 target_node_id = target_node_map.get(target.response_target_id)
                 if target_node_id is None:
@@ -134,8 +174,8 @@ class GlobalRouteMatrixBuilder:
                         resource_id=resource.resource_id,
                         fire_event_id=target.fire_event_id,
                         response_target_id=target.response_target_id,
-                        eta_seconds=cached_result.travel_time_seconds,
-                        route_distance_meters=cached_result.distance_meters,
+                        eta_seconds=cached_result.travel_time_seconds + extra_seconds,
+                        route_distance_meters=cached_result.distance_meters + extra_distance_meters,
                         node_path=cached_result.node_path,
                     )
                 )
@@ -149,3 +189,31 @@ class GlobalRouteMatrixBuilder:
             feasible_pairs=len(matrix),
             dijkstra_call_count=dijkstra_call_count,
         )
+
+    @staticmethod
+    def _first_mile_penalty(
+        station_latitude: float, station_longitude: float, source_node: GraphNode | None
+    ) -> tuple[float, float]:
+        """First-Mile Heuristic Fallback (see this module's own docstring):
+        (extra_distance_meters, extra_seconds) to add on top of an already-
+        REACHABLE Dijkstra route, honestly reflecting the un-routable gap
+        between a station's true coordinate and the real road node
+        NodeMappingService had to snap it to. (0.0, 0.0) - no correction -
+        when `source_node` is missing (defensive only; every REACHABLE
+        result's source_node_id is guaranteed present in road_nodes) or the
+        gap is within FIRST_MILE_PENALTY_THRESHOLD_KM, the ordinary slack
+        between a station's exact coordinate and its nearest real road node.
+
+        Computed once per resource (identical for every target it routes
+        to, since it depends only on the resource's own fixed station
+        coordinate and its one snapped source node) - never per Dijkstra
+        call, and never for a resource NodeMappingService could not map at
+        all (that stays UNMAPPABLE, exactly as before; this never manufactures
+        a route where none exists)."""
+        if source_node is None:
+            return 0.0, 0.0
+        gap_km = haversine_distance_km(station_latitude, station_longitude, source_node.latitude, source_node.longitude)
+        if gap_km <= FIRST_MILE_PENALTY_THRESHOLD_KM:
+            return 0.0, 0.0
+        extra_seconds = (gap_km / FIRST_MILE_FALLBACK_SPEED_KMH) * 3600.0
+        return gap_km * 1000.0, extra_seconds

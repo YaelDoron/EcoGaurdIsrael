@@ -1,7 +1,5 @@
 import { TimestampDisplay } from "../data/TimestampDisplay";
-import "../status/badges.css";
 import { SimulationControl } from "./SimulationControl";
-import { describeSimulation, describeSimulationProgress } from "./simulationStatusPresentation";
 import type { OperationsSimulationSummary } from "../../types/operationsOverview";
 import "./OperationsStatusHeader.css";
 
@@ -16,10 +14,15 @@ export interface OperationsStatusHeaderProps {
 }
 
 /**
- * Task A8 Part 22-23 + Task A9: the dashboard's simulation-state indicator,
- * "last updated" timestamp, and (A9) the one Start Simulation/Run Again
- * action - extended in place rather than adding a second toolbar, so the
- * map stays the visually dominant element.
+ * Task A8 Part 22-23 + Task A9: the dashboard's "last updated" timestamp and
+ * the one Start Simulation/Run Again action - extended in place rather than
+ * adding a second toolbar, so the map stays the visually dominant element.
+ *
+ * Production polish pass: the "No Simulation Running"/"Running" status
+ * badge is deliberately gone - it read as development telemetry on an
+ * operational dashboard. `SimulationControl`'s own button already reflects
+ * PREPARING/RUNNING/terminal state via its label/disabled-ness, so no
+ * separate indicator is needed to know whether a run is in progress.
  */
 export function OperationsStatusHeader({
   simulation,
@@ -27,15 +30,12 @@ export function OperationsStatusHeader({
   refreshError,
   onRequestOverviewRefresh,
 }: OperationsStatusHeaderProps) {
-  const presentation = describeSimulation(simulation);
-  const progress = describeSimulationProgress(simulation.run);
   const runFailureMessage =
     simulation.run?.state === "failed" && simulation.run.error !== null ? simulation.run.error.message : null;
 
   return (
     <div className="operations-status-header">
       <div className="operations-status-header__row">
-        <span className={`badge badge--${presentation.tone}`}>{presentation.label}</span>
         <span className="operations-status-header__updated">
           Last updated: <TimestampDisplay value={generatedAt} />
         </span>
@@ -46,7 +46,6 @@ export function OperationsStatusHeader({
         />
       </div>
 
-      {progress ? <p className="operations-status-header__progress">{progress}</p> : null}
       {runFailureMessage ? <p className="operations-status-header__run-error">{runFailureMessage}</p> : null}
       {refreshError ? <span className="operations-status-header__refresh-warning">{refreshError}</span> : null}
     </div>

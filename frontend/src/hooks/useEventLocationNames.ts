@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getEventDetails } from "../api/eventDetails";
+import { translateIfUntranslated } from "../components/map/stationTranslations";
 
 /**
  * Persisted location names for several FireEvents at once (event id -> the
@@ -18,6 +19,7 @@ export function useEventLocationNames(fireEventIds: number[]): Record<number, st
       getEventDetails(id)
         .then((details) => details.detection_evidence.news.find((item) => item.location_name)?.location_name ?? null)
         .catch(() => null)
+        .then((name) => translateIfUntranslated(name))
         .then((name) => {
           if (!cancelled) {
             setNames((previous) => (previous[id] === name ? previous : { ...previous, [id]: name }));

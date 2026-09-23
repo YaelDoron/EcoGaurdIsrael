@@ -6,6 +6,12 @@ import { createFireIcon } from "./divIcon";
 
 export interface FireEventMarkerProps {
   fireEvent: FireEventSummary;
+  /**
+   * English place name for the popup ("{name} Wildfire" title, name in the
+   * body instead of raw coordinates). `null`/omitted when none is known yet -
+   * falls back to "Event #id" and the raw coordinates.
+   */
+  locationName?: string | null;
 }
 
 const MARKER_SIZE = 32;
@@ -31,17 +37,22 @@ function fireColor(status: FireEventSummary["status"]): string {
  * always shows, regardless of layer-visibility toggles for the optional
  * layers below it.
  */
-export function FireEventMarker({ fireEvent }: FireEventMarkerProps) {
+export function FireEventMarker({ fireEvent, locationName = null }: FireEventMarkerProps) {
   const icon = createFireIcon(fireColor(fireEvent.status), { size: MARKER_SIZE });
+  const title = locationName ? `${locationName} Wildfire` : `Event #${fireEvent.fire_event_id}`;
 
   return (
     <Marker position={[fireEvent.latitude, fireEvent.longitude]} icon={icon}>
       <Popup>
-        <strong>Event #{fireEvent.fire_event_id}</strong>
+        <strong>{title}</strong>
         <p>Status: {STATUS_LABEL[fireEvent.status] ?? fireEvent.status}</p>
-        <p>
-          <CoordinateDisplay latitude={fireEvent.latitude} longitude={fireEvent.longitude} />
-        </p>
+        {locationName ? (
+          <p>{locationName}</p>
+        ) : (
+          <p>
+            <CoordinateDisplay latitude={fireEvent.latitude} longitude={fireEvent.longitude} />
+          </p>
+        )}
       </Popup>
     </Marker>
   );

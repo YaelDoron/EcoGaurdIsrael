@@ -21,8 +21,8 @@ const LOAD_MORE_STEP = 5;
  * already clearly shown on the map, Active Fires cards, and Event Details -
  * repeating every lifecycle/reassessment as its own feed row was
  * noisy/repetitive. `global_planning_run` is excluded because it is now
- * reached via the dedicated "View Response Plan" action next to Active
- * Fires (see ViewResponsePlanAction). All three are filtered out of the
+ * reached via the page header's "Global Response Plan" link
+ * (ActiveWildfiresPage). All three are filtered out of the
  * "eligible" candidate list BEFORE the visible-count window is applied, so
  * none of them ever occupies one of the 5 initially-visible slots and none
  * counts toward "Showing X of Y" - this is a frontend presentation filter

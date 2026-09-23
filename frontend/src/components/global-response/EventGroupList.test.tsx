@@ -66,10 +66,17 @@ function renderList(
   focusEventId: number | null = null,
   onFocusEvent = vi.fn(),
   eventLabels?: Record<number, string>,
+  eventPlaceNames?: Record<number, string | null>,
 ) {
   return render(
     <MemoryRouter>
-      <EventGroupList events={events} focusEventId={focusEventId} onFocusEvent={onFocusEvent} eventLabels={eventLabels} />
+      <EventGroupList
+        events={events}
+        focusEventId={focusEventId}
+        onFocusEvent={onFocusEvent}
+        eventLabels={eventLabels}
+        eventPlaceNames={eventPlaceNames}
+      />
     </MemoryRouter>,
   );
 }
@@ -112,10 +119,25 @@ describe("EventGroupList", () => {
     expect(screen.queryByText("Minimum Resources")).not.toBeInTheDocument();
   });
 
-  it("renders an action card for each assigned action", () => {
+  it("renders an action row for each assigned action, via the shared grouped ResponseActions component", () => {
     renderList([makeEvent({ actions: [makeAction({ resource: { ...makeAction().resource, resource_id: "engine-9" } })] })]);
 
-    expect(screen.getByText("(engine-9)")).toBeInTheDocument();
+    expect(screen.getByText("engine-9")).toBeInTheDocument();
+  });
+
+  it("groups multiple trucks from the same station into one row, not one per truck", () => {
+    renderList([
+      makeEvent({
+        actions: [
+          makeAction({ resource: { ...makeAction().resource, resource_id: "TRUCK-101-1", station_id: "station-101" } }),
+          makeAction({ resource: { ...makeAction().resource, resource_id: "TRUCK-101-2", station_id: "station-101" } }),
+        ],
+      }),
+    ]);
+
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("TRUCK-101-1")).toBeInTheDocument();
+    expect(screen.getByText("TRUCK-101-2")).toBeInTheDocument();
   });
 
   it("titles a group with its English label instead of the raw id", () => {
@@ -123,6 +145,12 @@ describe("EventGroupList", () => {
 
     expect(screen.getByRole("link", { name: "Haifa Subdistrict" })).toHaveAttribute("href", "/events/101");
     expect(screen.queryByRole("link", { name: "Event #101" })).not.toBeInTheDocument();
+  });
+
+  it("passes the event's resolved place name to ResponseActions, so its target group titles use it too", () => {
+    renderList([makeEvent({ fire_event_id: 101 })], null, vi.fn(), undefined, { 101: "Haifa Subdistrict" });
+
+    expect(screen.getByRole("heading", { name: "Active fire - Haifa Subdistrict" })).toBeInTheDocument();
   });
 
   it("returns the focus button to its default label when the group is not focused", () => {
@@ -140,7 +168,7 @@ describe("EventGroupList", () => {
   it("shows an empty state within the group when there are no assigned actions", () => {
     renderList([makeEvent({ actions: [] })]);
 
-    expect(screen.getByText("No assigned resources")).toBeInTheDocument();
+    expect(screen.getByText("No response actions")).toBeInTheDocument();
   });
 
   it("renders uncovered targets via the shared UncoveredTargets component", () => {

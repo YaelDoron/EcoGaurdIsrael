@@ -10,9 +10,9 @@ import { buildGlobalResponseMapLayer } from "../components/global-response/Globa
 import { PageHeader } from "../components/layout/PageHeader";
 import type { LatLngPoint } from "../components/map/mapTypes";
 import { MapView } from "../components/map/MapView";
-import { translatePlaceName } from "../components/map/stationTranslations";
 import { useEventLocationNames } from "../hooks/useEventLocationNames";
 import { useGlobalResponsePlan } from "../hooks/useGlobalResponsePlan";
+import { useTargetLocationNames, type GeocodeTarget } from "../hooks/useTargetLocationNames";
 import type { GlobalEventPlan, GlobalPlanningRunStatus } from "../types/globalResponsePlan";
 import "./GlobalResponsePlanPage.css";
 
@@ -80,18 +80,35 @@ export function GlobalResponsePlanPage() {
   // needed when they are geographically spread), so focusing never hides the
   // others - it only restyles them. Presentation only, no refetch.
   const boundsPoints = useMemo(() => buildBoundsPoints(events), [events]);
-  // English display name per event (translated location name, else "Event #id"),
-  // shared by the event list and the map popups.
+  // English display name per event: persisted news-evidence location name
+  // (the backend ingestion pipeline already translates this to English
+  // before saving - displayed as-is, never re-translated here), else a
+  // place reverse-geocoded from the event's own ACTIVE_FIRE target
+  // coordinates, else "Event #id" - the same fallback EventDetailsPage/
+  // ResponsePlanPage already use, so an event with no news evidence still
+  // gets a real name instead of a bare id.
   const eventIds = useMemo(() => events.map((event) => event.fire_event_id), [events]);
   const locationNames = useEventLocationNames(eventIds);
+  const eventGeocodeTargets = useMemo(() => collectEventGeocodeTargets(events), [events]);
+  const geocodedEventPlaces = useTargetLocationNames(eventGeocodeTargets);
+  const eventPlaceNames = useMemo(() => {
+    const names: Record<number, string | null> = {};
+    for (const id of eventIds) {
+      names[id] = locationNames[id] ?? geocodedEventPlaces[id] ?? null;
+    }
+    return names;
+  }, [eventIds, locationNames, geocodedEventPlaces]);
   const eventLabels = useMemo(() => {
     const labels: Record<number, string> = {};
     for (const id of eventIds) {
-      const name = locationNames[id];
-      labels[id] = name ? translatePlaceName(name) : `Event #${id}`;
+      labels[id] = eventPlaceNames[id] ?? `Event #${id}`;
     }
     return labels;
-  }, [eventIds, locationNames]);
+  }, [eventIds, eventPlaceNames]);
+  // Per-target place names (used inside each event's ResponseActions group
+  // headers), reverse-geocoded from every action's own target coordinates.
+  const targetGeocodeTargets = useMemo(() => collectTargetGeocodeTargets(events), [events]);
+  const targetLocations = useTargetLocationNames(targetGeocodeTargets);
   const mapLayer = useMemo(() => buildGlobalResponseMapLayer(events, focusEventId), [events, focusEventId]);
 
   if (isLoading) {
@@ -158,6 +175,8 @@ export function GlobalResponsePlanPage() {
           focusEventId={focusEventId}
           onFocusEvent={handleFocusEvent}
           eventLabels={eventLabels}
+          eventPlaceNames={eventPlaceNames}
+          targetLocations={targetLocations}
         />
         </div>
 
@@ -238,4 +257,44 @@ function buildBoundsPoints(events: GlobalEventPlan[]): LatLngPoint[] {
     }
   }
   return points;
+}
+
+/**
+ * Each event's own ACTIVE_FIRE target coordinates (searching its actions,
+ * then its uncovered targets), for reverse-geocoding a fallback event name
+ * when no news-evidence location name is on record - the same coordinate
+ * source EventDetailsPage's own title uses (`fire_event.latitude/longitude`),
+ * since a materialized GlobalEventPlan carries no FireEvent coordinate of
+ * its own. An event with no ACTIVE_FIRE target coordinate at all is simply
+ * omitted, never geocoded from a PREDICTED_RISK target or fabricated.
+ */
+function collectEventGeocodeTargets(events: GlobalEventPlan[]): GeocodeTarget[] {
+  const targets: GeocodeTarget[] = [];
+  for (const event of events) {
+    const activeFireTarget =
+      event.actions.map((action) => action.target).find((target) => target.target_type === "active_fire") ??
+      event.uncovered_targets.find((target) => target.target_type === "active_fire");
+    if (activeFireTarget && activeFireTarget.latitude !== null && activeFireTarget.longitude !== null) {
+      targets.push({ id: event.fire_event_id, latitude: activeFireTarget.latitude, longitude: activeFireTarget.longitude });
+    }
+  }
+  return targets;
+}
+
+/**
+ * Every unique persisted action-target coordinate across every event
+ * (mirroring ResponsePlanPage's own `collectGeocodeTargets`), for
+ * `ResponseActions`' per-target group titles.
+ */
+function collectTargetGeocodeTargets(events: GlobalEventPlan[]): GeocodeTarget[] {
+  const byId = new Map<number, GeocodeTarget>();
+  for (const event of events) {
+    for (const action of event.actions) {
+      const { response_target_id: id, latitude, longitude } = action.target;
+      if (latitude !== null && longitude !== null && !byId.has(id)) {
+        byId.set(id, { id, latitude, longitude });
+      }
+    }
+  }
+  return Array.from(byId.values());
 }

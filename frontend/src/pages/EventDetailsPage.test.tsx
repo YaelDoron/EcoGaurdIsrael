@@ -483,7 +483,18 @@ describe("EventDetailsPage", () => {
           plan_score: 90,
           coverage_score: 1,
           average_eta_seconds: 120,
-          actions: [],
+          actions: [
+            {
+              resource_id: "R1",
+              station_id: "S1",
+              response_target_id: 1,
+              target_type: "active_fire",
+              target_priority: 100,
+              eta_seconds: 120,
+              route_distance_meters: 1000,
+              node_path: [1, 2],
+            },
+          ],
           uncovered_target_ids: [],
           baseline_comparison: null,
         },
@@ -507,6 +518,38 @@ describe("EventDetailsPage", () => {
 
     expect(screen.getByRole("region", { name: "Map of Event #12" })).toBeInTheDocument();
     expect(screen.getAllByTestId("marker").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows the persisted location name (not raw coordinates or Event #id) in the fire marker's popup", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        detection_evidence: {
+          satellite: [],
+          // Already English: the backend ingestion pipeline translates
+          // location_name before it is ever saved - the frontend displays
+          // it as-is and never re-translates it.
+          news: [
+            {
+              id: 1,
+              title: "t",
+              summary: "s",
+              source: "src",
+              observed_at: "2026-09-17T13:10:00Z",
+              location_name: "Galilee",
+              latitude: null,
+              longitude: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const popup = screen.getAllByTestId("popup")[0];
+    expect(within(popup).getByText("Galilee Wildfire")).toBeInTheDocument();
+    expect(within(popup).queryByText("Event #12")).not.toBeInTheDocument();
   });
 
   it("does not render the old subtitle", async () => {
@@ -542,6 +585,36 @@ describe("EventDetailsPage", () => {
     renderPage();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Modiin Wildfire Event" })).toBeInTheDocument();
+  });
+
+  it("shows the persisted location name in the title exactly as saved, never mixing languages", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        detection_evidence: {
+          satellite: [],
+          // Backend-translated before persistence - see
+          // NewsMonitoringAgent.translate_report / SimulationEventExecutor.
+          news: [
+            {
+              id: 1,
+              title: "t",
+              summary: "s",
+              source: "src",
+              observed_at: "2026-09-17T13:10:00Z",
+              location_name: "Galilee",
+              latitude: null,
+              longitude: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    renderPage();
+
+    const title = await screen.findByRole("heading", { level: 1 });
+    expect(title).toHaveTextContent("Galilee Wildfire Event");
+    expect(title.textContent).not.toMatch(/[֐-׿]/);
   });
 
   it("falls back to a generic event title, not coordinates, when no location name is available", async () => {
@@ -834,7 +907,14 @@ describe("EventDetailsPage", () => {
       makeResult({
         current_response_plan: {
           plan_id: 77, generated_at: "2026-09-17T13:30:00Z", methodology: "ga", methodology_version: "1.0",
-          plan_score: 90, coverage_score: 1, average_eta_seconds: 120, actions: [], uncovered_target_ids: [], baseline_comparison: null,
+          plan_score: 90, coverage_score: 1, average_eta_seconds: 120,
+          actions: [
+            {
+              resource_id: "R1", station_id: "S1", response_target_id: 1, target_type: "active_fire",
+              target_priority: 100, eta_seconds: 120, route_distance_meters: 1000, node_path: [1, 2],
+            },
+          ],
+          uncovered_target_ids: [], baseline_comparison: null,
         },
       }),
     );
@@ -856,13 +936,69 @@ describe("EventDetailsPage", () => {
     expect(document.querySelector(".page-header__actions")).toBeNull();
   });
 
-  it("renders no Response Plan action in the Fire Event card when there is no current plan", async () => {
+  it("renders no Response Plan link in the Fire Event card when there is no current plan", async () => {
     getEventDetailsMock.mockResolvedValue(makeResult({ current_response_plan: null }));
 
     renderPage();
     await screen.findByText("Data as of:", { exact: false });
 
     expect(screen.queryByRole("link", { name: "View Current Response Plan" })).not.toBeInTheDocument();
+  });
+
+  it("shows a disabled/pending Response Plan button (not nothing) on first load, before a plan exists yet, for a still-active event", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({ fire_event: { ...makeResult().fire_event, status: "confirmed" }, current_response_plan: null }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const pending = screen.getByText("Response Plan pending…");
+    expect(pending).toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByRole("link", { name: "View Current Response Plan" })).not.toBeInTheDocument();
+  });
+
+  it("renders no Response Plan action at all for a resolved event with no plan - none will ever be generated", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({ fire_event: { ...makeResult().fire_event, status: "resolved" }, current_response_plan: null }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.queryByText(/Response Plan/)).not.toBeInTheDocument();
+  });
+
+  it("shows an active, clickable 'No Resources Available' button - not the stuck pending state - when a plan exists but allocated zero resources", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: { ...makeResult().fire_event, fire_event_id: 789, status: "confirmed" },
+        current_response_plan: {
+          plan_id: 900,
+          generated_at: "2026-09-17T13:30:00Z",
+          methodology: "global_genetic_resource_allocation",
+          methodology_version: "1.0",
+          plan_score: 0,
+          coverage_score: 0,
+          average_eta_seconds: null,
+          actions: [],
+          uncovered_target_ids: [1],
+          baseline_comparison: null,
+        },
+      }),
+    );
+
+    renderPage("789");
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.queryByText("Response Plan pending…")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "View Current Response Plan" })).not.toBeInTheDocument();
+
+    const cta = screen.getByRole("link", { name: "View Response Plan (No Resources Available)" });
+    expect(cta).toHaveTextContent("No Resources Available");
+    expect(cta).toHaveAttribute("href", "/events/789/plan");
+    expect(cta).toHaveClass("event-details-page__action--warning");
+    expect(cta).not.toHaveAttribute("aria-disabled");
   });
 
   it("marks only the 'No spread predicted' fallback as a quiet/muted state", async () => {

@@ -26,6 +26,12 @@ const ORIGIN_MARKER_COLOR = "var(--color-info)";
 const FIRE_MARKER_COLOR = "#ff2200";
 const PREDICTED_RISK_COLOR = "var(--color-warning)";
 
+// "Last mile" connector: bridges the routed path's snapped-to-road end point
+// to the target's own (off-road) coordinate - always dashed and thin so it
+// is never mistaken for part of the actual computed route.
+const LAST_MILE_GAP_DASH = "5, 10";
+const LAST_MILE_GAP_WEIGHT = 2;
+
 const MARKER_SIZE = 16;
 const MARKER_SIZE_FOCUSED = 22;
 const STATION_SIZE = 24;
@@ -103,6 +109,21 @@ export function GlobalResponseMapLayer({ layer, eventLabels = {} }: GlobalRespon
           pathOptions={routePathOptions(route.isFocused, route.fireEventId)}
         />
       ))}
+
+      {layer.routes.map((route) =>
+        route.lastMileGap ? (
+          <Polyline
+            key={`last-mile-${route.actionKey}`}
+            positions={route.lastMileGap.map((point): [number, number] => [point.latitude, point.longitude])}
+            pathOptions={{
+              color: hasFocus && route.isFocused ? ROUTE_COLOR_FOCUSED : ROUTE_COLOR_DIMMED,
+              weight: LAST_MILE_GAP_WEIGHT,
+              dashArray: LAST_MILE_GAP_DASH,
+              opacity: opacityFor(route.isFocused) ?? (hasFocus && route.isFocused ? 1 : 0.85),
+            }}
+          />
+        ) : null,
+      )}
 
       {layer.fireMarkers.map((fire) => (
         <Marker

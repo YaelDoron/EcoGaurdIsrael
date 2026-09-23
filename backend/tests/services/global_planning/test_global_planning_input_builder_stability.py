@@ -90,6 +90,9 @@ class FakeRoadNetworkFetcher:
     def fetch_network_in_bbox(self, *args, **kwargs):
         return [], []
 
+    def fetch_network_in_bbox_tiled(self, *args, **kwargs):
+        return [], []
+
 
 class SequencedCandidateCollector:
     """Returns a pre-programmed resource tuple on each successive .collect()
