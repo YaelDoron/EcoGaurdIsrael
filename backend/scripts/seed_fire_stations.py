@@ -28,12 +28,26 @@ from src.models.resource_status import ResourceStatus
 
 DATA_PATH = Path(__file__).resolve().parents[1] / "src" / "database" / "data" / "firefighting_stations.json"
 
-DEFAULT_RESOURCE_COUNT = 3
+# Logical resource injection: counts follow the same hierarchy the
+# station_type field already encodes (National HQ > District HQ > Regional
+# > Substation), just sized up from the original baseline - a live check
+# of the seeded fleet (409 trucks total: 1 HQ, 7 District, 33 Regional, 97
+# Substation) showed even the OLD counts already vastly exceed a heavy
+# 6-simultaneous-event scenario's total demand (roughly 20-24 desired
+# resources, per this session's own live GlobalPlanningRun data) - so
+# NATIONAL fleet size was never the real bottleneck for 100% coverage;
+# geographic/routing reachability was (see GlobalPlanningInputBuilder's
+# progressive expansion + RoadNetworkFetcher's tiling, this same session).
+# This bump specifically grows the LOCAL, geographically-distributed tier
+# (Substation, by far the most numerous - 97 of 138 stations) the most in
+# absolute terms, since that's what actually helps a fire find enough
+# LOCALLY-reachable supply without needing the expensive wide fetch at all.
+DEFAULT_RESOURCE_COUNT = 4
 RESOURCE_COUNTS_BY_STATION_TYPE = {
-    "מטה": 8,  # National HQ
-    "מחוז": 6,  # District HQ
-    "אזורית": 5,  # Regional Station
-    "משנה": 2,  # Substation
+    "מטה": 12,  # National HQ
+    "מחוז": 9,  # District HQ
+    "אזורית": 7,  # Regional Station
+    "משנה": 3,  # Substation
 }
 
 

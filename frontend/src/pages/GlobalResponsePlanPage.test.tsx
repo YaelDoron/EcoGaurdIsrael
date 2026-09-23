@@ -18,6 +18,10 @@ const { getEventDetailsMock } = vi.hoisted(() => ({ getEventDetailsMock: vi.fn()
 
 vi.mock("../api/eventDetails", () => ({ getEventDetails: getEventDetailsMock }));
 
+const { reverseGeocodeMock } = vi.hoisted(() => ({ reverseGeocodeMock: vi.fn() }));
+
+vi.mock("../api/reverseGeocode", () => ({ reverseGeocode: reverseGeocodeMock }));
+
 vi.mock("react-leaflet", async () => import("../test/reactLeafletStub"));
 
 function makeResponse(overrides: Partial<GlobalResponsePlanResponse> = {}): GlobalResponsePlanResponse {
@@ -106,6 +110,8 @@ describe("GlobalResponsePlanPage", () => {
   beforeEach(() => {
     getEventDetailsMock.mockReset();
     getEventDetailsMock.mockRejectedValue(new Error("no details"));
+    reverseGeocodeMock.mockReset();
+    reverseGeocodeMock.mockResolvedValue(null);
     getCurrentGlobalResponsePlanMock.mockReset();
   });
 
@@ -221,10 +227,13 @@ describe("GlobalResponsePlanPage", () => {
     expect(screen.getByRole("link", { name: "Event #202" })).toBeInTheDocument();
   });
 
-  it("titles each event group with its English location name instead of the raw id", async () => {
+  it("titles each event group with its persisted location name instead of the raw id", async () => {
+    // Already English: the backend ingestion pipeline translates
+    // location_name before it is ever saved - the frontend displays it
+    // as-is and never re-translates it.
     getEventDetailsMock.mockImplementation((id: number) =>
       Promise.resolve({
-        detection_evidence: { satellite: [], news: [{ location_name: id === 101 ? "Haifa Subdistrict" : "חיפה" }] },
+        detection_evidence: { satellite: [], news: [{ location_name: id === 101 ? "Haifa Subdistrict" : "Haifa" }] },
       }),
     );
     getCurrentGlobalResponsePlanMock.mockResolvedValue(makeResponse());
@@ -233,6 +242,30 @@ describe("GlobalResponsePlanPage", () => {
 
     expect(await screen.findByRole("link", { name: "Haifa Subdistrict" })).toHaveAttribute("href", "/events/101");
     expect(await screen.findByRole("link", { name: "Haifa" })).toHaveAttribute("href", "/events/202");
+  });
+
+  it("falls back to a place reverse-geocoded from the event's own target coordinates when there is no news location name", async () => {
+    getEventDetailsMock.mockResolvedValue({ detection_evidence: { satellite: [], news: [] } });
+    reverseGeocodeMock.mockImplementation((latitude: number, longitude: number) =>
+      Promise.resolve(latitude === 32.7 && longitude === 35.0 ? "Nof HaGalil" : null),
+    );
+    getCurrentGlobalResponsePlanMock.mockResolvedValue(makeResponse());
+
+    renderAtPath("/global-response-plan");
+
+    expect(await screen.findByRole("link", { name: "Nof HaGalil" })).toHaveAttribute("href", "/events/101");
+    expect(reverseGeocodeMock).toHaveBeenCalledWith(32.7, 35.0);
+  });
+
+  it("still falls back to Event #id when neither a news location name nor any target coordinate is available", async () => {
+    getEventDetailsMock.mockResolvedValue({ detection_evidence: { satellite: [], news: [] } });
+    getCurrentGlobalResponsePlanMock.mockResolvedValue(makeResponse());
+
+    renderAtPath("/global-response-plan");
+    await screen.findByText(/Last updated:/);
+
+    // Event 202 has no actions/uncovered_targets, so no coordinate exists to geocode.
+    expect(screen.getByRole("link", { name: "Event #202" })).toBeInTheDocument();
   });
 
   it("splits the layout into a details column and a map column", async () => {

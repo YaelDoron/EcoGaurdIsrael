@@ -15,6 +15,7 @@ import { MapView } from "../components/map/MapView";
 import { ResponseTargetLayer } from "../components/map/ResponseTargetLayer";
 import { SpreadLayer } from "../components/map/SpreadLayer";
 import { StationLayer } from "../components/map/StationLayer";
+import { translateIfUntranslated } from "../components/map/stationTranslations";
 import type { LatLngPoint, LayerToggle, LayerVisibility } from "../components/map/mapTypes";
 import { SeverityBadge } from "../components/status/SeverityBadge";
 import { StatusBadge } from "../components/status/StatusBadge";
@@ -211,15 +212,23 @@ export function EventDetailsPage() {
   } = data;
   const confidencePercent = Math.round(fireEvent.detection_confidence * 100);
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
-  // Title: the event's persisted location name (news evidence), else a place
-  // reverse-geocoded from its coordinates, else a generic title with the id.
-  const placeName =
-    detectionEvidence.news.find((item) => item.location_name)?.location_name ??
-    geocodedPlaces[fireEvent.fire_event_id] ??
-    null;
+  // Title: the event's persisted location name (news evidence - the backend
+  // ingestion pipeline translates this to English before it is ever saved,
+  // so it is displayed as-is here, never re-translated on the frontend),
+  // else a place reverse-geocoded from its coordinates (already English),
+  // else a generic title with the id.
+  const newsLocationName = translateIfUntranslated(
+    detectionEvidence.news.find((item) => item.location_name)?.location_name ?? null,
+  );
+  const placeName = newsLocationName ?? geocodedPlaces[fireEvent.fire_event_id] ?? null;
   const headerTitle = placeName ? `${placeName} Wildfire Event` : `Wildfire Event #${fireEvent.fire_event_id}`;
   // A still-unverified event must not read as a confirmed critical one.
   const isUnverifiedCritical = fireEvent.status === "suspected" && severity?.level === "critical";
+  // No plan is generated for a resolved/dismissed event: only a still-active
+  // event (suspected/confirmed) with no plan YET is "pending" - the button
+  // stays visible in a disabled/loading state rather than disappearing, so it
+  // doesn't look like it never renders on a page the operator just opened.
+  const isPlanStatusPending = fireEvent.status === "suspected" || fireEvent.status === "confirmed";
 
   return (
     <section className="event-details-page">
@@ -242,9 +251,11 @@ export function EventDetailsPage() {
           </h2>
           <LayerControls layers={layerToggles} visibility={layerVisibility} onToggle={toggleLayer} />
           <MapView boundsPoints={boundsPoints} ariaLabel={`Map of Event #${fireEvent.fire_event_id}`}>
-            <FireEventMarker fireEvent={fireEvent} />
+            <FireEventMarker fireEvent={fireEvent} locationName={placeName} />
             {(layerVisibility.spread ?? true) ? <SpreadLayer predictions={spreadPredictions} /> : null}
-            {(layerVisibility.targets ?? true) ? <ResponseTargetLayer targets={targets} /> : null}
+            {(layerVisibility.targets ?? true) ? (
+              <ResponseTargetLayer targets={targets} eventLocationName={placeName} />
+            ) : null}
             {(layerVisibility.stations ?? true) ? (
               <StationLayer stations={data.stations} stationSummaries={stationSummaries} />
             ) : null}
@@ -257,7 +268,7 @@ export function EventDetailsPage() {
               <h2 id="fire-event-heading" className="event-details-page__section-title">
                 Fire Event
               </h2>
-              {currentPlan ? (
+              {currentPlan && currentPlan.actions.length > 0 ? (
                 <Link
                   to={`/events/${fireEvent.fire_event_id}/plan`}
                   className="event-details-page__action event-details-page__action--primary"
@@ -266,6 +277,29 @@ export function EventDetailsPage() {
                   <ClipboardIcon />
                   Response Plan
                 </Link>
+              ) : currentPlan ? (
+                // A plan was generated but allocated zero resources (e.g. the
+                // global optimizer found "No feasible assignments"). This is
+                // a real, current plan - not a missing one - so the button
+                // stays active/clickable rather than reverting to the
+                // "pending" state, letting the operator click through and
+                // see the warning on the plan details page.
+                <Link
+                  to={`/events/${fireEvent.fire_event_id}/plan`}
+                  className="event-details-page__action event-details-page__action--warning"
+                  aria-label="View Response Plan (No Resources Available)"
+                >
+                  <ClipboardIcon />
+                  No Resources Available
+                </Link>
+              ) : isPlanStatusPending ? (
+                <span
+                  className="event-details-page__action event-details-page__action--primary event-details-page__action--pending"
+                  aria-disabled="true"
+                >
+                  <ClipboardIcon />
+                  Response Plan pending…
+                </span>
               ) : null}
             </div>
             <dl className="event-details-page__facts event-details-page__facts--grid">

@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { EmptyState } from "../feedback/EmptyState";
-import { ResponseActionCard } from "../response-plan/ResponseActionCard";
+import { ResponseActions } from "../response-plan/ResponseActions";
 import { UncoveredTargets } from "../response-plan/UncoveredTargets";
 import { formatCoveragePercentage, formatDurationSeconds, NOT_AVAILABLE_LABEL } from "../response-plan/formatting";
 import { SeverityBadge } from "../status/SeverityBadge";
@@ -20,12 +20,18 @@ export interface EventGroupListProps {
   /** Display name per event id (English location name). Falls back to
    * "Event #id" for an id without one. */
   eventLabels?: Record<number, string>;
+  /** The RAW (nullable) resolved place name per event id - unlike
+   * `eventLabels`, never pre-filled with "Event #id", so it can be handed
+   * straight to `ResponseActions`' `locationName` (which does its own,
+   * different fallback to "Target #id"). */
+  eventPlaceNames?: Record<number, string | null>;
+  /** Per-target place names from reverse geocoding (target id -> name),
+   * shared across every event's `ResponseActions` group. */
+  targetLocations?: Record<number, string | null>;
 }
 
 const NO_EVENTS_TITLE = "No materialized fire events";
 const NO_EVENTS_MESSAGE = "This generation has no fire events with a materialized response plan.";
-const NO_ACTIONS_TITLE = "No assigned resources";
-const NO_ACTIONS_MESSAGE = "No resources are assigned to this fire event in the current generation.";
 
 /**
  * Every materialized FireEvent in the current global generation
@@ -33,12 +39,19 @@ const NO_ACTIONS_MESSAGE = "No resources are assigned to this fire event in the 
  * component performs no client-side grouping of its own, only rendering.
  * Each group's severity/coverage/resource-count fields and its
  * routes/actions/uncovered-targets are shown exactly as the backend
- * assembled them, reusing `ResponseActionCard`/`UncoveredTargets` (the same
- * presentation components the single-event Response Plan page uses) rather
- * than a parallel rendering of the same `ResponsePlanAction`/
- * `ResponsePlanTarget` shapes.
+ * assembled them, reusing `ResponseActions`/`UncoveredTargets` (the same
+ * presentation components the single-event Response Plan page uses,
+ * including its per-station truck grouping) rather than a parallel
+ * rendering of the same `ResponsePlanAction`/`ResponsePlanTarget` shapes.
  */
-export function EventGroupList({ events, focusEventId, onFocusEvent, eventLabels = {} }: EventGroupListProps) {
+export function EventGroupList({
+  events,
+  focusEventId,
+  onFocusEvent,
+  eventLabels = {},
+  eventPlaceNames = {},
+  targetLocations = {},
+}: EventGroupListProps) {
   return (
     <section aria-labelledby="event-group-list-heading" className="event-group-list">
       <h2 id="event-group-list-heading" className="event-group-list__title">
@@ -110,15 +123,12 @@ export function EventGroupList({ events, focusEventId, onFocusEvent, eventLabels
                   </span>
                 </p>
 
-                {event.actions.length === 0 ? (
-                  <EmptyState title={NO_ACTIONS_TITLE} message={NO_ACTIONS_MESSAGE} />
-                ) : (
-                  <div className="event-group__actions">
-                    {event.actions.map((action) => (
-                      <ResponseActionCard key={action.resource.resource_id} action={action} />
-                    ))}
-                  </div>
-                )}
+                <ResponseActions
+                  actions={event.actions}
+                  locationName={eventPlaceNames[event.fire_event_id] ?? null}
+                  targetLocations={targetLocations}
+                  headingId={`response-actions-heading-${event.fire_event_id}`}
+                />
 
                 {event.uncovered_targets.length > 0 ? <UncoveredTargets targets={event.uncovered_targets} /> : null}
               </article>

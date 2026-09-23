@@ -23,6 +23,12 @@ export interface ResponseActionsProps {
   locationName?: string | null;
   /** Per-target place names from reverse geocoding (target id -> name); preferred over `locationName`. */
   targetLocations?: Record<number, string | null>;
+  /** Overrides the section heading's id (and its aria-labelledby). Needed
+   * when this component renders more than once on the same page (e.g. once
+   * per event in the Global Response Plan's event list) so every instance
+   * gets a unique, valid DOM id - defaults to the original fixed id for the
+   * common single-plan-per-page case. */
+  headingId?: string;
 }
 
 const EMPTY_TITLE = "No response actions";
@@ -143,6 +149,7 @@ export function ResponseActions({
   onSelectAction,
   locationName = null,
   targetLocations = {},
+  headingId = "response-actions-heading",
 }: ResponseActionsProps) {
   const groups = groupByTarget(actions);
   const titles = groupTitles(
@@ -152,8 +159,8 @@ export function ResponseActions({
   const maxScore = Math.max(0, ...groups.map((group) => group.target.priority_score ?? 0));
 
   return (
-    <section aria-labelledby="response-actions-heading" className="response-plan-summary__section">
-      <h2 id="response-actions-heading" className="response-plan-summary__section-title">
+    <section aria-labelledby={headingId} className="response-plan-summary__section">
+      <h2 id={headingId} className="response-plan-summary__section-title">
         Response Actions
       </h2>
       {actions.length === 0 ? (

@@ -27,23 +27,51 @@ const STATION_ICON_SIZE = 26;
  * available: amber if some trucks are assigned, grey if none are usable.
  */
 /**
- * Trucks still free under the current plan: the station's raw `available`
- * count minus the trucks the active global plan allocates from it, never
- * below zero. (The raw count is the DB state, which does not yet reflect this
- * plan's allocations.)
+ * Trucks dispatched to some OTHER event/plan: the station's raw `assigned`
+ * count, minus whichever of those are already this event's own current-plan
+ * allocations (a DB status update can land before or after a plan is
+ * generated - see `current_global_plan_allocations`'s docs - so the two
+ * counts can overlap). Subtracting the overlap is what prevents a truck from
+ * being counted under both "Allocated" and "Unavailable" at once, which
+ * otherwise made `Total` less than `Available + Allocated + Unavailable`.
+ */
+function assignedToOtherEventCount(summary: StationSummary): number {
+  const allocated = summary.current_global_plan_allocations.length;
+  return Math.max(0, (summary.assigned_status ?? 0) - allocated);
+}
+
+/**
+ * Trucks not usable for a new dispatch: any resource dispatched to another
+ * event ({@link assignedToOtherEventCount}) plus the station's raw
+ * `unavailable` (out-of-service) count.
+ */
+export function dynamicUnavailableCount(summary: StationSummary): number {
+  return assignedToOtherEventCount(summary) + (summary.unavailable ?? 0);
+}
+
+/**
+ * Trucks free for a new dispatch. Deliberately NOT derived from the
+ * backend's own `available` field - that raw count is an independent signal
+ * that can drift out of sync with `current_global_plan_allocations` (see
+ * {@link assignedToOtherEventCount}) and mixing the two was the source of a
+ * double-counting bug. `Available` is instead always the strict remainder
+ * `Total - (Allocated + Unavailable)`, so the three displayed buckets are
+ * guaranteed to sum to `Total`.
  */
 export function dynamicAvailableCount(summary: StationSummary): number {
-  return Math.max(0, summary.available - summary.current_global_plan_allocations.length);
+  const total = summary.total_resources ?? 0;
+  const allocated = summary.current_global_plan_allocations.length;
+  return Math.max(0, total - allocated - dynamicUnavailableCount(summary));
 }
 
 function stationColor(summary: StationSummary | undefined): string {
   if (summary && summary.current_global_plan_allocations.length > 0) {
     return STATION_ALLOCATED_COLOR;
   }
-  if (!summary || summary.total_resources === 0 || summary.available > 0) {
+  if (!summary || summary.total_resources === 0 || dynamicAvailableCount(summary) > 0) {
     return STATION_MARKER_COLOR;
   }
-  if (summary.assigned_status > 0) {
+  if (assignedToOtherEventCount(summary) > 0) {
     return TONE_MAP_COLOR.warning;
   }
   return TONE_MAP_COLOR.neutral;
@@ -52,6 +80,7 @@ function stationColor(summary: StationSummary | undefined): string {
 function InventoryStats({ summary }: { summary: StationSummary }) {
   const dynamicAvailable = dynamicAvailableCount(summary);
   const allocated = summary.current_global_plan_allocations.length;
+  const dynamicUnavailable = dynamicUnavailableCount(summary);
   return (
     <dl className="station-popup__stats">
       <div className="station-popup__stat">
@@ -74,13 +103,13 @@ function InventoryStats({ summary }: { summary: StationSummary }) {
       </div>
       <div
         className={
-          summary.unavailable > 0
+          dynamicUnavailable > 0
             ? "station-popup__stat station-popup__stat--unavailable"
             : "station-popup__stat station-popup__stat--zero"
         }
       >
         <dt>Unavailable</dt>
-        <dd>{summary.unavailable}</dd>
+        <dd>{dynamicUnavailable}</dd>
       </div>
     </dl>
   );

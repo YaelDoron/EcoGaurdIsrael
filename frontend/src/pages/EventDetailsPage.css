@@ -60,6 +60,31 @@
   filter: brightness(1.08);
 }
 
+/* Disabled/loading state: a plan is still being generated for this event. */
+.event-details-page__action--pending {
+  cursor: default;
+  opacity: 0.6;
+  box-shadow: none;
+}
+
+.event-details-page__action--pending:hover {
+  transform: none;
+  box-shadow: none;
+  filter: none;
+}
+
+/* A real, current plan that allocated zero resources - still clickable,
+   but flagged so it reads as a warning rather than a normal plan link. */
+.event-details-page__action--warning {
+  background: var(--color-warning);
+  border-color: var(--color-warning);
+  color: #1f2937;
+}
+
+.event-details-page__action--warning:hover {
+  filter: brightness(1.05);
+}
+
 .event-details-page__refresh {
   padding: var(--space-2) var(--space-4);
   border: 1px solid var(--color-border);

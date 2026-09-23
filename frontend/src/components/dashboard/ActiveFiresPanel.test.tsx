@@ -21,10 +21,10 @@ function makeEvent(overrides: Partial<ActiveFireEvent> = {}): ActiveFireEvent {
   };
 }
 
-function renderPanel(activeFires: ActiveFireEvent[], globalPlanningRunId: number | null = null) {
+function renderPanel(activeFires: ActiveFireEvent[]) {
   return render(
     <MemoryRouter>
-      <ActiveFiresPanel activeFires={activeFires} globalPlanningRunId={globalPlanningRunId} />
+      <ActiveFiresPanel activeFires={activeFires} />
     </MemoryRouter>,
   );
 }
@@ -58,15 +58,9 @@ describe("ActiveFiresPanel", () => {
     expect(css).not.toMatch(/overflow-y/);
   });
 
-  it("does not show View Response Plan when no real global planning run is available", () => {
-    renderPanel([], null);
+  it("never renders its own View Response Plan action - the page header's Global Response Plan link is the one route to it", () => {
+    renderPanel([]);
 
     expect(screen.queryByRole("button", { name: /view response plan/i })).not.toBeInTheDocument();
-  });
-
-  it("shows View Response Plan when a real global planning run id is available", () => {
-    renderPanel([], 42);
-
-    expect(screen.getByRole("button", { name: "View Response Plan" })).toBeInTheDocument();
   });
 });

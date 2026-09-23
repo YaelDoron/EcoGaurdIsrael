@@ -12,6 +12,18 @@ from typing import Iterable, Protocol
 
 EARTH_RADIUS_KM = 6371.0088
 
+# First-Mile Heuristic Fallback threshold: the ordinary, harmless slack
+# between a station's exact coordinate and the nearest real road node (a
+# building's own driveway/forecourt, typically well under 100m). Shared by
+# GlobalRouteMatrixBuilder (adds a time/distance correction to a route's
+# totals past this gap) and ResponsePlanPresenter (bridges the same gap in
+# `path_coordinates` with one honest straight-line segment from the
+# station's real coordinate) - defined once here so both layers agree on
+# exactly the same threshold, never two independently-tuned numbers that
+# could drift apart and disagree about whether a given route needed either
+# correction.
+FIRST_MILE_PENALTY_THRESHOLD_KM = 0.1
+
 
 class NamedCircularArea(Protocol):
     """Structural shape shared by any persisted circular area with a name.

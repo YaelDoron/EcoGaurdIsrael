@@ -7,6 +7,8 @@ a route computed to FireEvent B's target, not just its "own" event.
 """
 from __future__ import annotations
 
+import pytest
+
 from src.calculators.routing.dijkstra_calculator import DijkstraCalculator
 from src.models.global_planning_resource import GlobalPlanningResource
 from src.models.global_planning_target import GlobalPlanningTarget
@@ -16,6 +18,7 @@ from src.models.resource_status import ResourceStatus
 from src.models.response_target_type import ResponseTargetType
 from src.services.global_planning.global_route_matrix_builder import GlobalRouteMatrixBuilder
 from src.services.routing.node_mapping_service import NodeMappingService
+from src.utils.geo import haversine_distance_km
 
 # Node layout: 1=station A origin, 2=station B origin, 3=target A1, 4=target B1;
 # 6/7 form a disconnected component (isolated source -> isolated target) used
@@ -232,3 +235,90 @@ def test_empty_targets_produces_empty_matrix():
 
     assert len(result.matrix) == 0
     assert result.dijkstra_call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# First-Mile Heuristic Fallback: a small, bounded correction added on TOP of
+# an already-REACHABLE Dijkstra route when the origin had to snap to a real
+# road node a non-trivial distance from the station's true coordinate (a
+# station-micro fetch that exhausted every retry, in production). This is
+# never a Haversine route SUBSTITUTE - test_input_builder_never_imports_the_
+# haversine_route_fallback (in test_global_planning_input_builder.py) already
+# guards that this module never imports HaversineFallbackCalculator.
+# ---------------------------------------------------------------------------
+
+# ~166m north of NODE_STATION_A (32.70, 35.00) - comfortably past
+# FIRST_MILE_PENALTY_THRESHOLD_KM (100m) without being anywhere near
+# NodeMappingService's own MAX_SNAP_DISTANCE_KM (5km) cap, so it still snaps
+# to NODE_STATION_A normally.
+FAR_STATION_LAT = 32.7015
+FAR_STATION_LON = 35.00
+
+
+def test_first_mile_penalty_added_when_the_origin_snaps_far_from_the_true_station_coordinate():
+    resource = _resource("R1", "STATION-FAR", FAR_STATION_LAT, FAR_STATION_LON)
+    target = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
+    nodes, edges = _nodes_and_edges()
+
+    result = make_builder().build((resource,), (target,), nodes, edges)
+
+    option = result.matrix.get("R1", 101)
+    assert option is not None
+    gap_km = haversine_distance_km(FAR_STATION_LAT, FAR_STATION_LON, 32.70, 35.00)
+    assert gap_km > 0.1  # the fixture must genuinely exceed the penalty threshold, or this test proves nothing
+    expected_extra_seconds = (gap_km / 30.0) * 3600.0
+    expected_extra_meters = gap_km * 1000.0
+    # Base route (NODE_STATION_A -> NODE_TARGET_A1) is 500.0m / 60.0s - see _nodes_and_edges.
+    assert option.eta_seconds == pytest.approx(60.0 + expected_extra_seconds)
+    assert option.route_distance_meters == pytest.approx(500.0 + expected_extra_meters)
+
+
+def test_no_first_mile_penalty_when_the_snap_gap_is_within_the_ordinary_threshold():
+    # ~44m north of the node - well under FIRST_MILE_PENALTY_THRESHOLD_KM
+    # (100m), the ordinary slack between a station's exact coordinate and
+    # its nearest real road node - must not be penalized at all.
+    resource = _resource("R1", "STATION-NEAR", 32.7004, 35.00)
+    target = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
+    nodes, edges = _nodes_and_edges()
+
+    result = make_builder().build((resource,), (target,), nodes, edges)
+
+    option = result.matrix.get("R1", 101)
+    assert option is not None
+    assert option.eta_seconds == 60.0
+    assert option.route_distance_meters == 500.0
+
+
+def test_first_mile_penalty_never_fabricates_a_route_for_an_unreachable_pair():
+    """The penalty only ever corrects an already-REACHABLE route - it must
+    never turn a genuinely UNREACHABLE pair into a feasible one."""
+    resource = _resource("R1", "STATION-FAR", FAR_STATION_LAT, FAR_STATION_LON)
+    unreachable_target = _target(fire_event_id=1, response_target_id=102, lat=33.51, lon=36.01)
+    nodes, edges = _nodes_and_edges(include_unreachable_target=True)
+
+    result = make_builder().build((resource,), (unreachable_target,), nodes, edges)
+
+    assert result.matrix.get("R1", 102) is None
+    assert len(result.matrix) == 0
+
+
+def test_first_mile_penalty_is_identical_for_resources_sharing_the_same_far_snapped_station():
+    resource_1 = _resource("R1", "STATION-FAR", FAR_STATION_LAT, FAR_STATION_LON)
+    resource_2 = _resource("R2", "STATION-FAR", FAR_STATION_LAT, FAR_STATION_LON)
+    target = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
+    nodes, edges = _nodes_and_edges()
+
+    result = make_builder().build((resource_1, resource_2), (target,), nodes, edges)
+
+    assert result.dijkstra_call_count == 1  # same-station dedup (Task 14) still holds
+    option_1 = result.matrix.get("R1", 101)
+    option_2 = result.matrix.get("R2", 101)
+    assert option_1 is not None and option_2 is not None
+    assert option_1.eta_seconds == option_2.eta_seconds
+    assert option_1.eta_seconds > 60.0  # confirms the penalty was genuinely added, not silently dropped
+
+
+def test_first_mile_penalty_helper_returns_zero_for_a_close_snap_or_a_missing_node():
+    assert GlobalRouteMatrixBuilder._first_mile_penalty(32.70, 35.00, None) == (0.0, 0.0)
+    close_node = GraphNode(id=1, latitude=32.70, longitude=35.00)
+    assert GlobalRouteMatrixBuilder._first_mile_penalty(32.70, 35.00, close_node) == (0.0, 0.0)

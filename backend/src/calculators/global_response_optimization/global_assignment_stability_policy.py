@@ -34,7 +34,22 @@ from numbers import Real
 METHODOLOGY = "ecoguard_demo_assignment_stability_policy"
 METHODOLOGY_VERSION = "1.0"
 
-DEFAULT_STABILITY_BONUS_WEIGHT = 50.0
+# Sized to damp micro-flickering between near-identical candidates, never to
+# entrench a materially worse (i.e. meaningfully farther) one. Against the
+# quadratic eta_factor (see GlobalResponsePlanScorer.eta_factor,
+# eta_reference_seconds=900s default), even a conservative multi-minute ETA
+# advantage clears this easily: e.g. a target already at the max active-fire
+# priority (200.0) reachable at 20 vs. 27 minutes (a 7-minute gap late in the
+# curve, where the quadratic penalty's marginal bite is at its weakest) still
+# swings eta_priority_component by ~25 points - several times this weight.
+# At the low end (a low-priority PREDICTED_RISK target, priority_score close
+# to its ~51 floor) the same 7-minute gap still swings the component by
+# several points, comfortably above this weight. A gap of ~15 seconds -
+# genuine routing noise rather than a real distance difference - swings the
+# component by well under this weight even at max priority; only once a gap
+# approaches a real minute or more does it start to matter, which is exactly
+# the "keep doing what you were already doing" case this bonus exists for.
+DEFAULT_STABILITY_BONUS_WEIGHT = 5.0
 
 
 @dataclass(frozen=True)

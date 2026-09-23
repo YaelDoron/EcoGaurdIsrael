@@ -27,6 +27,23 @@ class ResponsePlanScorer:
 
         `ETA_REFERENCE_SECONDS` is an engineering normalization constant, not
         an official wildfire response-time standard.
+
+        Quadratic in `travel_time_seconds / eta_reference_seconds`, not
+        linear: a target's fitness contribution is `priority_score *
+        eta_factor(eta)`, and `priority_score` only ever varies by roughly
+        2x between targets (see response_target_calculator.py -
+        ACTIVE_FIRE_BASE_PRIORITY=100 + severity_score in [0, 100], or
+        risk_score * horizon_factor). A linear-in-eta factor let that ~2x
+        priority spread outweigh a much larger ETA gap, so the GA could
+        prefer sending a resource to a farther, higher-priority target while
+        a closer, lower-priority target got skipped or served from even
+        farther away. Squaring the ratio keeps the two reference points
+        `eta_factor(0) == 1` and `eta_factor(eta_reference_seconds) == 0.5`
+        unchanged, but makes the factor fall off much faster beyond that
+        point (e.g. `eta_factor(2 * eta_reference_seconds)` drops from 1/3 to
+        0.2, `eta_factor(4 * eta_reference_seconds)` from 0.2 to ~0.06) -
+        heavily penalizing distance/ETA so the closest available resources
+        are exhausted before farther ones are considered.
         """
         if (
             isinstance(travel_time_seconds, bool)
@@ -40,7 +57,7 @@ class ResponsePlanScorer:
             raise ResponsePlanScoringError(
                 f"travel_time_seconds must be a finite non-negative number, got {travel_time_seconds!r}"
             )
-        return 1.0 / (1.0 + float(travel_time_seconds) / self._config.eta_reference_seconds)
+        return 1.0 / (1.0 + (float(travel_time_seconds) / self._config.eta_reference_seconds) ** 2)
 
     def evaluate(
         self,
@@ -79,8 +96,20 @@ class ResponsePlanScorer:
 
         total_priority = sum(target.priority_score for target in optimization_input.targets)
         if total_priority > 0:
-            total_score = 100.0 * raw_fitness / total_priority
-            coverage_score = 100.0 * covered_priority / total_priority
+            # raw_fitness and covered_priority are, by construction, sums of a
+            # subset of the same non-negative per-target terms that make up
+            # total_priority (raw_fitness additionally scaled down by
+            # eta_factor <= 1), so total_score/coverage_score can never
+            # mathematically exceed 100. But raw_fitness/covered_priority are
+            # summed in a different order (action order, sorted by resource)
+            # than total_priority (target order), and float addition is not
+            # associative, so a full-coverage plan can land a few ULPs above
+            # 100 (e.g. 100.00000000000003) rather than exactly 100. Clamp to
+            # counter that FP drift rather than letting PlanScoreBreakdown's
+            # range validation raise and crash the whole GA run on an
+            # otherwise-valid, fully-covering candidate.
+            total_score = min(100.0, 100.0 * raw_fitness / total_priority)
+            coverage_score = min(100.0, 100.0 * covered_priority / total_priority)
         else:
             total_score = 0.0
             coverage_score = 0.0

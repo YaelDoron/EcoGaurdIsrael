@@ -37,44 +37,38 @@ function renderHeader(simulation: OperationsSimulationSummary, onRequestOverview
 }
 
 describe("OperationsStatusHeader", () => {
-  it("shows No Simulation Running when disabled", () => {
-    renderHeader({ enabled: false, run: null });
-
-    expect(screen.getByText("No Simulation Running")).toBeInTheDocument();
+  it("never renders a simulation-state badge/banner at all - production polish pass", () => {
+    for (const simulation of [
+      { enabled: false, run: null },
+      { enabled: true, run: null },
+      { enabled: true, run: makeRun({ state: "preparing" }) },
+      { enabled: true, run: makeRun({ state: "running" }) },
+      { enabled: true, run: makeRun({ state: "completed" }) },
+      { enabled: true, run: makeRun({ state: "completed_with_errors" }) },
+      { enabled: true, run: makeRun({ state: "failed" }) },
+    ] as OperationsSimulationSummary[]) {
+      const { unmount } = renderHeader(simulation);
+      for (const forbidden of [
+        "No Simulation Running",
+        "Running",
+        "Preparing Simulation",
+        "Completed",
+        "Completed with Errors",
+        "Failed",
+      ]) {
+        expect(screen.queryByText(forbidden)).not.toBeInTheDocument();
+      }
+      expect(document.querySelector(".badge")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
-  it("shows No Simulation Running when enabled but no run has started", () => {
-    renderHeader({ enabled: true, run: null });
-
-    expect(screen.getByText("No Simulation Running")).toBeInTheDocument();
-  });
-
-  it("shows Running - Event X of Y (ASCII hyphen, not an em dash) while running", () => {
-    renderHeader({ enabled: true, run: makeRun() });
-
-    expect(screen.getByText("Running - Event 3 of 5")).toBeInTheDocument();
-    expect(screen.queryByText("Running — Event 3 of 5")).not.toBeInTheDocument();
-  });
-
-  it("shows Completed", () => {
-    renderHeader({ enabled: true, run: makeRun({ state: "completed" }) });
-
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-  });
-
-  it("shows Completed with Errors", () => {
-    renderHeader({ enabled: true, run: makeRun({ state: "completed_with_errors" }) });
-
-    expect(screen.getByText("Completed with Errors")).toBeInTheDocument();
-  });
-
-  it("shows Failed, plus the run's own safe error message", () => {
+  it("still shows the run's own safe error message on a failed run, even without a status badge", () => {
     renderHeader({
       enabled: true,
       run: makeRun({ state: "failed", error: { code: "EVENT_FAILED", message: "One event could not be processed." } }),
     });
 
-    expect(screen.getByText("Failed")).toBeInTheDocument();
     expect(screen.getByText("One event could not be processed.")).toBeInTheDocument();
   });
 
@@ -110,7 +104,7 @@ describe("OperationsStatusHeader", () => {
     }
   });
 
-  it("shows a factual progress line (current event/incident, elapsed) while running, without a fake ETA", () => {
+  it("never shows simulation-engine telemetry (current event, incident id, elapsed seconds) - production polish pass", () => {
     renderHeader({
       enabled: true,
       run: makeRun({
@@ -120,24 +114,9 @@ describe("OperationsStatusHeader", () => {
       }),
     });
 
-    expect(screen.getByText(/Current event: NEWS/)).toBeInTheDocument();
-    expect(screen.getByText(/Current incident: incident-carmel-01/)).toBeInTheDocument();
-    expect(screen.getByText(/Elapsed: 87s/)).toBeInTheDocument();
-    for (const forbidden of [/remaining/i, /eta/i, /\b120 seconds\b/i, /2 min/i]) {
+    for (const forbidden of [/Current event/i, /Current incident/i, /Elapsed:/i, /incident-carmel-01/i, /87s/]) {
       expect(screen.queryByText(forbidden)).not.toBeInTheDocument();
     }
-  });
-
-  it("never fabricates a location name from incident_id", () => {
-    renderHeader({
-      enabled: true,
-      run: makeRun({
-        state: "running",
-        current_event: { event_index: 6, incident_id: "incident-carmel-01", event_type: "NEWS", timestamp_offset_sec: 40 },
-      }),
-    });
-
-    expect(screen.queryByText("Carmel")).not.toBeInTheDocument();
   });
 
   it("never renders a Stop/Cancel/Pause/Reset control", () => {

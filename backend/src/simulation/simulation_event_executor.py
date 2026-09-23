@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from src.external.news.news_client import TextProcessor
 from src.repositories.news_repository import NewsRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.repositories.weather_repository import WeatherRepository
@@ -19,6 +21,16 @@ from src.simulation.simulation_scenario import SimulationScenario
 logger = logging.getLogger(__name__)
 
 GeneratorFactory = Callable[[int], Any]
+
+# TextProcessor's translation methods never raise and never report whether
+# they actually translated or fell back (see news_client.py's fail-safe
+# contract) - this is the executor's own independent signal that a
+# just-generated Hebrew name is about to be persisted untranslated, purely
+# from observing the output text itself, so a developer watching simulation
+# logs can see exactly which entity ended up with raw source text even if
+# they missed the corresponding TRANSLATION FALLBACK TRIGGERED warning in
+# news_client.py.
+_HEBREW_CHARACTERS = re.compile(r"[֐-׿]")
 
 
 @dataclass(frozen=True)
@@ -49,6 +61,7 @@ class SimulationEventExecutor:
         weather_generator_factory: GeneratorFactory = WeatherDataGenerator,
         satellite_generator_factory: GeneratorFactory = SatelliteDataGenerator,
         news_generator_factory: GeneratorFactory = NewsDataGenerator,
+        text_processor: TextProcessor | None = None,
     ) -> None:
         self._weather_repository = weather_repository or WeatherRepository()
         self._satellite_repository = satellite_repository or SatelliteHotspotRepository()
@@ -59,6 +72,14 @@ class SimulationEventExecutor:
         self._weather_generator_factory = weather_generator_factory
         self._satellite_generator_factory = satellite_generator_factory
         self._news_generator_factory = news_generator_factory
+        # `None` (the default) means "translate nothing" - simulated Hebrew
+        # text/location names are persisted exactly as generated, unchanged
+        # from before this was added. Every existing caller/test that does
+        # not pass one keeps that exact prior behavior. A real TextProcessor
+        # is only ever injected by production wiring (see
+        # demo_simulation_runner.py), never constructed here - this class
+        # must never require an LLM API key just to run a demo scenario.
+        self._text_processor = text_processor
 
     def execute(
         self,
@@ -166,6 +187,53 @@ class SimulationEventExecutor:
             },
         )
 
+    def _translate_hotspots(self, hotspots: tuple[Any, ...]) -> tuple[Any, ...]:
+        """Translate each hotspot's Hebrew location_name to English before it
+        is ever persisted - a no-op (returns hotspots unchanged) when no
+        text_processor was injected, or for a hotspot with no location_name
+        at all (real FIRMS ingestion never sets one; nothing to translate)."""
+        if self._text_processor is None:
+            if hotspots:
+                logger.warning(
+                    "Simulation translation is not configured (no TextProcessor injected) - "
+                    "%d satellite hotspot(s) will be persisted with their original, untranslated location_name.",
+                    len(hotspots),
+                )
+            return hotspots
+        translated = []
+        for hotspot in hotspots:
+            if hotspot.location_name is None:
+                translated.append(hotspot)
+                continue
+            translated_name = self._text_processor.translate_location_name(hotspot.location_name)
+            _warn_if_still_untranslated("satellite hotspot location_name", translated_name)
+            translated.append(replace(hotspot, location_name=translated_name))
+        return tuple(translated)
+
+    def _translate_reports(self, reports: tuple[Any, ...]) -> tuple[Any, ...]:
+        """Translate each report's title/summary/location_name to English
+        before it is ever persisted - the same universal backend LLM
+        translation NewsMonitoringAgent applies to real RSS ingestion,
+        reused here for simulated news (a no-op when no text_processor was
+        injected)."""
+        if self._text_processor is None:
+            if reports:
+                logger.warning(
+                    "Simulation translation is not configured (no TextProcessor injected) - "
+                    "%d news report(s) will be persisted with their original, untranslated text.",
+                    len(reports),
+                )
+            return reports
+        translated = []
+        for report in reports:
+            title, summary, location_name = self._text_processor.translate_report(
+                report.title, report.summary, report.location_name
+            )
+            _warn_if_still_untranslated("news report title", title)
+            _warn_if_still_untranslated("news report location_name", location_name)
+            translated.append(replace(report, title=title, summary=summary, location_name=location_name))
+        return tuple(translated)
+
     @staticmethod
     def _execute_resource_status_event(event: SimulationEvent) -> SimulationEventExecutionResult:
         """Acknowledge a resource-status timeline event without direct persistence."""
@@ -191,7 +259,7 @@ class SimulationEventExecutor:
             timestamp=event_timestamp,
             location=incident.location,
         )
-        hotspots = tuple(generated.hotspots)
+        hotspots = tuple(self._translate_hotspots(generated.hotspots))
         saved_count = 0
         duplicates_skipped = 0
         failed_count = 0
@@ -233,7 +301,7 @@ class SimulationEventExecutor:
             location=incident.location,
             report_index=event.source_event_index,
         )
-        reports = tuple(generated.reports)
+        reports = tuple(self._translate_reports(generated.reports))
         saved_count = 0
         duplicates_skipped = 0
         failed_count = 0
@@ -284,6 +352,23 @@ class SimulationEventExecutor:
             duplicates_skipped=0,
             failed_count=1,
             error_message=error_message,
+        )
+
+
+def _warn_if_still_untranslated(field_description: str, value: str | None) -> None:
+    """Log a visible warning when a field that just went through
+    TextProcessor still contains Hebrew script - TextProcessor's methods
+    never raise and never report success/failure directly (by design, see
+    news_client.py), so this is the executor's own signal, from the output
+    text alone, that the LLM call for this specific field fell back to its
+    original, untranslated value."""
+    if value is not None and _HEBREW_CHARACTERS.search(value):
+        logger.warning(
+            "Simulation %s still contains untranslated Hebrew text after a translation attempt - "
+            "the LLM translation likely failed or degraded; see the corresponding 'TRANSLATION FALLBACK "
+            "TRIGGERED' warning from news_client.py for the exact reason: %r",
+            field_description,
+            value,
         )
 
 

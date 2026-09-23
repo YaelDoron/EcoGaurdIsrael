@@ -23,6 +23,20 @@ from src.database.models.graph_node_db import GraphNodeDB
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
 
+# PostgreSQL hard-limits a single prepared statement to 65535 bind
+# parameters. get_network_in_bbox's edge lookup used to pass one parameter
+# per node id per IN(...) clause, and _upsert_nodes' multi-row VALUES
+# INSERT passes 3 parameters per node in ONE statement; with several
+# concurrent, geographically spread FireEvents (Global Multi-Incident
+# Optimizer) plus accumulated per-region OSM coverage, both can now exceed
+# that limit outright - observed live as psycopg.OperationalError ("number
+# of parameters must be between 0 and 65535") on a real 4-event bbox (a
+# single per-anchor OSM fetch alone was seen returning 29,000+ nodes, i.e.
+# 87,000+ params for an unbatched 3-column VALUES insert). 10,000 is
+# comfortably under the limit for both the 1-param-per-row IN(...) lookup
+# and the 3-param-per-row node upsert (30,000 params/batch).
+_BULK_OPERATION_BATCH_SIZE = 10_000
+
 
 class RoadNetworkRepository:
     """Persists and retrieves the road network graph via SQLAlchemy."""
@@ -66,15 +80,21 @@ class RoadNetworkRepository:
 
     def _upsert_nodes(self, db: Session, nodes: list[GraphNode]) -> None:
         values = [{"id": node.id, "latitude": node.latitude, "longitude": node.longitude} for node in nodes]
-        insert_stmt = self._dialect_insert(db)(GraphNodeDB).values(values)
-        upsert_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[GraphNodeDB.id],
-            set_={
-                "latitude": insert_stmt.excluded.latitude,
-                "longitude": insert_stmt.excluded.longitude,
-            },
-        )
-        db.execute(upsert_stmt)
+        # Batched for the same reason as _edges_touching: a single combined
+        # multi-row VALUES INSERT passes 3 bind parameters per node in ONE
+        # statement, which can exceed PostgreSQL's 65535-parameter limit on
+        # its own for a large OSM fetch (see _BULK_OPERATION_BATCH_SIZE).
+        for start in range(0, len(values), _BULK_OPERATION_BATCH_SIZE):
+            chunk = values[start : start + _BULK_OPERATION_BATCH_SIZE]
+            insert_stmt = self._dialect_insert(db)(GraphNodeDB).values(chunk)
+            upsert_stmt = insert_stmt.on_conflict_do_update(
+                index_elements=[GraphNodeDB.id],
+                set_={
+                    "latitude": insert_stmt.excluded.latitude,
+                    "longitude": insert_stmt.excluded.longitude,
+                },
+            )
+            db.execute(upsert_stmt)
 
     def _insert_edges(self, db: Session, edges: list[GraphEdge]) -> None:
         values = [
@@ -128,22 +148,39 @@ class RoadNetworkRepository:
         )
         node_ids = {db_node.id for db_node in db_nodes}
 
-        db_edges: list[GraphEdgeDB] = []
-        if node_ids:
-            db_edges = (
-                db.execute(
-                    select(GraphEdgeDB).where(
-                        GraphEdgeDB.source_node_id.in_(node_ids),
-                        GraphEdgeDB.target_node_id.in_(node_ids),
-                    )
-                )
-                .scalars()
-                .all()
-            )
+        db_edges = self._edges_touching(db, node_ids)
 
         nodes = [GraphNode.model_validate(db_node) for db_node in db_nodes]
         edges = [GraphEdge.model_validate(db_edge) for db_edge in db_edges]
         return nodes, edges
+
+    @staticmethod
+    def _edges_touching(db: Session, node_ids: set[int]) -> list[GraphEdgeDB]:
+        """Return every GraphEdgeDB whose source AND target are both in
+        `node_ids`, batching the lookup to stay under PostgreSQL's 65535
+        bind-parameter limit (see _BULK_OPERATION_BATCH_SIZE).
+
+        Only `source_node_id` is filtered in SQL, in chunks; `target_node_id`
+        membership is checked in Python against the already-materialized
+        `node_ids` set instead of a second chunked IN(...) clause - same
+        result as the original single two-clause query (an edge is only
+        included when BOTH endpoints are in node_ids), one query dimension
+        instead of a source x target cross-product of chunks.
+        """
+        if not node_ids:
+            return []
+
+        node_id_list = list(node_ids)
+        edges: list[GraphEdgeDB] = []
+        for start in range(0, len(node_id_list), _BULK_OPERATION_BATCH_SIZE):
+            chunk = node_id_list[start : start + _BULK_OPERATION_BATCH_SIZE]
+            chunk_edges = (
+                db.execute(select(GraphEdgeDB).where(GraphEdgeDB.source_node_id.in_(chunk)))
+                .scalars()
+                .all()
+            )
+            edges.extend(edge for edge in chunk_edges if edge.target_node_id in node_ids)
+        return edges
 
     @staticmethod
     def _validate_bbox(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> None:

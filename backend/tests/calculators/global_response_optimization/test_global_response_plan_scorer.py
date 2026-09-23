@@ -137,6 +137,59 @@ def test_eta_factor_uses_configured_reference_seconds():
     assert scorer_short.eta_factor(900.0) < scorer_default.eta_factor(900.0)
 
 
+def test_covering_a_slot_with_an_extremely_distant_resource_always_beats_leaving_it_uncovered():
+    """Regression guard: the GA must never prefer 0 coverage over dispatching
+    a genuinely distant resource. slot_value = tier_weight + severity_component
+    + eta_priority_component + stability_component; tier_weight alone is a
+    validated-positive constant (GlobalDemandScoringPolicy.__post_init__
+    rejects non-positive weights) and eta_factor is bounded in (0, 1] for any
+    finite eta - it asymptotically shrinks the ETA term toward 0 but can
+    never make it negative, so slot_value can never drop below tier_weight,
+    let alone below an uncovered slot's fixed 0 contribution. Checked at an
+    absurdly large ETA (100 hours) to make sure this holds in the limit, not
+    just for reasonable distances."""
+    problem = _problem(
+        (make_target(1, 10, priority_score=100.0),),
+        (make_resource("R1"),),
+        (make_route("R1", 1, 10, eta_seconds=360_000.0),),
+    )
+    scorer = GlobalResponsePlanScorer()
+    covered = scorer.evaluate(
+        problem, GlobalResponsePlanChromosome(problem.resource_ids, (problem.slots[0].slot_id,))
+    )
+    uncovered = scorer.evaluate(problem, GlobalResponsePlanChromosome(problem.resource_ids, (None,)))
+
+    assert covered.fitness_score > uncovered.fitness_score
+    assert uncovered.fitness_score == 0.0
+    assert covered.fitness_score > 0.0
+
+
+def test_slot_value_is_never_negative_for_any_finite_eta():
+    """Same invariant as above, checked directly against slot_value (not just
+    evaluate()'s sum) across a wide range of ETAs, including 0 and very
+    large values - there is no distance 'penalty' term that can push a
+    single slot's value below zero."""
+    problem = _problem((make_target(1, 10, priority_score=100.0),), (make_resource("R1"),), ())
+    scorer = GlobalResponsePlanScorer()
+    slot = problem.slots[0]
+
+    for eta_seconds in (0.0, 1.0, 900.0, 1_800.0, 100_000.0, 10_000_000.0):
+        assert scorer.slot_value(problem, slot, eta_seconds) > 0.0
+
+
+def test_eta_factor_is_quadratic_not_linear_in_the_eta_ratio():
+    """Regression test: distance/ETA must be heavily penalized so the
+    closest available resources are favored, mirroring the same fix already
+    applied to the per-event ResponsePlanScorer. The two reference points
+    (0 and eta_reference_seconds) are unchanged - what changes is how fast
+    the factor falls off beyond them (0.2 at 2x the reference, not the old
+    linear formula's 1/3)."""
+    scorer = GlobalResponsePlanScorer()
+    assert scorer.eta_factor(0.0) == pytest.approx(1.0)
+    assert scorer.eta_factor(900.0) == pytest.approx(0.5)
+    assert scorer.eta_factor(1800.0) == pytest.approx(0.2)
+
+
 # ---------------------------------------------------------------------------
 # Task 14-16 - required > desired > predicted-risk tier ordering
 # ---------------------------------------------------------------------------

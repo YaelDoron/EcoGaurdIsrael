@@ -86,16 +86,24 @@ class NewsMonitoringAgent:
                 continue
 
             location_name = self.text_processor.extract_location(entry["title"], entry["summary"])
+            # Geocoding uses the ORIGINAL (Hebrew) location name, extracted
+            # above - Nominatim resolves Israeli place names most reliably
+            # in their native script. Translation happens after, and only
+            # changes what gets displayed/persisted, never what got geocoded.
             latitude, longitude = self.geocoder.geocode(location_name)
 
-            # Create a WildfireReport object with the extracted and geocoded information
-            # The object is saved to the database.
+            title_en, summary_en, location_name_en = self.text_processor.translate_report(
+                entry["title"], entry["summary"], location_name
+            )
+
+            # Create a WildfireReport object with the translated text and the
+            # geocoded coordinates. The object is saved to the database.
             report = WildfireReport(
                 source_url=source_url,
                 source_feed=entry["source_feed"],
-                title=entry["title"],
-                summary=entry["summary"],
-                location_name=location_name,
+                title=title_en,
+                summary=summary_en,
+                location_name=location_name_en,
                 latitude=latitude,
                 longitude=longitude,
                 published_at=self._parse_published_at(entry.get("published")),

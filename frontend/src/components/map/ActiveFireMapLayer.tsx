@@ -1,4 +1,5 @@
 import { Marker, Popup } from "react-leaflet";
+import { translateIfUntranslated } from "./stationTranslations";
 import { CoordinateDisplay } from "../data/CoordinateDisplay";
 import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
@@ -56,7 +57,7 @@ export function ActiveFireMapLayer({ activeFires }: ActiveFireMapLayerProps) {
           <Marker key={fire.fire_event_id} position={[fire.latitude, fire.longitude]} icon={icon}>
             <Popup>
               <strong>Fire Event #{fire.fire_event_id}</strong>
-              {fire.location_name !== null ? <p>{fire.location_name}</p> : null}
+              {fire.location_name !== null ? <p>{translateIfUntranslated(fire.location_name)}</p> : null}
               <p>
                 Detection: <StatusBadge status={fire.status} />
               </p>

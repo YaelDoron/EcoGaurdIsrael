@@ -27,10 +27,19 @@ scraping:
 # The configuration for the LLM used to analyze the news articles.
 llm:
   provider: "groq"           # "groq" or "gemini"
-  model: "llama-3.1-8b-instant"
+  # "llama-3.1-8b-instant" has been decommissioned by Groq (calls now fail
+  # with HTTP 404 "model_not_found") - "openai/gpt-oss-20b" is the closest
+  # available fast/cheap model on this account. It is a *reasoning* model
+  # (spends some of its token budget on a hidden "reasoning" pass before the
+  # final JSON reply), so max_tokens below is sized with headroom for that,
+  # and reasoning_effort is set to "low" to keep it fast for this
+  # high-volume, latency-sensitive use case.
+  model: "openai/gpt-oss-20b"
+  reasoning_effort: "low"     # Groq-specific; ignored by other providers
   api_key_env: "GROQ_API_KEY" # name of the env var holding the key (see .env)
   temperature: 0.0
-  max_tokens: 100
+  max_tokens: 200             # budget for the short {"locationName": ...} extraction reply (incl. reasoning tokens)
+  translation_max_tokens: 600 # budget for translating title+summary+locationName to English
   request_timeout_seconds: 15
 
 # Geocoding settings for converting location names to geographic coordinates via Nominatim

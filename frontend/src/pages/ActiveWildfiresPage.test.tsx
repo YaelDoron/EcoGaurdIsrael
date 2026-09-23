@@ -357,7 +357,7 @@ describe("ActiveWildfiresPage (Task A8 Operations Overview)", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("shows the simulation status indicator, with the run control disabled while RUNNING", async () => {
+  it("disables the run control while RUNNING, with no separate status badge/banner (production polish pass)", async () => {
     getOperationsOverviewMock.mockResolvedValue(
       makeOverview([], {
         simulation: {
@@ -386,9 +386,11 @@ describe("ActiveWildfiresPage (Task A8 Operations Overview)", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Running - Event 2 of 4")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Running…" })).toBeDisabled();
+    expect(screen.queryByText(/Event \d+ of \d+/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /start simulation/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled();
+    expect(screen.queryByText("No Simulation Running")).not.toBeInTheDocument();
+    expect(document.querySelector(".operations-status-header .badge")).not.toBeInTheDocument();
   });
 
   it("shows an enabled Start Simulation control when simulation.enabled and no run has started (Task A9)", async () => {
@@ -453,89 +455,25 @@ describe("ActiveWildfiresPage (Task A8 Operations Overview)", () => {
     expect(within(feed).queryByText(/2 active fires/)).not.toBeInTheDocument();
   });
 
-  it("does not show View Response Plan when no global planning run has ever been persisted", async () => {
-    getOperationsOverviewMock.mockResolvedValue(makeOverview([]));
+  it("never renders its own View Response Plan action beside Active Fires - the page header's Global Response Plan link is the one route to it (production polish pass)", async () => {
+    const globalPlanningItem: OperationsActivityFeedItem = {
+      activity_id: "global_planning_run:7",
+      activity_type: "global_planning_run",
+      entity_id: 7,
+      occurred_at: "2026-09-17T13:05:00Z",
+      available_at: "2026-09-17T13:05:00Z",
+      title: "Global Response Plan",
+      location: null,
+      preview: { status: "completed", fire_event_count: 2 },
+    };
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([], { activity_feed: { items: [globalPlanningItem], limit: 30 } }),
+    );
 
     renderPage();
     await screen.findByText("No active wildfire events");
 
     expect(screen.queryByRole("button", { name: /view response plan/i })).not.toBeInTheDocument();
-  });
-
-  it("shows View Response Plan beside Active Fires when a real global planning run exists", async () => {
-    const globalPlanningItem: OperationsActivityFeedItem = {
-      activity_id: "global_planning_run:7",
-      activity_type: "global_planning_run",
-      entity_id: 7,
-      occurred_at: "2026-09-17T13:05:00Z",
-      available_at: "2026-09-17T13:05:00Z",
-      title: "Global Response Plan",
-      location: null,
-      preview: { status: "completed", fire_event_count: 2 },
-    };
-    getOperationsOverviewMock.mockResolvedValue(
-      makeOverview([], { activity_feed: { items: [globalPlanningItem], limit: 30 } }),
-    );
-
-    renderPage();
-
-    expect(await screen.findByRole("button", { name: "View Response Plan" })).toBeInTheDocument();
-  });
-
-  it("removing Global Planning from the feed does not remove access to the Response Plan", async () => {
-    const user = userEvent.setup();
-    const globalPlanningItem: OperationsActivityFeedItem = {
-      activity_id: "global_planning_run:7",
-      activity_type: "global_planning_run",
-      entity_id: 7,
-      occurred_at: "2026-09-17T13:05:00Z",
-      available_at: "2026-09-17T13:05:00Z",
-      title: "Global Response Plan",
-      location: null,
-      preview: { status: "completed", fire_event_count: 2 },
-    };
-    getOperationsOverviewMock.mockResolvedValue(
-      makeOverview([], { activity_feed: { items: [globalPlanningItem], limit: 30 } }),
-    );
-    getOperationsActivityDetailMock.mockResolvedValue({
-      activity_type: "global_planning_run",
-      entity_id: 7,
-      occurred_at: "2026-09-17T13:05:00Z",
-      title: "Global Response Plan",
-      location: null,
-      details: {
-        global_planning_run_id: 7,
-        status: "completed",
-        trigger: "fire_event_update",
-        started_at: "2026-09-17T13:00:00Z",
-        completed_at: "2026-09-17T13:05:00Z",
-        methodology: "global_planning_refresh_coordinator",
-        methodology_version: "1.0",
-        fire_event_ids: [12],
-        response_plan_ids: [66],
-        coverage_score: 100,
-        average_eta_seconds: 280,
-        shortage_total_required: null,
-        shortage_total_desired: null,
-        shortage_total_assigned: null,
-        shortage_unmet_required: null,
-        shortage_unmet_desired: null,
-        ga_population_size: null,
-        ga_generation_count: null,
-        ga_mutation_rate: null,
-        ga_crossover_rate: null,
-        members: [],
-      },
-    } satisfies OperationsActivityDetailResponse);
-
-    renderPage();
-    const button = await screen.findByRole("button", { name: "View Response Plan" });
-    expect(screen.queryByText(/global response plan/i, { selector: ".activity-row__main" })).not.toBeInTheDocument();
-
-    await user.click(button);
-
-    await waitFor(() => expect(getOperationsActivityDetailMock).toHaveBeenCalledTimes(1));
-    expect(getOperationsActivityDetailMock).toHaveBeenCalledWith("global_planning_run", 7);
   });
 });
 
@@ -666,8 +604,9 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
     await waitFor(() => expect(screen.getByText("Event #18").closest("article")).toHaveAttribute("data-emphasized", "true"));
 
     await vi.advanceTimersByTimeAsync(5000);
+    // "Run Again" only appears once the run reaches a terminal state - no
+    // separate "Completed" status badge to check (production polish pass).
     expect(await screen.findByRole("button", { name: "Run Again" })).toBeEnabled();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
   });
 
   it("does not insert any local fake activity/fire/danger data when Start is clicked", async () => {

@@ -190,3 +190,55 @@ def test_negative_distance_meters_rejected():
 
     with pytest.raises(ValueError):
         DijkstraCalculator().calculate_shortest_path(1, 2, edges)
+
+
+# ---------------------------------------------------------------------------
+# Adjacency-list caching (infrastructure-only optimization, Global Optimizer
+# performance fix): repeated calls against the SAME edges list object must
+# reuse one built adjacency list, never rebuild it per call.
+# ---------------------------------------------------------------------------
+
+
+def test_repeated_calls_against_the_same_edges_object_reuse_one_cached_adjacency_list():
+    edges = [
+        make_edge(1, 2, distance_meters=900.0, travel_time_seconds=60.0),
+        make_edge(2, 3, distance_meters=900.0, travel_time_seconds=60.0),
+    ]
+    calculator = DijkstraCalculator()
+
+    first = calculator.calculate_shortest_path(1, 3, edges)
+    second = calculator.calculate_shortest_path(1, 2, edges)
+
+    assert first.status is RouteStatus.REACHABLE
+    assert second.status is RouteStatus.REACHABLE
+    # Exactly one adjacency list was ever built for this edges object,
+    # regardless of how many source/target pairs were queried against it.
+    assert len(calculator._adjacency_cache) == 1
+
+
+def test_a_different_edges_object_gets_its_own_cache_entry_and_correct_result():
+    edges_a = [make_edge(1, 2, distance_meters=900.0, travel_time_seconds=60.0)]
+    edges_b = [make_edge(1, 2, distance_meters=5000.0, travel_time_seconds=500.0)]
+    calculator = DijkstraCalculator()
+
+    result_a = calculator.calculate_shortest_path(1, 2, edges_a)
+    result_b = calculator.calculate_shortest_path(1, 2, edges_b)
+
+    assert result_a.travel_time_seconds == 60.0
+    assert result_b.travel_time_seconds == 500.0
+    assert len(calculator._adjacency_cache) == 2
+
+
+def test_caching_never_changes_the_result_vs_an_uncached_calculator():
+    edges = [
+        make_edge(1, 2, distance_meters=900.0, travel_time_seconds=60.0),
+        make_edge(2, 3, distance_meters=900.0, travel_time_seconds=60.0),
+    ]
+
+    cached_twice = DijkstraCalculator()
+    cached_twice.calculate_shortest_path(1, 3, edges)
+    result_from_cached_instance = cached_twice.calculate_shortest_path(1, 3, edges)
+
+    result_fresh_instance = DijkstraCalculator().calculate_shortest_path(1, 3, edges)
+
+    assert result_from_cached_instance == result_fresh_instance

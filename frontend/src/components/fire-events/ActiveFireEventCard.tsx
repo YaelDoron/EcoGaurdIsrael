@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { translateIfUntranslated } from "../map/stationTranslations";
 import { TimestampDisplay } from "../data/TimestampDisplay";
 import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
@@ -44,6 +45,7 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
   const emphasize = event.status === "confirmed" && (severity?.level === "high" || severity?.level === "critical");
   const cardClassName = emphasize ? "fire-event-card fire-event-card--emphasized" : "fire-event-card";
+  const locationName = translateIfUntranslated(event.location_name);
 
   return (
     <article className={cardClassName} data-emphasized={emphasize}>
@@ -52,12 +54,12 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
           <h3 className="fire-event-card__title">Event #{event.fire_event_id}</h3>
           <p
             className={
-              event.location_name !== null
+              locationName !== null
                 ? "fire-event-card__location"
                 : "fire-event-card__location fire-event-card__location--unavailable"
             }
           >
-            {event.location_name !== null ? event.location_name : "Location unavailable"}
+            {locationName !== null ? locationName : "Location unavailable"}
           </p>
         </div>
         <StatusBadge status={event.status} />

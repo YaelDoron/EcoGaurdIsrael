@@ -37,6 +37,21 @@ describe("FireEventMarker", () => {
     expect(screen.getByText("Status: Suspected")).toBeInTheDocument();
   });
 
+  it("falls back to raw coordinates in the body when no location name is known", () => {
+    render(<FireEventMarker fireEvent={makeFireEvent({ latitude: 32.731, longitude: 35.046 })} />);
+
+    expect(screen.getByText(/32\.731/)).toBeInTheDocument();
+  });
+
+  it("shows '{name} Wildfire' as the title and the location name (not coordinates) in the body when known", () => {
+    render(<FireEventMarker fireEvent={makeFireEvent({ fire_event_id: 7 })} locationName="Galilee" />);
+
+    expect(screen.getByText("Galilee Wildfire")).toBeInTheDocument();
+    expect(screen.queryByText("Event #7")).not.toBeInTheDocument();
+    expect(screen.getByText("Galilee")).toBeInTheDocument();
+    expect(screen.queryByText(/32\.731/)).not.toBeInTheDocument();
+  });
+
   it.each([
     ["suspected", "rgb(255, 69, 0)"],
     ["confirmed", "rgb(255, 34, 0)"],

@@ -1,7 +1,8 @@
 """Tests for SimulationEventExecutor."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -106,6 +107,21 @@ class CapturingGenerator:
 class RaisingGenerator:
     def generate(self, **kwargs):
         raise RuntimeError("generator exploded")
+
+
+class FakeTextProcessor:
+    """A trivial, deterministic stand-in for TextProcessor: uppercases text
+    so translated output is unmistakably distinct from the original."""
+
+    def translate_report(self, title, summary, location_name):
+        return (
+            f"EN: {title}",
+            f"EN: {summary}",
+            None if location_name is None else f"EN: {location_name}",
+        )
+
+    def translate_location_name(self, location_name):
+        return f"EN: {location_name}"
 
 
 def make_scenario(scenario_type=ScenarioType.ACTIVE_FIRE, location=CARMEL_LOCATION) -> SimulationScenario:
@@ -271,6 +287,47 @@ def test_satellite_event_saves_active_fire_hotspot_with_correct_inputs():
     assert result.duplicates_skipped == 0
 
 
+def test_satellite_event_translates_hotspot_location_name_when_a_text_processor_is_injected():
+    generated = SimpleNamespace(hotspots=(make_hotspot(),))
+    hotspot_with_location = replace(generated.hotspots[0], location_name="הרי יהודה")
+    generator = CapturingGenerator(SimpleNamespace(hotspots=(hotspot_with_location,)))
+    repository = FakeSatelliteRepository()
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_generator=generator,
+        satellite_repository=repository,
+        news_repository=FakeNewsRepository(),
+        text_processor=FakeTextProcessor(),
+    )
+
+    executor.execute(
+        scenario=make_scenario(location=GOLAN_LOCATION),
+        event=make_event(SimulationEventType.SATELLITE),
+        event_timestamp=TIMESTAMP,
+    )
+
+    assert repository.save_calls[0].location_name == "EN: הרי יהודה"
+
+
+def test_satellite_event_without_a_text_processor_persists_the_hotspot_unchanged():
+    generated = SimpleNamespace(hotspots=(replace(make_hotspot(), location_name="הרי יהודה"),))
+    repository = FakeSatelliteRepository()
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_generator=CapturingGenerator(generated),
+        satellite_repository=repository,
+        news_repository=FakeNewsRepository(),
+    )
+
+    executor.execute(
+        scenario=make_scenario(location=GOLAN_LOCATION),
+        event=make_event(SimulationEventType.SATELLITE),
+        event_timestamp=TIMESTAMP,
+    )
+
+    assert repository.save_calls[0].location_name == "הרי יהודה"
+
+
 def test_satellite_event_with_no_fire_empty_output_succeeds():
     generator = SatelliteDataGenerator(seed=123)
     repository = FakeSatelliteRepository()
@@ -341,6 +398,153 @@ def test_news_event_passes_source_event_index_as_report_index_and_saves_report()
     assert result.duplicates_skipped == 0
     assert result.details["report_index"] == 1
     assert "/carmel/report-2/" in repository.save_calls[0].source_url
+
+
+def test_news_event_translates_title_summary_and_location_when_a_text_processor_is_injected():
+    generator = NewsDataGenerator(seed=123)
+    repository = FakeNewsRepository()
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_repository=FakeSatelliteRepository(),
+        news_generator=generator,
+        news_repository=repository,
+        text_processor=FakeTextProcessor(),
+    )
+
+    executor.execute(
+        scenario=make_scenario(location=CARMEL_LOCATION),
+        event=make_event(SimulationEventType.NEWS, source_event_index=1),
+        event_timestamp=TIMESTAMP,
+    )
+
+    saved = repository.save_calls[0]
+    assert saved.title.startswith("EN: ")
+    assert saved.summary.startswith("EN: ")
+    assert saved.location_name.startswith("EN: ")
+
+
+def test_news_event_without_a_text_processor_persists_the_report_unchanged():
+    generator = NewsDataGenerator(seed=123)
+    repository = FakeNewsRepository()
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_repository=FakeSatelliteRepository(),
+        news_generator=generator,
+        news_repository=repository,
+    )
+
+    executor.execute(
+        scenario=make_scenario(location=CARMEL_LOCATION),
+        event=make_event(SimulationEventType.NEWS, source_event_index=1),
+        event_timestamp=TIMESTAMP,
+    )
+
+    saved = repository.save_calls[0]
+    assert not saved.title.startswith("EN: ")
+
+
+class FallbackTextProcessor:
+    """A TextProcessor stand-in that always degrades to its fail-safe
+    fallback (returns text unchanged), simulating an LLM failure/rate limit
+    without needing a real network call - used to verify the executor logs
+    a visible warning whenever Hebrew survives a translation attempt."""
+
+    def translate_report(self, title, summary, location_name):
+        return (title, summary, location_name)
+
+    def translate_location_name(self, location_name):
+        return location_name
+
+
+def test_satellite_event_warns_when_translation_falls_back_and_hebrew_survives(caplog):
+    generated = SimpleNamespace(hotspots=(replace(make_hotspot(), location_name="הרי יהודה"),))
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_generator=CapturingGenerator(generated),
+        satellite_repository=FakeSatelliteRepository(),
+        news_repository=FakeNewsRepository(),
+        text_processor=FallbackTextProcessor(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        executor.execute(
+            scenario=make_scenario(location=GOLAN_LOCATION),
+            event=make_event(SimulationEventType.SATELLITE),
+            event_timestamp=TIMESTAMP,
+        )
+
+    assert any("untranslated Hebrew" in message for message in caplog.messages)
+
+
+class SuccessfulTextProcessor:
+    """A TextProcessor stand-in that returns pure, Hebrew-free English -
+    unlike FakeTextProcessor (which just prefixes "EN: " onto the original
+    text and so still contains Hebrew), this represents what a genuinely
+    successful translation looks like."""
+
+    def translate_report(self, title, summary, location_name):
+        return ("Fire update", "Smoke seen nearby.", None if location_name is None else "Judean Hills")
+
+    def translate_location_name(self, location_name):
+        return "Judean Hills"
+
+
+def test_satellite_event_does_not_warn_when_translation_succeeds(caplog):
+    generated = SimpleNamespace(hotspots=(replace(make_hotspot(), location_name="הרי יהודה"),))
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_generator=CapturingGenerator(generated),
+        satellite_repository=FakeSatelliteRepository(),
+        news_repository=FakeNewsRepository(),
+        text_processor=SuccessfulTextProcessor(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        executor.execute(
+            scenario=make_scenario(location=GOLAN_LOCATION),
+            event=make_event(SimulationEventType.SATELLITE),
+            event_timestamp=TIMESTAMP,
+        )
+
+    assert not any("untranslated Hebrew" in message for message in caplog.messages)
+
+
+def test_satellite_event_warns_when_no_text_processor_is_configured_at_all(caplog):
+    generated = SimpleNamespace(hotspots=(replace(make_hotspot(), location_name="הרי יהודה"),))
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_generator=CapturingGenerator(generated),
+        satellite_repository=FakeSatelliteRepository(),
+        news_repository=FakeNewsRepository(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        executor.execute(
+            scenario=make_scenario(location=GOLAN_LOCATION),
+            event=make_event(SimulationEventType.SATELLITE),
+            event_timestamp=TIMESTAMP,
+        )
+
+    assert any("not configured" in message for message in caplog.messages)
+
+
+def test_news_event_warns_when_translation_falls_back_and_hebrew_survives(caplog):
+    executor = SimulationEventExecutor(
+        weather_repository=FakeWeatherRepository(),
+        satellite_repository=FakeSatelliteRepository(),
+        news_generator=NewsDataGenerator(seed=123),
+        news_repository=FakeNewsRepository(),
+        text_processor=FallbackTextProcessor(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        executor.execute(
+            scenario=make_scenario(location=CARMEL_LOCATION),
+            event=make_event(SimulationEventType.NEWS, source_event_index=1),
+            event_timestamp=TIMESTAMP,
+        )
+
+    assert any("untranslated Hebrew" in message for message in caplog.messages)
 
 
 def test_news_event_counts_duplicate_url():

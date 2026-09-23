@@ -80,6 +80,24 @@ describe("buildGlobalResponseMapLayer", () => {
     expect(layer.routes[0].resourceId).toBe("engine-1");
   });
 
+  it("bridges the 'last mile' gap when the route's last point differs from the target's own coordinate", () => {
+    const action = makeAction({
+      target: makeTarget({ target_type: "predicted_risk", response_target_id: 2, latitude: 32.8, longitude: 35.1 }),
+    });
+    const layer = buildGlobalResponseMapLayer([makeEvent({ actions: [action] })], null);
+
+    expect(layer.routes[0].lastMileGap).toEqual([
+      { latitude: 32.7, longitude: 35.0 }, // the route's last snapped point (unchanged from action.route.path_coordinates)
+      { latitude: 32.8, longitude: 35.1 }, // the target's own coordinate
+    ]);
+  });
+
+  it("has no lastMileGap when the route already ends exactly at the target", () => {
+    const layer = buildGlobalResponseMapLayer([makeEvent()], null); // default fixture: path ends at (32.7, 35.0) == target.
+
+    expect(layer.routes[0].lastMileGap).toBeNull();
+  });
+
   it("tags every route/marker with its owning fire_event_id", () => {
     const layer = buildGlobalResponseMapLayer([makeEvent({ fire_event_id: 202 })], null);
 

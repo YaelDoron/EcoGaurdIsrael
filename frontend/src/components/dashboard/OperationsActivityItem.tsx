@@ -1,3 +1,4 @@
+import { translateIfUntranslated } from "../map/stationTranslations";
 import { FIRE_DANGER_PRESENTATION } from "../status/fireDangerPresentation";
 import { SEVERITY_PRESENTATION, STATUS_PRESENTATION } from "../status/presentation";
 import { SATELLITE_CONFIDENCE_LABEL } from "./activityFeedPresentation";
@@ -103,14 +104,18 @@ function buildReportLine(item: OperationsActivityFeedItem): ReportLine {
       const { confidence, location_name } = item.preview;
       const confidenceLabel =
         confidence !== null ? (SATELLITE_CONFIDENCE_LABEL[confidence.toLowerCase()] ?? confidence) : null;
+      const translatedLocationName = translateIfUntranslated(location_name);
       return {
-        main: location_name !== null ? `New satellite hotspot detected - ${location_name}` : "New satellite hotspot detected",
+        main:
+          translatedLocationName !== null
+            ? `New satellite hotspot detected - ${translatedLocationName}`
+            : "New satellite hotspot detected",
         secondary: confidenceLabel ? `${confidenceLabel} confidence` : undefined,
       };
     }
     case "news_report": {
       const { source, headline } = item.preview;
-      return { main: headline, secondary: source };
+      return { main: translateIfUntranslated(headline), secondary: source };
     }
     case "fire_event": {
       const { status } = item.preview;

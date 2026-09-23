@@ -20,6 +20,22 @@ resource-status mutation - it only issues read queries against
 `FireStationRepository`, and the new `GraphNodeReadRepository`, then copies
 fields into presentation DTOs. Not wired into any FastAPI endpoint yet -
 that is a separate task.
+
+One deliberate, narrow exception (First-Mile Heuristic Fallback - see
+GlobalRouteMatrixBuilder's own docstring for the full rationale):
+`_resolve_path_coordinates` checks whether the route's own origin node sits
+more than FIRST_MILE_PENALTY_THRESHOLD_KM from the station's already-known,
+already-persisted coordinate and, only then, prepends that ONE real point to
+`path_coordinates` - never a fabricated/interpolated coordinate, never a
+change to `node_path` or to any recalculated status/eta/distance field, and
+never anything beyond a single haversine comparison against a shared
+constant already used identically by GlobalRouteMatrixBuilder itself. This
+exists purely so a station whose Step 4 micro-fetch never found close-enough
+real road data still renders a continuous line on the map instead of a
+disconnected hole - the same honest gap-bridging idea real-world routers use
+for an origin that isn't already sitting on a mapped road, never a
+substitute for the real, road-network-derived path Dijkstra already
+returned.
 """
 from __future__ import annotations
 
@@ -47,6 +63,7 @@ from src.repositories.graph_node_read_repository import GraphNodeReadRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
 from src.repositories.route_planning_repository import RoutePlanningRepository
+from src.utils.geo import FIRST_MILE_PENALTY_THRESHOLD_KM, haversine_distance_km
 
 
 class ResponsePlanPresenter:
@@ -175,7 +192,7 @@ class ResponsePlanPresenter:
         return ResponsePlanActionResponse(
             resource=self._present_resource(action, stations_by_id),
             target=self._present_target(action.response_target_id, targets_by_id),
-            route=self._present_route(action, routes_by_key, nodes_by_id),
+            route=self._present_route(action, routes_by_key, stations_by_id, nodes_by_id),
         )
 
     @staticmethod
@@ -221,6 +238,7 @@ class ResponsePlanPresenter:
         self,
         action: ResponseActionDetails,
         routes_by_key: dict[tuple[str, int], RouteResult],
+        stations_by_id: dict[str, FireStationDB],
         nodes_by_id: dict[int, GraphNodeDB],
     ) -> ResponsePlanRouteResponse:
         route = routes_by_key.get((str(action.resource_id), action.response_target_id))
@@ -237,13 +255,16 @@ class ResponsePlanPresenter:
             eta_seconds=route.travel_time_seconds,
             distance_meters=route.distance_meters,
             node_path=list(route.node_path) if route.node_path else None,
-            path_coordinates=self._resolve_path_coordinates(route.node_path, nodes_by_id),
+            path_coordinates=self._resolve_path_coordinates(
+                route.node_path, nodes_by_id, stations_by_id.get(action.station_id)
+            ),
         )
 
     @staticmethod
     def _resolve_path_coordinates(
         node_path: tuple[int, ...],
         nodes_by_id: dict[int, GraphNodeDB],
+        station: FireStationDB | None,
     ) -> list[CoordinateResponse] | None:
         if not node_path:
             return None
@@ -253,4 +274,17 @@ class ResponsePlanPresenter:
             if node is None:
                 return None
             coordinates.append(CoordinateResponse(latitude=node.latitude, longitude=node.longitude))
+
+        # First-Mile Heuristic Fallback (see this module's own docstring):
+        # prepend the station's real coordinate - never a fabricated point -
+        # ONLY when the route's own first node is genuinely far from it, so
+        # the map draws one honest bridging segment instead of a gap.
+        if station is not None:
+            first_node = coordinates[0]
+            gap_km = haversine_distance_km(
+                station.latitude, station.longitude, first_node.latitude, first_node.longitude
+            )
+            if gap_km > FIRST_MILE_PENALTY_THRESHOLD_KM:
+                coordinates.insert(0, CoordinateResponse(latitude=station.latitude, longitude=station.longitude))
+
         return coordinates

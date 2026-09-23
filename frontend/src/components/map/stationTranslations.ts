@@ -1,7 +1,24 @@
 /**
- * English renderings of the Hebrew station data (names, addresses, types)
+ * English renderings of the Hebrew STATION data (names, addresses, types)
  * seeded from the government fire-station registry, so the UI reads in one
  * language. Presentation only - the stored values are never modified.
+ *
+ * Scope: this static dictionary covers the fixed, known vocabulary in the
+ * seeded station dataset, and is the primary translator for that data.
+ * Dynamic, freeform location names (wildfire event/news/satellite-hotspot
+ * location names) come back from the backend already in English, translated
+ * once at ingestion via an LLM (see NewsMonitoringAgent.translate_report /
+ * SimulationEventExecutor's TextProcessor wiring) - this dictionary is never
+ * used to re-translate or second-guess a correct backend translation.
+ *
+ * `translateIfUntranslated` is the one narrow exception: a safety net for
+ * when that backend translation step permanently failed (news_client.py's
+ * translate_report/translate_location_name are deliberately best-effort and
+ * never block a save - on a genuine, retry-exhausted LLM failure they
+ * persist the original Hebrew text rather than lose the report, logging
+ * "TRANSLATION FALLBACK TRIGGERED"). It only ever touches text that still
+ * contains Hebrew characters, so correctly-translated text is never
+ * re-processed - see its own docstring below.
  *
  * Translation is dictionary-based and word-by-word: every word in the seed
  * data (backend/src/database/data/firefighting_stations.json) has an entry,
@@ -20,6 +37,14 @@ const WORDS: Record<string, string> = {
   מועצה: "Council", אזורית: "Regional", האזורית: "Regional", פינת: "Corner of", סמוך: "Near", נמל: "Port", תעופה: "Airport",
   פארק: "Park", תעשיה: "Industrial", התעשייה: "Industry", "אזה\"ת": "Industrial Zone", ביטחון: "Security",
   מפרץ: "Bay", // e.g. Haifa Bay
+  עליון: "Upper", תחתון: "Lower", מישור: "Plain", יער: "Forest",
+  // --- major geographic regions (kept for station addresses that name a
+  // wider region, e.g. a regional council address - not used for dynamic
+  // wildfire event/news location names, which are backend-translated) ---
+  הגולן: "HaGolan", הנגב: "HaNegev", ערבה: "Arava", הערבה: "HaArava",
+  כנרת: "Kinneret", הכנרת: "HaKinneret", שפלה: "Shfela", השפלה: "HaShfela", ערה: "Ara",
+  דן: "Dan", דרום: "South", צפון: "North", מרכז: "Center", מטה: "Mateh", החוף: "HaChof",
+  "יו\"ש": "Judea and Samaria",
   // --- places & names (seed station names + address words) ---
   אגוז: "Agoz", ואדי: "Wadi", גוז: "Guz", אום: "Umm", אל: "Al", פחם: "Fahm", אופקים: "Ofakim", אור: "Or", יהודה: "Yehuda",
   סביון: "Savyon", עקיבא: "Akiva", איילון: "Ayalon", אילת: "Eilat", אלון: "Alon", אלעד: "Elad", אלקנה: "Elkana",
@@ -78,8 +103,21 @@ const PHRASES: [RegExp, string][] = [
   // Hebrew puts the qualifier first; English reads it the other way round.
   [/מפרץ חיפה/g, "Haifa Bay"],
   [/פארק הכרמל/g, "Carmel Park"],
+  [/יער ירושלים/g, "Jerusalem Forest"],
   [/גליל מערבי/g, "Western Galilee"],
   [/גליל מזרחי/g, "Eastern Galilee"],
+  [/הגליל העליון/g, "Upper Galilee"],
+  [/הגליל התחתון/g, "Lower Galilee"],
+  [/גליל עליון/g, "Upper Galilee"],
+  [/גליל תחתון/g, "Lower Galilee"],
+  // A well-known named region: the internationally recognized English name
+  // reads better for an operator than a mechanical "Ramat HaGolan" would.
+  [/רמת הגולן/g, "Golan Heights"],
+  // "ו" ("and") prefixes "שומרון" here, so the two words don't tokenize
+  // separately - handled as one phrase rather than trying to strip
+  // conjunction prefixes generically.
+  [/יהודה ושומרון/g, "Judea and Samaria"],
+  [/נציבות כבאות והצלה לישראל/g, "Israel Fire and Rescue Commission"],
 ];
 
 const STATION_TYPES: Record<string, string> = {
@@ -127,14 +165,29 @@ export function translateStationLabel(name: string): string {
   return translateFragment(name);
 }
 
-/** English rendering of a place/region name; already-English names pass through. */
-export function translatePlaceName(name: string): string {
-  return translateFragment(name);
-}
-
 export function translateStationName(name: string): string {
   const english = translateFragment(name);
   return /station/i.test(english) ? english : `${english} Station`;
+}
+
+/**
+ * Safety net for dynamic (non-station) text the backend was supposed to
+ * translate but didn't - see the module docstring above. Text that is
+ * already in English (the normal case, always) passes through completely
+ * unchanged; only text that still contains a Hebrew character is run
+ * through the same dictionary/romanization fallback the station data uses,
+ * so a permanently-failed LLM translation reads as best-effort English
+ * instead of raw, untouched Hebrew. Never re-translates or alters text
+ * the backend already translated correctly.
+ */
+export function translateIfUntranslated(text: string): string;
+export function translateIfUntranslated(text: string | null): string | null;
+export function translateIfUntranslated(text: string | null): string | null {
+  if (text === null || !HEBREW_WORD.test(text)) {
+    return text;
+  }
+  HEBREW_WORD.lastIndex = 0; // stateful global-flag regex - reset after the .test() probe above.
+  return translateFragment(text);
 }
 /** House-number suffix letters become Latin (13א -> 13a). */
 function houseNumber(raw: string): string {

@@ -64,6 +64,12 @@ __pycache__/
 venv/
 env/
 
+# OSMnx's on-disk HTTP response cache (road-network fetches) - real,
+# persistent local state that must survive between runs, never source
+# code; strictly local per machine, never committed.
+backend/cache/
+cache/
+
 # Environment variables (never commit real credentials)
 .env
 backend/.env

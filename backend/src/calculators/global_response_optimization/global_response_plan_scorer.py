@@ -10,12 +10,20 @@ DESIRED suppression > PREDICTED_RISK optional coverage - see
 GlobalDemandScoringPolicy for exactly why the ordering can never invert).
 severity_component breaks ties between competing incidents under REQUIRED-
 slot scarcity using SeverityDemandPolicy's configured severity_rank.
-eta_priority_component is `target.priority_score * eta_factor(eta)` - the
-EXACT Stage 4/legacy formula, reused unchanged (Task 35: this is the one
-and only place `target.priority_score` - which already embeds
-ACTIVE_FIRE_BASE_PRIORITY + severity_score, see response_target_calculator.py -
-enters scoring; it is never added a second time), clamped so it can only
-ever differentiate WITHIN a tier.
+eta_priority_component is `target.priority_score * eta_factor(eta)` (Task
+35: this is the one and only place `target.priority_score` - which already
+embeds ACTIVE_FIRE_BASE_PRIORITY + severity_score, see
+response_target_calculator.py - enters scoring; it is never added a second
+time), clamped so it can only ever differentiate WITHIN a tier.
+`eta_factor` is now quadratic in the ETA ratio (see its own docstring) so
+distance dominates the WITHIN-tier comparison between candidate resources
+for the same slot - a multi-minute ETA advantage must reliably outweigh
+stability_component below, not be swamped by it. The clamp ceiling
+(`within_tier_component_cap`) - and therefore the cross-tier safety proof
+below - is unaffected by that reshaping: `eta_factor` is bounded in (0, 1]
+for any monotonically-decreasing formula, so `eta_priority_component`'s
+maximum was, and still is, `priority_score`'s own max, which the ceiling
+was already sized for.
 
 stability_component (Stage 6) adds `GlobalAssignmentStabilityPolicy.
 stability_bonus_weight` when the resource being scored currently holds a
@@ -100,7 +108,23 @@ class GlobalResponsePlanScorer:
         """Stage 6: re-derive GlobalDemandScoringPolicy's own cross-tier
         safety proof with stability_bonus_weight folded into the maximum
         within-tier total, so adding a soft stability preference can never
-        by itself let a lower tier outscore a higher one."""
+        by itself let a lower tier outscore a higher one.
+
+        Re-checked when `eta_factor` was reshaped from linear to quadratic
+        (see its own docstring): this margin only ever uses
+        `within_tier_component_cap` - the CLAMPED ceiling
+        `clamp_eta_priority_component` enforces on `eta_priority_component`
+        - never `eta_factor`'s own formula. That ceiling bounds
+        `priority_score * eta_factor(eta)` for ANY monotonically-decreasing
+        `eta_factor` with range (0, 1], because the product's supremum is
+        `priority_score`'s own max (approached as eta_factor -> 1), which is
+        exactly what `within_tier_component_cap` was already sized for. So
+        reshaping `eta_factor` does not change this margin's soundness and
+        needed no numeric change here - only `stability_bonus_weight`
+        shrinking (Stage 6 retune, see GlobalAssignmentStabilityPolicy)
+        affects `max_within_tier` below, and only by making it smaller,
+        which can only make an already-valid margin more comfortably valid.
+        """
         policy = self._demand_scoring_policy
         max_within_tier = (
             policy.severity_priority_weight * policy._MAX_SEVERITY_RANK
@@ -121,11 +145,29 @@ class GlobalResponsePlanScorer:
             )
 
     def eta_factor(self, eta_seconds: float) -> float:
+        """Return the ETA utility factor used by `eta_priority_component`.
+
+        Quadratic in `eta_seconds / eta_reference_seconds`, mirroring the
+        Stage 4/legacy per-event scorer's own fix
+        (response_plan_scorer.py): a linear-in-eta factor let a resource
+        already PLANNED to a target (worth `stability_bonus_weight`, a
+        small WITHIN-tier bonus) keep winning over a genuinely closer
+        available resource elsewhere, because the fitness gap between a
+        near and a far ETA was too shallow to reliably clear that bonus.
+        Squaring the ratio keeps `eta_factor(0) == 1` and
+        `eta_factor(eta_reference_seconds) == 0.5` unchanged (so
+        `clamp_eta_priority_component`'s ceiling - and therefore
+        GlobalDemandScoringPolicy's cross-tier safety margin, which is
+        derived from that ceiling, not from this formula's shape - are
+        unaffected), but it falls off much faster beyond that point, so a
+        multi-minute ETA advantage dominates the stability bonus instead of
+        being swamped by it.
+        """
         if isinstance(eta_seconds, bool) or not isinstance(eta_seconds, Real) or not math.isfinite(eta_seconds) or eta_seconds < 0:
             raise GlobalResponsePlanScoringError(
                 f"eta_seconds must be a finite non-negative number, got {eta_seconds!r}"
             )
-        return 1.0 / (1.0 + float(eta_seconds) / self._config.eta_reference_seconds)
+        return 1.0 / (1.0 + (float(eta_seconds) / self._config.eta_reference_seconds) ** 2)
 
     def slot_value(
         self,

@@ -16,19 +16,24 @@ Global Multi-Incident Optimizer refactor's authoritative planning cycle
 No per-event optimizer invocation anywhere in this flow - ONE global
 optimization problem, exactly the target architecture (Task 1).
 
-Bounded retry (Task 33): GlobalPlanningInputUnstable or a stale-input
-rejection from activation rebuilds the ENTIRE cycle (a fresh GlobalPlanningRun,
-a fresh GlobalPlanningInput, a fresh GA run) up to MAX_GLOBAL_STALE_RETRIES
-times - never a per-event patch, never manually edited chromosome. If
-retries are exhausted, the previous authoritative generation's ResponsePlans/
-commitments/dispatch locks remain fully intact and current; this cycle is
-recorded as failed and STALE_RETRY_EXHAUSTED is returned.
+Bounded retry (Task 33): GlobalPlanningInputUnstable, a stale-input
+rejection from activation, or a GlobalHardDispatchLockInfeasible from
+building the optimization problem (a hard-dispatched resource losing its
+only feasible route to its locked event, most commonly a transient
+road-network coverage gap - see _run_one_cycle) all rebuild the ENTIRE
+cycle (a fresh GlobalPlanningRun, a fresh GlobalPlanningInput, a fresh GA
+run) up to MAX_GLOBAL_STALE_RETRIES times - never a per-event patch, never
+manually edited chromosome. If retries are exhausted, the previous
+authoritative generation's ResponsePlans/commitments/dispatch locks remain
+fully intact and current; this cycle is recorded as failed and
+STALE_RETRY_EXHAUSTED is returned.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
 import hashlib
+import logging
 from enum import Enum
 
 from src.calculators.global_response_optimization.global_assignment_change_calculator import GlobalAssignmentChange
@@ -36,6 +41,7 @@ from src.calculators.global_response_optimization.global_assignment_stability_po
     GlobalAssignmentStabilityPolicy,
 )
 from src.calculators.global_response_optimization.global_demand_scoring_policy import GlobalDemandScoringPolicy
+from src.calculators.global_response_optimization.global_hard_dispatch_lock import GlobalHardDispatchLockInfeasible
 from src.calculators.global_response_optimization.global_optimization_policy_fingerprint import (
     compute_optimization_policy_fingerprint,
 )
@@ -66,6 +72,8 @@ MAX_GLOBAL_STALE_RETRIES = 1
 
 _REFRESH_METHODOLOGY = "global_planning_refresh_coordinator"
 _REFRESH_METHODOLOGY_VERSION = "1.0"
+
+logger = logging.getLogger(__name__)
 
 
 class GlobalPlanningRefreshStatus(Enum):
@@ -222,13 +230,47 @@ class GlobalPlanningRefreshCoordinator:
                 retry_count=retry_count,
             )
 
-        ga_result = self._optimization_service.optimize(
-            global_planning_input,
-            self._config,
-            self._demand_scoring_policy,
-            self._severity_demand_policy,
-            self._stability_policy,
-        )
+        # Infrastructure resilience: a hard-dispatched resource can become
+        # genuinely infeasible for its own locked FireEvent between the
+        # cycle that dispatched it and THIS cycle's fresh GlobalPlanningInput
+        # - most concretely, a road-network fetch that succeeded last cycle
+        # (giving it a real route) can time out or lose coverage this cycle
+        # (see GlobalPlanningInputBuilder's own per-anchor/station-micro
+        # fetch resilience), leaving zero feasible routes for that resource
+        # to its locked event. build_global_optimization_problem correctly
+        # refuses to silently drop or guess at that lock (see
+        # global_hard_dispatch_lock.py) - but letting that propagate here
+        # would crash the entire refresh cycle and, with it, every OTHER
+        # unrelated fire event's planning for this tick. This is exactly the
+        # same "this cycle's build produced a state the GA cannot honor"
+        # shape MAX_GLOBAL_STALE_RETRIES already exists to recover from for
+        # GlobalPlanningInputUnstable/stale-activation - reusing it here
+        # (record this run FAILED, return None so refresh() retries a FRESH
+        # cycle, which gets a fresh road-network fetch and a real chance at
+        # a feasible route) is the same safe fallback, not a special case.
+        # If retries are exhausted, the previous authoritative generation's
+        # ResponsePlans/commitments/dispatch locks remain fully intact -
+        # never a crashed server, never a silently dropped or guessed lock.
+        try:
+            ga_result = self._optimization_service.optimize(
+                global_planning_input,
+                self._config,
+                self._demand_scoring_policy,
+                self._severity_demand_policy,
+                self._stability_policy,
+            )
+        except GlobalHardDispatchLockInfeasible:
+            logger.warning(
+                "GlobalPlanningRun %s: a hard-dispatched resource has no feasible route to its locked "
+                "FireEvent in this cycle's road network (likely a transient OSM coverage gap); failing "
+                "this cycle so the bounded retry can rebuild with a fresh road-network fetch.",
+                stored_run.id,
+                exc_info=True,
+            )
+            self._global_planning_run_repository.complete_run(
+                stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of
+            )
+            return None
 
         # Final-closure atomicity fix: the required GlobalPlanningRunEvent
         # member results, the run's optimization metadata, and its final

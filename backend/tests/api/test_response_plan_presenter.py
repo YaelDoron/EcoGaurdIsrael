@@ -355,13 +355,109 @@ def test_graph_node_coordinates_returned_in_exact_node_path_order():
         20: make_node(20, 2.0, 2.0),
         30: make_node(30, 3.0, 3.0),
     }
-    presenter, _ = make_presenter(targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes)
+    # Station colocated with node 10 (the route's own origin) - keeps this
+    # test about node_path ORDER only; the First-Mile Heuristic Fallback
+    # (a station far from its snapped node) has its own dedicated tests below.
+    station = make_station(latitude=1.0, longitude=1.0)
+    presenter, _ = make_presenter(
+        targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes, stations=[station]
+    )
     details = make_plan(actions=(make_action(response_target_id=1),))
 
     response = presenter.present(details)
 
     coordinates = response.actions[0].route.path_coordinates
     assert [(c.latitude, c.longitude) for c in coordinates] == [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+
+
+# ---------------------------------------------------------------------------
+# First-Mile Heuristic Fallback: bridge path_coordinates with the station's
+# real coordinate when the route's own origin node is a genuine, non-trivial
+# distance away (Step 4's station-micro fetch never found close-enough real
+# road data) - never touches node_path, eta_seconds, or distance_meters,
+# which are always the exact persisted values (GlobalRouteMatrixBuilder
+# already applied its own numeric correction to those at build time - the
+# presenter must never apply a second one).
+# ---------------------------------------------------------------------------
+
+
+def test_first_mile_bridge_prepends_the_stations_real_coordinate_when_origin_snapped_far():
+    # ~223m from node 10 - comfortably past FIRST_MILE_PENALTY_THRESHOLD_KM (100m).
+    route = make_route_result(node_path=(10, 20, 30), source_node_id=10, target_node_id=30)
+    target = make_target()
+    nodes = {10: make_node(10, 1.0, 1.0), 20: make_node(20, 2.0, 2.0), 30: make_node(30, 3.0, 3.0)}
+    station = make_station(latitude=1.002, longitude=1.0)
+    presenter, _ = make_presenter(
+        targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes, stations=[station]
+    )
+    details = make_plan(actions=(make_action(response_target_id=1),))
+
+    response = presenter.present(details)
+
+    action = response.actions[0]
+    coordinates = [(c.latitude, c.longitude) for c in action.route.path_coordinates]
+    assert coordinates == [(1.002, 1.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+    # node_path itself is untouched - the bridge only ever affects path_coordinates.
+    assert action.route.node_path == [10, 20, 30]
+
+
+def test_no_first_mile_bridge_when_the_snap_gap_is_within_the_ordinary_threshold():
+    # ~11m from node 10 - well under FIRST_MILE_PENALTY_THRESHOLD_KM (100m).
+    route = make_route_result(node_path=(10, 20, 30), source_node_id=10, target_node_id=30)
+    target = make_target()
+    nodes = {10: make_node(10, 1.0, 1.0), 20: make_node(20, 2.0, 2.0), 30: make_node(30, 3.0, 3.0)}
+    station = make_station(latitude=1.0001, longitude=1.0)
+    presenter, _ = make_presenter(
+        targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes, stations=[station]
+    )
+    details = make_plan(actions=(make_action(response_target_id=1),))
+
+    response = presenter.present(details)
+
+    coordinates = [(c.latitude, c.longitude) for c in response.actions[0].route.path_coordinates]
+    assert coordinates == [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+
+
+def test_first_mile_bridge_does_not_fire_when_the_station_cannot_be_resolved():
+    """A station_id that no longer resolves against persisted FireStation
+    data (see ResponsePlanResourceResponse's own docstring) means the real
+    coordinate to bridge from is unknown - never guessed at."""
+    route = make_route_result(node_path=(10, 20, 30), source_node_id=10, target_node_id=30)
+    target = make_target()
+    nodes = {10: make_node(10, 1.0, 1.0), 20: make_node(20, 2.0, 2.0), 30: make_node(30, 3.0, 3.0)}
+    presenter, _ = make_presenter(
+        targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes, stations=[]
+    )
+    details = make_plan(actions=(make_action(response_target_id=1, station_id="unknown-station"),))
+
+    response = presenter.present(details)
+
+    coordinates = [(c.latitude, c.longitude) for c in response.actions[0].route.path_coordinates]
+    assert coordinates == [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+
+
+def test_first_mile_bridge_never_alters_eta_or_distance():
+    """GlobalRouteMatrixBuilder already applies its own numeric first-mile
+    correction to eta_seconds/distance_meters at build time (before
+    persistence) - the presenter's geometry bridge must never apply a
+    second correction on top of the already-persisted values."""
+    route = make_route_result(
+        node_path=(10, 20, 30), source_node_id=10, target_node_id=30,
+        distance_meters=800.0, travel_time_seconds=120.0,
+    )
+    target = make_target()
+    nodes = {10: make_node(10, 1.0, 1.0), 20: make_node(20, 2.0, 2.0), 30: make_node(30, 3.0, 3.0)}
+    station = make_station(latitude=1.002, longitude=1.0)  # far - the bridge fires
+    presenter, _ = make_presenter(
+        targets=[FakeStoredTarget(id=1, target=target)], routes=(route,), nodes=nodes, stations=[station]
+    )
+    details = make_plan(actions=(make_action(response_target_id=1),))
+
+    response = presenter.present(details)
+
+    route_response = response.actions[0].route
+    assert route_response.distance_meters == 800.0
+    assert route_response.eta_seconds == 120.0
 
 
 # ---------------------------------------------------------------------------

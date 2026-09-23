@@ -57,15 +57,16 @@ describe("ResponseTargetLayer", () => {
     expect(predictedRiskIcon.style.border).toContain("dashed");
   });
 
-  it("shows target type, priority, and horizon (when present) in the popup", () => {
+  it("shows target type, a human-readable operational term (not the raw priority score), and horizon (when present) in the popup", () => {
     render(
       <ResponseTargetLayer
-        targets={[makeTarget({ target_type: "predicted_risk", priority_score: 0.75, prediction_horizon_minutes: 60 })]}
+        targets={[makeTarget({ target_type: "predicted_risk", priority_score: 80, prediction_horizon_minutes: 60 })]}
       />,
     );
 
     expect(screen.getByText("Predicted risk")).toBeInTheDocument();
-    expect(screen.getByText("Priority score: 0.75")).toBeInTheDocument();
+    expect(screen.getByText("Risk: Critical")).toBeInTheDocument();
+    expect(screen.queryByText(/Priority score/)).not.toBeInTheDocument();
     expect(screen.getByText("Prediction horizon: 60 min")).toBeInTheDocument();
   });
 
@@ -73,5 +74,36 @@ describe("ResponseTargetLayer", () => {
     render(<ResponseTargetLayer targets={[makeTarget({ target_type: "active_fire" })]} />);
 
     expect(screen.queryByText(/Prediction horizon/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [100, "Low"],
+    [125, "Moderate"],
+    [150, "High"],
+    [187.4, "Critical"],
+  ] as const)(
+    "labels an ACTIVE_FIRE target with priority_score %s as Severity: %s (severity_score = priority_score - 100)",
+    (priorityScore, level) => {
+      render(<ResponseTargetLayer targets={[makeTarget({ target_type: "active_fire", priority_score: priorityScore })]} />);
+
+      expect(screen.getByText(`Severity: ${level}`)).toBeInTheDocument();
+    },
+  );
+
+  it("shows the event's location name in every target's popup when known", () => {
+    render(
+      <ResponseTargetLayer
+        targets={[makeTarget({ target_order: 0 }), makeTarget({ target_order: 1, target_type: "predicted_risk" })]}
+        eventLocationName="HaGalil"
+      />,
+    );
+
+    expect(screen.getAllByText("HaGalil")).toHaveLength(2);
+  });
+
+  it("omits the location name line when none is known", () => {
+    render(<ResponseTargetLayer targets={[makeTarget()]} />);
+
+    expect(screen.queryByText("HaGalil")).not.toBeInTheDocument();
   });
 });

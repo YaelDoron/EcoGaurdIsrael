@@ -33,6 +33,23 @@ class DijkstraResult:
 class DijkstraCalculator:
     """Computes the fastest (lowest total travel_time_seconds) path between two GraphNode ids."""
 
+    def __init__(self) -> None:
+        # Infrastructure-only optimization, no algorithm change: a route
+        # matrix build (GlobalRouteMatrixBuilder) or a per-event route plan
+        # (RoutePlanningAgent) calls calculate_shortest_path many times in a
+        # row against the exact same `edges` list (the same fetched
+        # road-network graph), one call per resource/target pair. Rebuilding
+        # the O(E) adjacency dict from scratch on every single call was pure
+        # redundant work; it is now built once per distinct `edges` object
+        # and reused. Keyed by `id(edges)` rather than the edges themselves
+        # (a full-content key would cost as much to compute as the adjacency
+        # list it is meant to avoid rebuilding) - safe because each caller
+        # constructs a fresh DijkstraCalculator per planning run (see
+        # GlobalRouteMatrixBuilder/response_planning_production_factory) and
+        # passes the SAME edges list object throughout that run, so the
+        # cache's lifetime is naturally bounded to one build/plan call.
+        self._adjacency_cache: dict[int, dict[int, list[tuple[int, float, float]]]] = {}
+
     def calculate_shortest_path(
         self,
         source_node_id: int,
@@ -53,7 +70,10 @@ class DijkstraCalculator:
         """
         _validate_node_id("source_node_id", source_node_id)
         _validate_node_id("target_node_id", target_node_id)
-        adjacency = _build_adjacency_list(edges)
+        adjacency = self._adjacency_cache.get(id(edges))
+        if adjacency is None:
+            adjacency = _build_adjacency_list(edges)
+            self._adjacency_cache[id(edges)] = adjacency
 
         if source_node_id == target_node_id:
             return DijkstraResult(
