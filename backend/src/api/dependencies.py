@@ -10,7 +10,9 @@ from collections.abc import Iterator
 
 from sqlalchemy.orm import Session
 
+from src.agents.response.chatbot_agent import ChatbotAgent
 from src.database.connection import get_session_factory
+from src.external.gemini.gemini_client import GeminiClient
 from src.services.fire_danger.fire_danger_query_service import FireDangerQueryService
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.fire_event_read.event_details_service import EventDetailsService
@@ -67,6 +69,26 @@ def get_event_details_service() -> EventDetailsService:
     request-scoped Session.
     """
     return EventDetailsService()
+
+
+def get_chatbot_agent() -> ChatbotAgent:
+    """FastAPI dependency providing a fully-wired ChatbotAgent (Task 5).
+
+    Reuses this module's own get_active_fire_events_service/
+    get_event_details_service factories above - the exact same
+    ActiveFireEventsService/EventDetailsService construction every other
+    fire-event-read endpoint already uses - rather than constructing them a
+    second, independent way. `GeminiClient()` is a fresh, stateless HTTP
+    client (no in-memory state to share across requests, unlike
+    SimulationRunManager below) that already defaults to
+    settings.GEMINI_API_KEY/GEMINI_MODEL/GEMINI_REQUEST_TIMEOUT (Task 3) -
+    no new Gemini configuration is introduced here.
+    """
+    return ChatbotAgent(
+        active_fire_events_service=get_active_fire_events_service(),
+        event_details_service=get_event_details_service(),
+        gemini_client=GeminiClient(),
+    )
 
 
 def get_fire_danger_query_service() -> FireDangerQueryService:
