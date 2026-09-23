@@ -1,0 +1,806 @@
+{
+  "dataset": "training_v2.csv",
+  "total_samples": 3000,
+  "positive_samples": 1500,
+  "negative_samples": 1500,
+  "held_out_split": {
+    "test_size": 0.2,
+    "random_state": 42
+  },
+  "standard_cross_validation": {
+    "n_splits": 5,
+    "random_state": 42
+  },
+  "grouped_cross_validation": {
+    "n_splits": 7,
+    "group": "scenario_family"
+  },
+  "logistic_regression": {
+    "config": {
+      "scaler": "StandardScaler",
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "held_out_metrics": {
+      "accuracy": 0.6783333333333333,
+      "precision": 0.6801346801346801,
+      "recall": 0.6733333333333333,
+      "f1": 0.6767169179229481,
+      "roc_auc": 0.7671055555555556,
+      "true_positive": 202,
+      "true_negative": 205,
+      "false_positive": 95,
+      "false_negative": 98
+    },
+    "standard_cv_metrics": {
+      "accuracy": {
+        "mean": 0.6990000000000001,
+        "std": 0.007423685817106705
+      },
+      "precision": {
+        "mean": 0.7106791653830883,
+        "std": 0.006889980953712624
+      },
+      "recall": {
+        "mean": 0.6713333333333333,
+        "std": 0.015577761927397227
+      },
+      "f1": {
+        "mean": 0.6903585719633948,
+        "std": 0.009697475286893456
+      },
+      "roc_auc": {
+        "mean": 0.7788588888888889,
+        "std": 0.00877151858412242
+      }
+    },
+    "grouped_cv_summary": {
+      "accuracy": {
+        "mean": 0.5430142400123877,
+        "std": 0.27811017217731465
+      },
+      "precision": {
+        "mean": 0.5390907724843205,
+        "std": 0.36529054789336507
+      },
+      "recall": {
+        "mean": 0.5151524792538217,
+        "std": 0.34518659799949697
+      },
+      "f1": {
+        "mean": 0.5113313903798835,
+        "std": 0.32880524093719216
+      },
+      "roc_auc": {
+        "mean": 0.5814951466296501,
+        "std": 0.36245249175239813
+      }
+    },
+    "grouped_cv_folds": [
+      {
+        "fold_index": 0,
+        "validation_families": [
+          "high_low_satellite_false_alarm",
+          "low_confidence_satellite_noise",
+          "multi_satellite_real_fire"
+        ],
+        "metrics": {
+          "accuracy": 0.6899038461538461,
+          "precision": 0.5307262569832403,
+          "recall": 0.6785714285714286,
+          "f1": 0.5956112852664577,
+          "roc_auc": 0.7786490683229814,
+          "true_positive": 95,
+          "true_negative": 192,
+          "false_positive": 84,
+          "false_negative": 45
+        }
+      },
+      {
+        "fold_index": 1,
+        "validation_families": [
+          "mixed_confidence_non_fire_heat_source",
+          "mixed_satellite_with_false_news",
+          "news_only_before_satellite"
+        ],
+        "metrics": {
+          "accuracy": 0.22269807280513917,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "roc_auc": 0.029573678146204076,
+          "true_positive": 0,
+          "true_negative": 104,
+          "false_positive": 217,
+          "false_negative": 146
+        }
+      },
+      {
+        "fold_index": 2,
+        "validation_families": [
+          "correlated_satellite_news_false_alarm",
+          "high_confidence_satellite_false_positive",
+          "high_confidence_satellite_with_news"
+        ],
+        "metrics": {
+          "accuracy": 0.8097251585623678,
+          "precision": 0.6666666666666666,
+          "recall": 0.9285714285714286,
+          "f1": 0.7761194029850746,
+          "roc_auc": 0.9338407494145199,
+          "true_positive": 156,
+          "true_negative": 227,
+          "false_positive": 78,
+          "false_negative": 12
+        }
+      },
+      {
+        "fold_index": 3,
+        "validation_families": [
+          "high_low_satellite_with_news_real_fire",
+          "multi_satellite_plus_multi_news",
+          "nominal_satellite_false_heat_source"
+        ],
+        "metrics": {
+          "accuracy": 0.6592427616926503,
+          "precision": 0.7900355871886121,
+          "recall": 0.7025316455696202,
+          "f1": 0.7437185929648241,
+          "roc_auc": 0.7841439040639575,
+          "true_positive": 222,
+          "true_negative": 74,
+          "false_positive": 59,
+          "false_negative": 94
+        }
+      },
+      {
+        "fold_index": 4,
+        "validation_families": [
+          "multi_confidence_persistent_real_fire",
+          "news_rumor_no_fire",
+          "nominal_low_satellite_with_news_real_fire"
+        ],
+        "metrics": {
+          "accuracy": 0.6818181818181818,
+          "precision": 1.0,
+          "recall": 0.5155709342560554,
+          "f1": 0.680365296803653,
+          "roc_auc": 0.7785467128027682,
+          "true_positive": 149,
+          "true_negative": 151,
+          "false_positive": 0,
+          "false_negative": 140
+        }
+      },
+      {
+        "fold_index": 5,
+        "validation_families": [
+          "mixed_confidence_satellite_real_fire",
+          "nominal_satellite_with_news",
+          "persistent_non_wildfire_heat_source"
+        ],
+        "metrics": {
+          "accuracy": 0.7242888402625821,
+          "precision": 0.7862068965517242,
+          "recall": 0.7808219178082192,
+          "f1": 0.7835051546391752,
+          "roc_auc": 0.7657119136571192,
+          "true_positive": 228,
+          "true_negative": 103,
+          "false_positive": 62,
+          "false_negative": 64
+        }
+      },
+      {
+        "fold_index": 6,
+        "validation_families": [
+          "multiple_news_same_false_alarm",
+          "satellite_only_before_news"
+        ],
+        "metrics": {
+          "accuracy": 0.013422818791946308,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "roc_auc": 0.0,
+          "true_positive": 0,
+          "true_negative": 4,
+          "false_positive": 145,
+          "false_negative": 149
+        }
+      }
+    ],
+    "grouped_per_family": [
+      {
+        "scenario_family": "correlated_satellite_news_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 162,
+        "predicted_positive_rate": 0.48148148148148145,
+        "accuracy": 0.5185185185185185
+      },
+      {
+        "scenario_family": "high_confidence_satellite_false_positive",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 143,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 1.0
+      },
+      {
+        "scenario_family": "high_confidence_satellite_with_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 168,
+        "predicted_positive_rate": 0.9285714285714286,
+        "accuracy": 0.9285714285714286
+      },
+      {
+        "scenario_family": "high_low_satellite_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 130,
+        "predicted_positive_rate": 0.6461538461538462,
+        "accuracy": 0.35384615384615387
+      },
+      {
+        "scenario_family": "high_low_satellite_with_news_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 161,
+        "predicted_positive_rate": 0.4161490683229814,
+        "accuracy": 0.4161490683229814
+      },
+      {
+        "scenario_family": "low_confidence_satellite_noise",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 146,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 1.0
+      },
+      {
+        "scenario_family": "mixed_confidence_non_fire_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 154,
+        "predicted_positive_rate": 0.6298701298701299,
+        "accuracy": 0.37012987012987014
+      },
+      {
+        "scenario_family": "mixed_confidence_satellite_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 142,
+        "predicted_positive_rate": 0.7746478873239436,
+        "accuracy": 0.7746478873239436
+      },
+      {
+        "scenario_family": "mixed_satellite_with_false_news",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 167,
+        "predicted_positive_rate": 0.718562874251497,
+        "accuracy": 0.281437125748503
+      },
+      {
+        "scenario_family": "multi_confidence_persistent_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 151,
+        "predicted_positive_rate": 0.7019867549668874,
+        "accuracy": 0.7019867549668874
+      },
+      {
+        "scenario_family": "multi_satellite_plus_multi_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 155,
+        "predicted_positive_rate": 1.0,
+        "accuracy": 1.0
+      },
+      {
+        "scenario_family": "multi_satellite_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 140,
+        "predicted_positive_rate": 0.6785714285714286,
+        "accuracy": 0.6785714285714286
+      },
+      {
+        "scenario_family": "multiple_news_same_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 149,
+        "predicted_positive_rate": 0.9731543624161074,
+        "accuracy": 0.026845637583892617
+      },
+      {
+        "scenario_family": "news_only_before_satellite",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 146,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 0.0
+      },
+      {
+        "scenario_family": "news_rumor_no_fire",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 151,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 1.0
+      },
+      {
+        "scenario_family": "nominal_low_satellite_with_news_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 138,
+        "predicted_positive_rate": 0.3115942028985507,
+        "accuracy": 0.3115942028985507
+      },
+      {
+        "scenario_family": "nominal_satellite_false_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 133,
+        "predicted_positive_rate": 0.44360902255639095,
+        "accuracy": 0.556390977443609
+      },
+      {
+        "scenario_family": "nominal_satellite_with_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 150,
+        "predicted_positive_rate": 0.7866666666666666,
+        "accuracy": 0.7866666666666666
+      },
+      {
+        "scenario_family": "persistent_non_wildfire_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 165,
+        "predicted_positive_rate": 0.37575757575757573,
+        "accuracy": 0.6242424242424243
+      },
+      {
+        "scenario_family": "satellite_only_before_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 149,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 0.0
+      }
+    ]
+  },
+  "random_forest": {
+    "config": {
+      "n_estimators": 300,
+      "random_state": 42,
+      "class_weight": null
+    },
+    "train_metrics": {
+      "accuracy": 0.9575,
+      "f1": 0.9556135770234987
+    },
+    "held_out_metrics": {
+      "accuracy": 0.7783333333333333,
+      "precision": 0.7684887459807074,
+      "recall": 0.7966666666666666,
+      "f1": 0.7823240589198036,
+      "roc_auc": 0.8524833333333333,
+      "true_positive": 239,
+      "true_negative": 228,
+      "false_positive": 72,
+      "false_negative": 61
+    },
+    "standard_cv_metrics": {
+      "accuracy": {
+        "mean": 0.7676666666666666,
+        "std": 0.008602325267042613
+      },
+      "precision": {
+        "mean": 0.7726003130579402,
+        "std": 0.016443527402952147
+      },
+      "recall": {
+        "mean": 0.76,
+        "std": 0.029135697844549533
+      },
+      "f1": {
+        "mean": 0.7656728483472959,
+        "std": 0.011450191732538141
+      },
+      "roc_auc": {
+        "mean": 0.8485411111111111,
+        "std": 0.009633906557339861
+      }
+    },
+    "grouped_cv_summary": {
+      "accuracy": {
+        "mean": 0.3823298296193406,
+        "std": 0.15833631801912484
+      },
+      "precision": {
+        "mean": 0.38236149938595004,
+        "std": 0.22268448466897428
+      },
+      "recall": {
+        "mean": 0.4281360736354256,
+        "std": 0.22490988777560494
+      },
+      "f1": {
+        "mean": 0.3958187595540323,
+        "std": 0.21390473304357077
+      },
+      "roc_auc": {
+        "mean": 0.22333758855551136,
+        "std": 0.2330394315402727
+      }
+    },
+    "grouped_cv_folds": [
+      {
+        "fold_index": 0,
+        "validation_families": [
+          "high_low_satellite_false_alarm",
+          "low_confidence_satellite_noise",
+          "multi_satellite_real_fire"
+        ],
+        "metrics": {
+          "accuracy": 0.625,
+          "precision": 0.44366197183098594,
+          "recall": 0.45,
+          "f1": 0.44680851063829785,
+          "roc_auc": 0.6295419254658386,
+          "true_positive": 63,
+          "true_negative": 197,
+          "false_positive": 79,
+          "false_negative": 77
+        }
+      },
+      {
+        "fold_index": 1,
+        "validation_families": [
+          "mixed_confidence_non_fire_heat_source",
+          "mixed_satellite_with_false_news",
+          "news_only_before_satellite"
+        ],
+        "metrics": {
+          "accuracy": 0.2633832976445396,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1": 0.0,
+          "roc_auc": 0.0016216446891136433,
+          "true_positive": 0,
+          "true_negative": 123,
+          "false_positive": 198,
+          "false_negative": 146
+        }
+      },
+      {
+        "fold_index": 2,
+        "validation_families": [
+          "correlated_satellite_news_false_alarm",
+          "high_confidence_satellite_false_positive",
+          "high_confidence_satellite_with_news"
+        ],
+        "metrics": {
+          "accuracy": 0.32558139534883723,
+          "precision": 0.2836676217765043,
+          "recall": 0.5892857142857143,
+          "f1": 0.3829787234042553,
+          "roc_auc": 0.22790788446526156,
+          "true_positive": 99,
+          "true_negative": 55,
+          "false_positive": 250,
+          "false_negative": 69
+        }
+      },
+      {
+        "fold_index": 3,
+        "validation_families": [
+          "high_low_satellite_with_news_real_fire",
+          "multi_satellite_plus_multi_news",
+          "nominal_satellite_false_heat_source"
+        ],
+        "metrics": {
+          "accuracy": 0.45879732739420936,
+          "precision": 0.6123076923076923,
+          "recall": 0.629746835443038,
+          "f1": 0.6209048361934477,
+          "roc_auc": 0.19536975349766825,
+          "true_positive": 199,
+          "true_negative": 7,
+          "false_positive": 126,
+          "false_negative": 117
+        }
+      },
+      {
+        "fold_index": 4,
+        "validation_families": [
+          "multi_confidence_persistent_real_fire",
+          "news_rumor_no_fire",
+          "nominal_low_satellite_with_news_real_fire"
+        ],
+        "metrics": {
+          "accuracy": 0.42045454545454547,
+          "precision": 0.5505952380952381,
+          "recall": 0.6401384083044983,
+          "f1": 0.592,
+          "roc_auc": 0.0,
+          "true_positive": 185,
+          "true_negative": 0,
+          "false_positive": 151,
+          "false_negative": 104
+        }
+      },
+      {
+        "fold_index": 5,
+        "validation_families": [
+          "mixed_confidence_satellite_real_fire",
+          "nominal_satellite_with_news",
+          "persistent_non_wildfire_heat_source"
+        ],
+        "metrics": {
+          "accuracy": 0.48577680525164113,
+          "precision": 0.6233766233766234,
+          "recall": 0.4931506849315068,
+          "f1": 0.5506692160611855,
+          "roc_auc": 0.4925487754254877,
+          "true_positive": 144,
+          "true_negative": 78,
+          "false_positive": 87,
+          "false_negative": 148
+        }
+      },
+      {
+        "fold_index": 6,
+        "validation_families": [
+          "multiple_news_same_false_alarm",
+          "satellite_only_before_news"
+        ],
+        "metrics": {
+          "accuracy": 0.09731543624161074,
+          "precision": 0.16292134831460675,
+          "recall": 0.19463087248322147,
+          "f1": 0.17737003058103976,
+          "roc_auc": 0.016373136345209677,
+          "true_positive": 29,
+          "true_negative": 0,
+          "false_positive": 149,
+          "false_negative": 120
+        }
+      }
+    ],
+    "grouped_per_family": [
+      {
+        "scenario_family": "correlated_satellite_news_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 162,
+        "predicted_positive_rate": 0.6604938271604939,
+        "accuracy": 0.3395061728395062
+      },
+      {
+        "scenario_family": "high_confidence_satellite_false_positive",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 143,
+        "predicted_positive_rate": 1.0,
+        "accuracy": 0.0
+      },
+      {
+        "scenario_family": "high_confidence_satellite_with_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 168,
+        "predicted_positive_rate": 0.5892857142857143,
+        "accuracy": 0.5892857142857143
+      },
+      {
+        "scenario_family": "high_low_satellite_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 130,
+        "predicted_positive_rate": 0.6,
+        "accuracy": 0.4
+      },
+      {
+        "scenario_family": "high_low_satellite_with_news_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 161,
+        "predicted_positive_rate": 0.36645962732919257,
+        "accuracy": 0.36645962732919257
+      },
+      {
+        "scenario_family": "low_confidence_satellite_noise",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 146,
+        "predicted_positive_rate": 0.00684931506849315,
+        "accuracy": 0.9931506849315068
+      },
+      {
+        "scenario_family": "mixed_confidence_non_fire_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 154,
+        "predicted_positive_rate": 0.461038961038961,
+        "accuracy": 0.538961038961039
+      },
+      {
+        "scenario_family": "mixed_confidence_satellite_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 142,
+        "predicted_positive_rate": 0.7183098591549296,
+        "accuracy": 0.7183098591549296
+      },
+      {
+        "scenario_family": "mixed_satellite_with_false_news",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 167,
+        "predicted_positive_rate": 0.7604790419161677,
+        "accuracy": 0.23952095808383234
+      },
+      {
+        "scenario_family": "multi_confidence_persistent_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 151,
+        "predicted_positive_rate": 0.8344370860927153,
+        "accuracy": 0.8344370860927153
+      },
+      {
+        "scenario_family": "multi_satellite_plus_multi_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 155,
+        "predicted_positive_rate": 0.9032258064516129,
+        "accuracy": 0.9032258064516129
+      },
+      {
+        "scenario_family": "multi_satellite_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 140,
+        "predicted_positive_rate": 0.45,
+        "accuracy": 0.45
+      },
+      {
+        "scenario_family": "multiple_news_same_false_alarm",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 149,
+        "predicted_positive_rate": 1.0,
+        "accuracy": 0.0
+      },
+      {
+        "scenario_family": "news_only_before_satellite",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 146,
+        "predicted_positive_rate": 0.0,
+        "accuracy": 0.0
+      },
+      {
+        "scenario_family": "news_rumor_no_fire",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 151,
+        "predicted_positive_rate": 1.0,
+        "accuracy": 0.0
+      },
+      {
+        "scenario_family": "nominal_low_satellite_with_news_real_fire",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 138,
+        "predicted_positive_rate": 0.427536231884058,
+        "accuracy": 0.427536231884058
+      },
+      {
+        "scenario_family": "nominal_satellite_false_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 133,
+        "predicted_positive_rate": 0.9473684210526315,
+        "accuracy": 0.05263157894736842
+      },
+      {
+        "scenario_family": "nominal_satellite_with_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 150,
+        "predicted_positive_rate": 0.28,
+        "accuracy": 0.28
+      },
+      {
+        "scenario_family": "persistent_non_wildfire_heat_source",
+        "label": 0,
+        "actual_positive_fraction": 0.0,
+        "sample_count": 165,
+        "predicted_positive_rate": 0.5272727272727272,
+        "accuracy": 0.4727272727272727
+      },
+      {
+        "scenario_family": "satellite_only_before_news",
+        "label": 1,
+        "actual_positive_fraction": 1.0,
+        "sample_count": 149,
+        "predicted_positive_rate": 0.19463087248322147,
+        "accuracy": 0.19463087248322147
+      }
+    ]
+  },
+  "feature_ablation": {
+    "full": {
+      "feature_names": [
+        "satellite_count",
+        "news_count",
+        "satellite_low_count",
+        "satellite_nominal_count",
+        "satellite_high_count",
+        "time_span_minutes",
+        "max_pairwise_distance_km"
+      ],
+      "models": {
+        "logistic_regression": {
+          "standard_cv_f1": 0.6903585719633948,
+          "standard_cv_f1_std": 0.009697475286893456,
+          "standard_cv_roc_auc": 0.7788588888888889,
+          "standard_cv_roc_auc_std": 0.00877151858412242,
+          "grouped_cv_f1": 0.5113313903798835,
+          "grouped_cv_f1_std": 0.32880524093719216,
+          "grouped_cv_roc_auc": 0.5814951466296501,
+          "grouped_cv_roc_auc_std": 0.36245249175239813
+        },
+        "random_forest": {
+          "standard_cv_f1": 0.7656728483472959,
+          "standard_cv_f1_std": 0.011450191732538141,
+          "standard_cv_roc_auc": 0.8485411111111111,
+          "standard_cv_roc_auc_std": 0.009633906557339861,
+          "grouped_cv_f1": 0.3958187595540323,
+          "grouped_cv_f1_std": 0.21390473304357077,
+          "grouped_cv_roc_auc": 0.22333758855551136,
+          "grouped_cv_roc_auc_std": 0.2330394315402727
+        }
+      }
+    },
+    "without_satellite_count": {
+      "feature_names": [
+        "news_count",
+        "satellite_low_count",
+        "satellite_nominal_count",
+        "satellite_high_count",
+        "time_span_minutes",
+        "max_pairwise_distance_km"
+      ],
+      "models": {
+        "logistic_regression": {
+          "standard_cv_f1": 0.6914921968681413,
+          "standard_cv_f1_std": 0.009846683591459526,
+          "standard_cv_roc_auc": 0.7787922222222222,
+          "standard_cv_roc_auc_std": 0.008725597789843593,
+          "grouped_cv_f1": 0.5107004879923123,
+          "grouped_cv_f1_std": 0.3286471206642232,
+          "grouped_cv_roc_auc": 0.5814920842821694,
+          "grouped_cv_roc_auc_std": 0.36241387811439973
+        },
+        "random_forest": {
+          "standard_cv_f1": 0.7613041407538442,
+          "standard_cv_f1_std": 0.007564642260218716,
+          "standard_cv_roc_auc": 0.8474477777777778,
+          "standard_cv_roc_auc_std": 0.00953880870994583,
+          "grouped_cv_f1": 0.3994328588582637,
+          "grouped_cv_f1_std": 0.21451336814208571,
+          "grouped_cv_roc_auc": 0.22890866968480025,
+          "grouped_cv_roc_auc_std": 0.23644031164116294
+        }
+      }
+    }
+  },
+  "note": "Dataset is synthetic (V2 proof-of-concept, mixed-confidence evidence added). Grouped CV tests generalization to unseen synthetic scenario families - it does NOT constitute real-world validation. No runtime classifier is selected by this comparison."
+}

@@ -20,12 +20,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from src.models.active_fire_events import (
+    ActiveFireEventMLSummary,
     ActiveFireEventSeveritySummary,
     ActiveFireEventsResult,
     ActiveFireEventSummary,
 )
 from src.models.fire_danger_areas import FireDangerAreaSnapshot
 from src.models.fire_event import FireEvent
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
 from src.repositories.fire_severity_assessment_repository import (
     FireSeverityAssessmentRepository,
@@ -78,12 +80,19 @@ class ActiveFireEventsService:
         self._validate_aware_datetime("as_of", snapshot_time)
 
         stored_events = self._fire_event_repository.get_active_events()
-        severity_by_event_id = self._fire_severity_assessment_repository.get_latest_for_events(
-            stored_event.id for stored_event in stored_events
-        )
+        event_ids = tuple(stored_event.id for stored_event in stored_events)
+        severity_by_event_id = self._fire_severity_assessment_repository.get_latest_for_events(event_ids)
+        # Batched (one query for every active event) to avoid an N+1
+        # get_ml_assessment() call per card - same precedent as severity above.
+        ml_assessment_by_event_id = self._fire_event_repository.get_ml_assessments_for_events(event_ids)
 
         items = tuple(
-            self._to_summary(stored_event, severity_by_event_id.get(stored_event.id), fire_danger_areas)
+            self._to_summary(
+                stored_event,
+                severity_by_event_id.get(stored_event.id),
+                ml_assessment_by_event_id.get(stored_event.id),
+                fire_danger_areas,
+            )
             for stored_event in stored_events
         )
         return ActiveFireEventsResult(as_of=snapshot_time, items=items)
@@ -92,6 +101,7 @@ class ActiveFireEventsService:
     def _to_summary(
         stored_event: StoredFireEvent,
         stored_severity: StoredFireSeverityAssessment | None,
+        ml_assessment: FireEventMLAssessment | None,
         fire_danger_areas: tuple[FireDangerAreaSnapshot, ...],
     ) -> ActiveFireEventSummary:
         event = stored_event.event
@@ -110,6 +120,16 @@ class ActiveFireEventsService:
                 else None
             ),
             location_name=ActiveFireEventsService._resolve_location_name(event, fire_danger_areas),
+            ml_summary=(
+                ActiveFireEventsService._to_ml_summary(ml_assessment) if ml_assessment is not None else None
+            ),
+        )
+
+    @staticmethod
+    def _to_ml_summary(ml_assessment: FireEventMLAssessment) -> ActiveFireEventMLSummary:
+        return ActiveFireEventMLSummary(
+            available=ml_assessment.ml_available,
+            model_score=ml_assessment.ml_probability,
         )
 
     @staticmethod

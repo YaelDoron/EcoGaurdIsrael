@@ -12,9 +12,14 @@ from src.calculators.fire_detection.fire_detection_config import (
     FIRE_DETECTION_METHODOLOGY_VERSION,
 )
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_event_ml_assessment_db import FireEventMLAssessmentDB
 from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenceDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
 from src.models import FireEvent, FireEventStatus, FireEvidenceRef, FireEvidenceType, SatelliteHotspot, WildfireReport
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.repositories.exceptions import FireEventRepositoryError
 from src.repositories.fire_event_config import ACTIVE_EVENT_MATCH_DISTANCE_KM
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
@@ -694,3 +699,200 @@ def test_get_recent_respects_limit(repository, satellite_repository):
 def test_get_recent_rejects_invalid_limit(repository):
     with pytest.raises(FireEventRepositoryError):
         repository.get_recent(0)
+
+
+# --- ML assessment persistence (Task 5) ---
+
+
+def make_ml_assessment(fire_event_id: int, **overrides) -> FireEventMLAssessment:
+    defaults = dict(
+        fire_event_id=fire_event_id,
+        decision_mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.8,
+        ml_available=True,
+        ml_probability=0.86,
+        ml_model_name="fire_detection_logistic_v3",
+        ml_model_version="3.0",
+        ml_feature_schema_version="v3",
+        ml_failure_reason=None,
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+        updated_at=UPDATED_AT,
+    )
+    defaults.update(overrides)
+    return FireEventMLAssessment(**defaults)
+
+
+def test_new_event_has_no_ml_assessment_until_recorded(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    assert repository.get_ml_assessment(stored.id) is None
+
+
+def test_upsert_ml_assessment_stores_and_reloads(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id))
+    reloaded = repository.get_ml_assessment(stored.id)
+
+    assert reloaded is not None
+    assert reloaded.fire_event_id == stored.id
+    assert reloaded.decision_mode is FireDetectionDecisionMode.SHADOW
+    assert reloaded.rule_status is FireDetectionStatus.CONFIRMED
+    assert reloaded.rule_confidence == pytest.approx(0.8)
+    assert reloaded.ml_available is True
+    assert reloaded.ml_probability == pytest.approx(0.86)
+    assert reloaded.ml_model_version == "3.0"
+    assert reloaded.agreement is FireDetectionMLRuleAgreement.AGREE_FIRE
+
+
+def test_upsert_ml_assessment_updates_existing_row_in_place(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id, ml_probability=0.3))
+
+    repository.upsert_ml_assessment(
+        stored.id, make_ml_assessment(stored.id, ml_probability=0.91, agreement=FireDetectionMLRuleAgreement.ML_STRONGER)
+    )
+
+    reloaded = repository.get_ml_assessment(stored.id)
+    assert reloaded.ml_probability == pytest.approx(0.91)
+    assert reloaded.agreement is FireDetectionMLRuleAgreement.ML_STRONGER
+
+
+def test_upsert_ml_assessment_does_not_create_a_second_row(repository, satellite_repository, sqlite_session_factory):
+    stored = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id))
+    repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id, ml_probability=0.5))
+
+    session = sqlite_session_factory()
+    count = len(
+        session.execute(
+            select(FireEventMLAssessmentDB).where(FireEventMLAssessmentDB.fire_event_id == stored.id)
+        ).scalars().all()
+    )
+    session.close()
+    assert count == 1
+
+
+def test_ml_unavailable_assessment_round_trips(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    repository.upsert_ml_assessment(
+        stored.id,
+        make_ml_assessment(
+            stored.id,
+            ml_available=False,
+            ml_probability=None,
+            ml_model_name=None,
+            ml_model_version=None,
+            ml_feature_schema_version=None,
+            ml_failure_reason="ML model unavailable.",
+            agreement=FireDetectionMLRuleAgreement.ML_UNAVAILABLE,
+        ),
+    )
+
+    reloaded = repository.get_ml_assessment(stored.id)
+    assert reloaded.ml_available is False
+    assert reloaded.ml_probability is None
+    assert reloaded.ml_failure_reason == "ML model unavailable."
+    assert reloaded.agreement is FireDetectionMLRuleAgreement.ML_UNAVAILABLE
+
+
+def test_upsert_ml_assessment_requires_existing_event(repository):
+    with pytest.raises(FireEventRepositoryError):
+        repository.upsert_ml_assessment(999999, make_ml_assessment(999999))
+
+
+def test_upsert_ml_assessment_rejects_mismatched_fire_event_id(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    with pytest.raises(FireEventRepositoryError):
+        repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id + 1))
+
+
+def test_get_ml_assessment_returns_the_correct_event_association(repository, satellite_repository):
+    """Two FireEvents each get their own ML assessment - get_ml_assessment
+    must never cross-return the other event's row."""
+    first = create_event_with_satellite(repository, satellite_repository)
+    second = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(first.id, make_ml_assessment(first.id, ml_probability=0.2))
+    repository.upsert_ml_assessment(second.id, make_ml_assessment(second.id, ml_probability=0.9))
+
+    first_assessment = repository.get_ml_assessment(first.id)
+    second_assessment = repository.get_ml_assessment(second.id)
+
+    assert first_assessment.fire_event_id == first.id
+    assert first_assessment.ml_probability == pytest.approx(0.2)
+    assert second_assessment.fire_event_id == second.id
+    assert second_assessment.ml_probability == pytest.approx(0.9)
+
+
+def test_get_ml_assessment_does_not_create_or_modify_any_row(
+    repository, satellite_repository, sqlite_session_factory
+):
+    """A pure read: calling get_ml_assessment (including repeatedly, and for
+    an event with no row) must never insert or update fire_event_ml_assessments."""
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    repository.get_ml_assessment(stored.id)
+    repository.get_ml_assessment(stored.id)
+    repository.get_ml_assessment(999999)
+
+    session = sqlite_session_factory()
+    count = len(session.execute(select(FireEventMLAssessmentDB)).scalars().all())
+    session.close()
+    assert count == 0
+
+
+# --- Batched ML assessment retrieval (dashboard Active Fire cards) ---
+
+
+def test_get_ml_assessments_for_events_returns_each_events_own_assessment(repository, satellite_repository):
+    first = create_event_with_satellite(repository, satellite_repository)
+    second = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(first.id, make_ml_assessment(first.id, ml_probability=0.2))
+    repository.upsert_ml_assessment(second.id, make_ml_assessment(second.id, ml_probability=0.9))
+
+    result = repository.get_ml_assessments_for_events((first.id, second.id))
+
+    assert set(result.keys()) == {first.id, second.id}
+    assert result[first.id].ml_probability == pytest.approx(0.2)
+    assert result[second.id].ml_probability == pytest.approx(0.9)
+
+
+def test_get_ml_assessments_for_events_omits_events_with_no_row(repository, satellite_repository):
+    with_row = create_event_with_satellite(repository, satellite_repository)
+    without_row = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(with_row.id, make_ml_assessment(with_row.id))
+
+    result = repository.get_ml_assessments_for_events((with_row.id, without_row.id))
+
+    assert set(result.keys()) == {with_row.id}
+
+
+def test_get_ml_assessments_for_events_empty_ids_returns_empty_dict(repository):
+    assert repository.get_ml_assessments_for_events(()) == {}
+
+
+def test_get_ml_assessments_for_events_matches_get_ml_assessment_per_event(repository, satellite_repository):
+    stored = create_event_with_satellite(repository, satellite_repository)
+    repository.upsert_ml_assessment(stored.id, make_ml_assessment(stored.id, ml_probability=0.42))
+
+    singular = repository.get_ml_assessment(stored.id)
+    batched = repository.get_ml_assessments_for_events((stored.id,))[stored.id]
+
+    assert batched == singular
+
+
+def test_get_ml_assessments_for_events_does_not_create_or_modify_any_row(
+    repository, satellite_repository, sqlite_session_factory
+):
+    stored = create_event_with_satellite(repository, satellite_repository)
+
+    repository.get_ml_assessments_for_events((stored.id,))
+    repository.get_ml_assessments_for_events((stored.id, 999999))
+
+    session = sqlite_session_factory()
+    count = len(session.execute(select(FireEventMLAssessmentDB)).scalars().all())
+    session.close()
+    assert count == 0

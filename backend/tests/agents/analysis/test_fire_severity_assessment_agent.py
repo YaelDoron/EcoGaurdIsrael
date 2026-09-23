@@ -172,6 +172,25 @@ def test_ready_input_calls_dependencies_once_and_returns_repository_result():
     assert result.assessment == repository.calls[0]["assessment"]
 
 
+def test_assess_from_input_result_never_touches_the_input_service():
+    """Performance pass: assess_from_input_result() is for a caller
+    (FireSeverityRefreshOrchestrator) that already prepared the
+    FireSeverityInputResult itself - it must persist directly from it
+    without re-running weather/satellite/vegetation lookups."""
+    input_service = FakeInputService(ready_input_result())  # would fail differently if actually called
+    calculator = FakeCalculator()
+    repository = FakeRepository()
+    agent = make_agent(input_service, calculator, repository)
+    input_result = ready_input_result()
+
+    result = agent.assess_from_input_result(input_result, ASSESSED_AT)
+
+    assert input_service.calls == []
+    assert calculator.calls == [INPUT_DATA]
+    assert isinstance(result, StoredFireSeverityAssessment)
+    assert result.assessment_id == 77
+
+
 def test_ready_input_creates_valid_assessment_from_calculator_result_and_methodology():
     repository = FakeRepository()
     result = make_agent(FakeInputService(ready_input_result()), repository=repository).assess(

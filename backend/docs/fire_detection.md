@@ -227,3 +227,5 @@ No severity logic is implemented in Fire Detection.
 - no manual analyst review workflow yet
 
 These are current scope boundaries, not bugs.
+
+**Update (Task 5):** a trained ML component (Logistic Regression V3) now also runs alongside this deterministic methodology at runtime, as a subordinate, non-authoritative signal (default mode: `SHADOW` - it cannot change any decision described on this page). See [fire_detection_runtime_ml.md](fire_detection_runtime_ml.md).

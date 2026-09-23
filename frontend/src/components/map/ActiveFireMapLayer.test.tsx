@@ -17,6 +17,7 @@ function makeFire(overrides: Partial<ActiveFireEvent> = {}): ActiveFireEvent {
     created_at: "2026-09-20T11:00:30Z",
     severity: null,
     location_name: null,
+    ml_summary: null,
     ...overrides,
   };
 }
@@ -229,5 +230,46 @@ describe("ActiveFireMapLayer", () => {
     expect(iconHtml(suspectedMarker)).toContain("background:#ffffff");
     expect(iconHtml(confirmedMarker)).toContain("border:2px solid #ffffff");
     expect(iconHtml(suspectedMarker)).not.toEqual(iconHtml(confirmedMarker));
+  });
+
+  // -------------------------------------------------------------------------
+  // Popup identity, and separation from Fire Danger (Parts 4/5)
+  // -------------------------------------------------------------------------
+
+  it('includes an "Active Fire Event" label, distinguishing it from a Fire Danger popup', () => {
+    render(<ActiveFireMapLayer activeFires={[makeFire()]} />);
+
+    expect(screen.getByText("Active Fire Event")).toBeInTheDocument();
+  });
+
+  it("contains Detection and Severity but never FFWI/Fire Danger wording", () => {
+    render(
+      <ActiveFireMapLayer
+        activeFires={[
+          makeFire({
+            status: "confirmed",
+            severity: { assessment_id: 1, status: "valid", score: 90, level: "critical", assessed_at: "2026-09-20T11:00:00Z" },
+          }),
+        ]}
+      />,
+    );
+
+    const popup = screen.getByTestId("popup");
+    expect(popup.textContent).toContain("Detection:");
+    expect(popup.textContent).toContain("Severity:");
+    expect(popup.textContent).not.toMatch(/FFWI/);
+    expect(popup.textContent).not.toMatch(/Fire Danger/);
+  });
+
+  it("does not show a Rule/AI score row in this lightweight popup", () => {
+    render(
+      <ActiveFireMapLayer
+        activeFires={[makeFire({ detection_confidence: 0.88, ml_summary: { available: true, model_score: 0.9 } })]}
+      />,
+    );
+
+    const popup = screen.getByTestId("popup");
+    expect(popup.textContent).not.toMatch(/Rule/);
+    expect(popup.textContent).not.toMatch(/\bAI\b/);
   });
 });

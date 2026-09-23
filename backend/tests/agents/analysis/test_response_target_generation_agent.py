@@ -101,9 +101,23 @@ class FakeInputService:
         self.result = result
         self.exc = exc
         self.calls = []
+        self.for_event_calls = []
 
     def prepare_input(self, fire_event_id, as_of):
         self.calls.append({"fire_event_id": fire_event_id, "as_of": as_of})
+        if self.exc is not None:
+            raise self.exc
+        return self.result
+
+    def prepare_input_for_event(self, stored_event, as_of, *, resolved_severity=None, resolved_spread_by_horizon=None):
+        self.for_event_calls.append(
+            {
+                "fire_event_id": stored_event.id,
+                "as_of": as_of,
+                "resolved_severity": resolved_severity,
+                "resolved_spread_by_horizon": resolved_spread_by_horizon,
+            }
+        )
         if self.exc is not None:
             raise self.exc
         return self.result
@@ -123,10 +137,12 @@ class FakeCalculator:
 
 
 class FakeRepository:
-    def __init__(self, stored_id=77, exc: Exception | None = None) -> None:
+    def __init__(self, stored_id=77, exc: Exception | None = None, latest: StoredResponseTargetSet | None = None) -> None:
         self.stored_id = stored_id
         self.exc = exc
         self.calls = []
+        self.latest = latest
+        self.latest_calls = []
 
     def save_target_set(self, target_set):
         self.calls.append(target_set)
@@ -137,6 +153,10 @@ class FakeRepository:
             target_set=target_set,
             targets=(),
         )
+
+    def get_latest_for_event_as_of(self, fire_event_id, as_of):
+        self.latest_calls.append({"fire_event_id": fire_event_id, "as_of": as_of})
+        return self.latest
 
 
 def ready_result(input_data=INPUT_DATA) -> ResponseTargetInputResult:
@@ -176,6 +196,155 @@ def test_ready_input_invokes_dependencies_once_and_returns_success():
     assert result.success is True
     assert result.status is ResponseTargetGenerationStatus.GENERATED
     assert result.target_set_id == 77
+
+
+# --- performance pass: generate_for_event() (FireEvent/Severity/Spread handoff) --
+
+
+class _FakeStoredEvent:
+    def __init__(self, event_id):
+        self.id = event_id
+
+
+def test_generate_for_event_uses_prepare_input_for_event_not_by_id():
+    input_service = FakeInputService(ready_result())
+    stored_event = _FakeStoredEvent(FIRE_EVENT_ID)
+
+    result = make_agent(input_service).generate_for_event(stored_event=stored_event, as_of=AS_OF)
+
+    assert input_service.calls == []  # the by-id path is never used
+    assert len(input_service.for_event_calls) == 1
+    assert input_service.for_event_calls[0]["fire_event_id"] == FIRE_EVENT_ID
+    assert result.success is True
+
+
+def test_generate_for_event_forwards_resolved_severity_and_spread():
+    input_service = FakeInputService(ready_result())
+    stored_event = _FakeStoredEvent(FIRE_EVENT_ID)
+    sentinel_severity = object()
+    sentinel_spread = {30: object(), 60: None}
+
+    make_agent(input_service).generate_for_event(
+        stored_event=stored_event,
+        as_of=AS_OF,
+        resolved_severity=sentinel_severity,
+        resolved_spread_by_horizon=sentinel_spread,
+    )
+
+    call = input_service.for_event_calls[0]
+    assert call["resolved_severity"] is sentinel_severity
+    assert call["resolved_spread_by_horizon"] is sentinel_spread
+
+
+def test_generate_for_event_failure_is_reported_as_failed_result():
+    input_service = FakeInputService(exc=RuntimeError("boom"))
+    stored_event = _FakeStoredEvent(FIRE_EVENT_ID)
+
+    result = make_agent(input_service).generate_for_event(stored_event=stored_event, as_of=AS_OF)
+
+    assert result.success is False
+    assert result.status is ResponseTargetGenerationStatus.FAILED
+
+
+# --- performance pass: content-based reuse, no duplicate target sets -------
+
+
+def test_identical_content_reuses_latest_target_set_without_saving():
+    latest = StoredResponseTargetSet(
+        id=555,
+        target_set=SimpleNamespace(targets=(ACTIVE_TARGET, PREDICTED_TARGET)),
+        targets=(),
+    )
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(ACTIVE_TARGET, PREDICTED_TARGET))
+    repository = FakeRepository(latest=latest)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert repository.calls == []  # save_target_set() never called
+    assert result.target_set_id == 555
+    assert result.targets == (ACTIVE_TARGET, PREDICTED_TARGET)
+    assert result.status is ResponseTargetGenerationStatus.GENERATED
+
+
+def test_changed_priority_score_triggers_regeneration_not_reuse():
+    changed_active = ResponseTarget(
+        fire_event_id=FIRE_EVENT_ID, target_type=ResponseTargetType.ACTIVE_FIRE,
+        latitude=FIRE_LAT, longitude=FIRE_LON, priority_score=999.0,  # was 150.0
+    )
+    latest = StoredResponseTargetSet(
+        id=555, target_set=SimpleNamespace(targets=(ACTIVE_TARGET, PREDICTED_TARGET)), targets=()
+    )
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(changed_active, PREDICTED_TARGET))
+    repository = FakeRepository(stored_id=556, latest=latest)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert len(repository.calls) == 1
+    assert result.target_set_id == 556
+
+
+def test_changed_spread_geometry_triggers_regeneration_not_reuse():
+    moved_predicted = ResponseTarget(
+        fire_event_id=FIRE_EVENT_ID, target_type=ResponseTargetType.PREDICTED_RISK,
+        latitude=33.0, longitude=36.0,  # was 32.75, 35.07
+        priority_score=80.0, prediction_horizon_minutes=30, spread_prediction_id=10, spread_prediction_cell_id=100,
+    )
+    latest = StoredResponseTargetSet(
+        id=555, target_set=SimpleNamespace(targets=(ACTIVE_TARGET, PREDICTED_TARGET)), targets=()
+    )
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(ACTIVE_TARGET, moved_predicted))
+    repository = FakeRepository(stored_id=557, latest=latest)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert len(repository.calls) == 1
+    assert result.target_set_id == 557
+
+
+def test_changed_fire_location_triggers_regeneration_not_reuse():
+    moved_active = ResponseTarget(
+        fire_event_id=FIRE_EVENT_ID, target_type=ResponseTargetType.ACTIVE_FIRE,
+        latitude=33.5, longitude=36.5, priority_score=150.0,  # fire moved
+    )
+    latest = StoredResponseTargetSet(
+        id=555, target_set=SimpleNamespace(targets=(ACTIVE_TARGET, PREDICTED_TARGET)), targets=()
+    )
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(moved_active, PREDICTED_TARGET))
+    repository = FakeRepository(stored_id=558, latest=latest)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert len(repository.calls) == 1
+    assert result.target_set_id == 558
+
+
+def test_no_latest_target_set_always_generates():
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(ACTIVE_TARGET, PREDICTED_TARGET))
+    repository = FakeRepository(stored_id=559, latest=None)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert len(repository.calls) == 1
+    assert result.target_set_id == 559
+
+
+def test_different_target_count_is_never_treated_as_matching():
+    latest = StoredResponseTargetSet(
+        id=555, target_set=SimpleNamespace(targets=(ACTIVE_TARGET,)), targets=()  # only 1 target before
+    )
+    input_service = FakeInputService(ready_result())
+    calculator = FakeCalculator(targets=(ACTIVE_TARGET, PREDICTED_TARGET))  # now 2 targets
+    repository = FakeRepository(stored_id=560, latest=latest)
+
+    result = make_agent(input_service, calculator, repository).generate(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    assert len(repository.calls) == 1
+    assert result.target_set_id == 560
 
 
 def test_calculator_receives_exact_prepared_input_fields():
@@ -620,7 +789,11 @@ def test_real_agent_does_not_attach_other_event_spread_by_geography(sqlite_sessi
     assert result.targets[0].target_type is ResponseTargetType.ACTIVE_FIRE
 
 
-def test_real_agent_repeated_generation_is_append_only(sqlite_session_factory):
+def test_real_agent_repeated_identical_generation_reuses_the_existing_set(sqlite_session_factory):
+    """Performance pass: response_target_sets stays append-only (nothing is
+    ever mutated or deleted), but a second call with byte-identical
+    determining inputs must reuse the existing row rather than inserting a
+    duplicate."""
     fire_event_repository = FireEventRepository(sqlite_session_factory)
     satellite_repository = SatelliteHotspotRepository(sqlite_session_factory)
     fire_event_id = persist_event(fire_event_repository, satellite_repository)
@@ -630,5 +803,50 @@ def test_real_agent_repeated_generation_is_append_only(sqlite_session_factory):
     second = agent.generate(fire_event_id=fire_event_id, as_of=AS_OF)
 
     assert first.targets == second.targets
+    assert first.target_set_id == second.target_set_id
+    assert len(repository.get_history_for_event(fire_event_id)) == 1
+
+
+def test_real_agent_regenerates_when_severity_changes_target_priority(sqlite_session_factory):
+    """Complementary case: once a determining input (severity score, which
+    feeds target priority) genuinely changes, a new set IS appended - reuse
+    never applies to a real content change."""
+    from src.calculators.fire_severity.fire_severity_config import (
+        FIRE_SEVERITY_METHODOLOGY_NAME,
+        FIRE_SEVERITY_METHODOLOGY_VERSION,
+    )
+    from src.models.fire_severity_assessment import FireSeverityAssessment
+    from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
+    from src.models.fire_severity_level import FireSeverityLevel
+
+    fire_event_repository = FireEventRepository(sqlite_session_factory)
+    satellite_repository = SatelliteHotspotRepository(sqlite_session_factory)
+    severity_repository = FireSeverityAssessmentRepository(sqlite_session_factory)
+    weather_repository = WeatherRepository(sqlite_session_factory)
+    fire_event_id = persist_event(fire_event_repository, satellite_repository)
+    agent, repository = make_real_agent(sqlite_session_factory)
+
+    first = agent.generate(fire_event_id=fire_event_id, as_of=AS_OF)
+
+    hotspot_id = satellite_repository.get_recent_hotspots(as_of=AS_OF, lookback_minutes=360)[0].id
+    weather_observation_id = persist_weather(weather_repository)
+    severity_repository.save_assessment(
+        FireSeverityAssessment(
+            fire_event_id=fire_event_id,
+            assessed_at=AS_OF,
+            status=FireSeverityAssessmentStatus.VALID,
+            score=95.0,
+            level=FireSeverityLevel.CRITICAL,
+            methodology=FIRE_SEVERITY_METHODOLOGY_NAME,
+            methodology_version=FIRE_SEVERITY_METHODOLOGY_VERSION,
+        ),
+        weather_observation_ids=(weather_observation_id,),
+        satellite_hotspot_ids=(hotspot_id,),
+        selected_frp_hotspot_id=hotspot_id,
+    )
+
+    second = agent.generate(fire_event_id=fire_event_id, as_of=AS_OF + timedelta(seconds=1))
+
+    assert first.targets != second.targets
     assert first.target_set_id != second.target_set_id
     assert len(repository.get_history_for_event(fire_event_id)) == 2

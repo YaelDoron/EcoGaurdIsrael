@@ -16,7 +16,11 @@ import pytest
 
 from src.models.active_fire_events import ActiveFireEventsResult
 from src.models.fire_danger_areas import FireDangerAreaSnapshot
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event import FireEvent
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_severity_assessment import FireSeverityAssessment
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
@@ -37,13 +41,24 @@ AS_OF = DETECTED_AT + timedelta(hours=1)
 
 
 class FakeFireEventRepository:
-    def __init__(self, active_events: tuple[StoredFireEvent, ...] = ()):
+    def __init__(
+        self,
+        active_events: tuple[StoredFireEvent, ...] = (),
+        ml_assessment_by_event_id: dict[int, FireEventMLAssessment] | None = None,
+    ):
         self.active_events = active_events
+        self.ml_assessment_by_event_id = dict(ml_assessment_by_event_id or {})
         self.calls = 0
+        self.ml_assessment_calls: list[tuple[int, ...]] = []
 
     def get_active_events(self) -> tuple[StoredFireEvent, ...]:
         self.calls += 1
         return self.active_events
+
+    def get_ml_assessments_for_events(self, fire_event_ids) -> dict[int, FireEventMLAssessment]:
+        ids = tuple(fire_event_ids)
+        self.ml_assessment_calls.append(ids)
+        return {fid: self.ml_assessment_by_event_id[fid] for fid in ids if fid in self.ml_assessment_by_event_id}
 
 
 class FakeFireSeverityAssessmentRepository:
@@ -114,11 +129,31 @@ def make_stored_severity(
     )
 
 
+def make_ml_assessment(fire_event_id: int, **overrides) -> FireEventMLAssessment:
+    defaults = dict(
+        fire_event_id=fire_event_id,
+        decision_mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.8,
+        ml_available=True,
+        ml_probability=0.9,
+        ml_model_name="fire_detection_logistic_v3",
+        ml_model_version="3.0",
+        ml_feature_schema_version="v3",
+        ml_failure_reason=None,
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+        updated_at=UPDATED_AT,
+    )
+    defaults.update(overrides)
+    return FireEventMLAssessment(**defaults)
+
+
 def make_service(
     active_events: tuple[StoredFireEvent, ...] = (),
     latest_severity_by_event_id: dict[int, StoredFireSeverityAssessment] | None = None,
+    ml_assessment_by_event_id: dict[int, FireEventMLAssessment] | None = None,
 ) -> tuple[ActiveFireEventsService, FakeFireEventRepository, FakeFireSeverityAssessmentRepository]:
-    fire_event_repository = FakeFireEventRepository(active_events)
+    fire_event_repository = FakeFireEventRepository(active_events, ml_assessment_by_event_id)
     severity_repository = FakeFireSeverityAssessmentRepository(latest_severity_by_event_id)
     service = ActiveFireEventsService(
         fire_event_repository=fire_event_repository,
@@ -235,6 +270,77 @@ def test_severity_lookup_is_batched_once_for_all_active_events():
     assert fire_event_repository.calls == 1
     assert len(severity_repository.calls) == 1
     assert set(severity_repository.calls[0]) == {1, 2, 3}
+
+
+# ---------------------------------------------------------------------------
+# ML summary (dashboard Active Fire cards, ML Task 7)
+# ---------------------------------------------------------------------------
+
+
+def test_event_with_ml_assessment_returns_available_summary():
+    stored = make_stored_event(1)
+    ml_assessment = make_ml_assessment(1, ml_available=True, ml_probability=0.9)
+    service, _, _ = make_service(active_events=(stored,), ml_assessment_by_event_id={1: ml_assessment})
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    summary = result.items[0].ml_summary
+    assert summary is not None
+    assert summary.available is True
+    assert summary.model_score == pytest.approx(0.9)
+
+
+def test_event_with_no_ml_assessment_returns_none_not_zero():
+    stored = make_stored_event(1)
+    service, _, _ = make_service(active_events=(stored,), ml_assessment_by_event_id={})
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    assert result.items[0].ml_summary is None
+
+
+def test_event_with_unavailable_ml_assessment_reports_available_false_not_zero():
+    stored = make_stored_event(1)
+    ml_assessment = make_ml_assessment(1, ml_available=False, ml_probability=None)
+    service, _, _ = make_service(active_events=(stored,), ml_assessment_by_event_id={1: ml_assessment})
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    summary = result.items[0].ml_summary
+    assert summary is not None
+    assert summary.available is False
+    assert summary.model_score is None
+
+
+def test_fire_event_a_never_receives_ml_summary_from_fire_event_b():
+    first = make_stored_event(1)
+    second = make_stored_event(2)
+    ml_assessment_1 = make_ml_assessment(1, ml_probability=0.1)
+    ml_assessment_2 = make_ml_assessment(2, ml_probability=0.8)
+    service, _, _ = make_service(
+        active_events=(first, second),
+        ml_assessment_by_event_id={1: ml_assessment_1, 2: ml_assessment_2},
+    )
+
+    result = service.get_active_events(as_of=AS_OF)
+
+    by_id = {item.fire_event_id: item for item in result.items}
+    assert by_id[1].ml_summary.model_score == pytest.approx(0.1)
+    assert by_id[2].ml_summary.model_score == pytest.approx(0.8)
+
+
+def test_ml_summary_lookup_is_batched_once_for_all_active_events():
+    """No N+1: exactly one call to get_ml_assessments_for_events for the
+    whole page, covering every active event id - mirrors the severity
+    lookup's own batching guarantee above."""
+    events = (make_stored_event(1), make_stored_event(2), make_stored_event(3))
+    service, fire_event_repository, _ = make_service(active_events=events)
+
+    service.get_active_events(as_of=AS_OF)
+
+    assert fire_event_repository.calls == 1
+    assert len(fire_event_repository.ml_assessment_calls) == 1
+    assert set(fire_event_repository.ml_assessment_calls[0]) == {1, 2, 3}
 
 
 # ---------------------------------------------------------------------------

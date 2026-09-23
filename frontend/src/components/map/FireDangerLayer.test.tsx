@@ -86,26 +86,26 @@ describe("FireDangerLayer", () => {
     render(<FireDangerLayer areas={[makeArea({ area_name: "Jerusalem Forest" })]} />);
 
     expect(screen.getByText("Jerusalem Forest")).toBeInTheDocument();
-    expect(screen.getByText("Fire danger: Very High")).toBeInTheDocument();
-    expect(screen.getByText("FFWI score: 42.5")).toBeInTheDocument();
+    expect(screen.getByText("Level: Very High")).toBeInTheDocument();
+    expect(screen.getByText("FFWI: 42.5")).toBeInTheDocument();
   });
 
-  it("labels the danger level 'Fire danger', never bare or ambiguous", () => {
+  it("labels the danger level 'Level', never bare or ambiguous", () => {
     render(<FireDangerLayer areas={[makeArea()]} />);
 
-    expect(screen.getByText("Fire danger: Very High")).toBeInTheDocument();
+    expect(screen.getByText("Level: Very High")).toBeInTheDocument();
   });
 
   it("renders VERY_HIGH human-readably as 'Very High'", () => {
     render(<FireDangerLayer areas={[makeArea({ assessment: { ...makeArea().assessment!, level: "very_high" } })]} />);
 
-    expect(screen.getByText("Fire danger: Very High")).toBeInTheDocument();
+    expect(screen.getByText("Level: Very High")).toBeInTheDocument();
   });
 
-  it("labels the persisted score 'FFWI score', never a bare/generic 'Score'", () => {
+  it("labels the persisted score 'FFWI', never a bare/generic 'Score'", () => {
     render(<FireDangerLayer areas={[makeArea()]} />);
 
-    expect(screen.getByText("FFWI score: 42.5")).toBeInTheDocument();
+    expect(screen.getByText("FFWI: 42.5")).toBeInTheDocument();
     expect(screen.queryByText(/^Score:/)).not.toBeInTheDocument();
     expect(screen.queryByText("Score: 42.5")).not.toBeInTheDocument();
   });
@@ -113,7 +113,7 @@ describe("FireDangerLayer", () => {
   it("shows the persisted score value unchanged - never recalculated", () => {
     render(<FireDangerLayer areas={[makeArea({ assessment: { ...makeArea().assessment!, score: 87.3 } })]} />);
 
-    expect(screen.getByText("FFWI score: 87.3")).toBeInTheDocument();
+    expect(screen.getByText("FFWI: 87.3")).toBeInTheDocument();
   });
 
   it("never labels the Fire Danger level as Severity - these are distinct domains", () => {
@@ -125,12 +125,40 @@ describe("FireDangerLayer", () => {
   it("gives the FFWI score a concise help affordance, not a paragraph of explanation", () => {
     render(<FireDangerLayer areas={[makeArea()]} />);
 
-    const scoreElement = screen.getByText("FFWI score: 42.5");
+    const scoreElement = screen.getByText("FFWI: 42.5");
     expect(scoreElement).toHaveAttribute(
       "title",
       "Fire-weather danger score used to determine the Fire Danger level.",
     );
   });
+
+  // -------------------------------------------------------------------------
+  // Popup identity + FFWI consistency across all levels (Parts 3/5)
+  // -------------------------------------------------------------------------
+
+  it('includes an explicit "Fire Danger Assessment" label, distinguishing it from a FireEvent popup', () => {
+    render(<FireDangerLayer areas={[makeArea()]} />);
+
+    expect(screen.getByText("Fire Danger Assessment")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["low", "Low"],
+    ["high", "High"],
+    ["extreme", "Extreme"],
+  ] as const)(
+    "shows FFWI for level=%s just like every other level (never hidden by level)",
+    (level, expectedLabel) => {
+      render(
+        <FireDangerLayer
+          areas={[makeArea({ assessment: { ...makeArea().assessment!, level, score: 12.5 } })]}
+        />,
+      );
+
+      expect(screen.getByText(`Level: ${expectedLabel}`)).toBeInTheDocument();
+      expect(screen.getByText("FFWI: 12.5")).toBeInTheDocument();
+    },
+  );
 
   it("shows 'No assessment yet' for a known area with a null assessment", () => {
     render(<FireDangerLayer areas={[makeArea({ assessment: null })]} />);

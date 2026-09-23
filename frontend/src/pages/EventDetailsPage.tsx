@@ -37,6 +37,13 @@ const DANGER_LEVEL_LABEL: Record<NonNullable<DangerAssessment["level"]>, string>
   extreme: "Extreme",
 };
 
+// ml_assessment.model_score is a model-estimated score from the
+// synthetic-trained Logistic Regression V3 classifier, not a calibrated
+// real-world probability of wildfire occurrence - see
+// backend/docs/fire_detection_runtime_ml.md, "Probability interpretation".
+const AI_MODEL_SCORE_HELP_TEXT = "Experimental score produced by the Fire Detection ML model.";
+const AI_MODEL_SCORE_UNAVAILABLE_LABEL = "Unavailable";
+
 const SPREAD_STATUS_LABEL: Record<SpreadPrediction["status"], string> = {
   valid: "Valid",
   insufficient_data: "Insufficient data",
@@ -202,6 +209,7 @@ export function EventDetailsPage() {
   const {
     fire_event: fireEvent,
     severity,
+    ml_assessment: mlAssessment,
     danger,
     detection_evidence: detectionEvidence,
     spread_predictions: spreadPredictions,
@@ -209,7 +217,19 @@ export function EventDetailsPage() {
     station_summaries: stationSummaries,
     current_response_plan: currentPlan,
   } = data;
-  const confidencePercent = Math.round(fireEvent.detection_confidence * 100);
+  // The deterministic rule-based detection score. `ml_assessment.rule_confidence`
+  // (when a row exists) and `fire_event.detection_confidence` are the same
+  // rule result in SHADOW mode (FireEvent.detection_confidence is always the
+  // rule decision's own confidence) - this only prefers the ML-assessment
+  // copy when present, it never changes which value is authoritative.
+  const ruleScore = (mlAssessment?.rule_confidence ?? fireEvent.detection_confidence).toFixed(2);
+  // AI Model Score: omitted entirely when there is no ml_assessment row at
+  // all (legacy FireEvent, or RULE_ONLY mode); "Unavailable" (never 0) when
+  // a row exists but the classifier could not produce a score.
+  const aiModelScore =
+    mlAssessment && mlAssessment.available && mlAssessment.model_score !== null
+      ? mlAssessment.model_score.toFixed(2)
+      : AI_MODEL_SCORE_UNAVAILABLE_LABEL;
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
   // Title: the event's persisted location name (news evidence), else a place
   // reverse-geocoded from its coordinates, else a generic title with the id.
@@ -288,9 +308,15 @@ export function EventDetailsPage() {
                 </dd>
               </div>
               <div className="event-details-page__fact">
-                <dt>Confidence</dt>
-                <dd>{confidencePercent}%</dd>
+                <dt>Rule Score</dt>
+                <dd>{ruleScore}</dd>
               </div>
+              {mlAssessment ? (
+                <div className="event-details-page__fact">
+                  <dt title={AI_MODEL_SCORE_HELP_TEXT}>AI Model Score</dt>
+                  <dd>{aiModelScore}</dd>
+                </div>
+              ) : null}
             </dl>
           </section>
 

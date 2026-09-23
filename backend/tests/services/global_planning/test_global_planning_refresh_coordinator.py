@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from src.models.global_planning_run_event_status import GlobalPlanningRunEventStatus
+from src.services.global_planning.global_planning_input_unstable import GlobalPlanningInputUnstable
 from src.services.global_planning.global_planning_refresh_coordinator import (
     GlobalPlanningRefreshCoordinator,
     GlobalPlanningRefreshStatus,
@@ -62,11 +64,26 @@ class _FakeGlobalPlanningRunRepository:
         return None
 
 
-class _FakeInputBuilder:
-    def __init__(self):
-        self.calls = 0
+class _FakeBundle:
+    """Duck-typed stand-in for GlobalPlanningPreRoutingBundle - the
+    coordinator only reads `.pre_routing_signature` off it directly and
+    otherwise passes it straight through to build(precomputed=...)."""
 
-    def build(self, *, global_planning_run_id, as_of):
+    def __init__(self, pre_routing_signature="sig"):
+        self.pre_routing_signature = pre_routing_signature
+
+
+class _FakeInputBuilder:
+    def __init__(self, pre_routing_signature="sig"):
+        self.calls = 0
+        self.precheck_calls = 0
+        self._pre_routing_signature = pre_routing_signature
+
+    def compute_pre_routing_bundle(self, *, global_planning_run_id, as_of):
+        self.precheck_calls += 1
+        return _FakeBundle(self._pre_routing_signature)
+
+    def build(self, *, global_planning_run_id, as_of, precomputed=None):
         self.calls += 1
 
         class _FakeInput:
@@ -98,6 +115,7 @@ class _FakeOptimizationService:
             actions = ()
             assignment_changes = ()
             shortage = None
+            event_results = ()
 
         return _FakeResult()
 
@@ -194,3 +212,286 @@ def test_invalid_as_of_rejected():
     coordinator = _make_coordinator(((1,),))
     with pytest.raises(ValueError):
         coordinator.refresh(trigger="manual", as_of=datetime(2026, 1, 1))
+
+
+# --- run-status regression tests: a run must never stay stuck RUNNING ----
+#
+# Root cause this section guards against: previously, only
+# GlobalPlanningInputUnstable raised from input_builder.build() was caught
+# and turned into a FAILED run. Any other exception from build() (e.g. the
+# road-network bbox query's PostgreSQL parameter-limit error) propagated
+# straight out of refresh(), leaving the just-created GlobalPlanningRun row
+# stuck at RUNNING forever, since complete_run() was never reached.
+
+
+class _AlwaysSucceedsActivationService:
+    """Every activate() call succeeds with an empty result."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def activate(self, *, global_planning_input, global_optimization_result, as_of, run_history=None):
+        self.calls += 1
+
+        class _FakeActivation:
+            response_plan_ids_by_event = {}
+
+        return _FakeActivation()
+
+
+class _FailingInputBuilder:
+    """Simulates an unexpected, non-retryable failure inside input
+    building - e.g. the road-network bbox query exceeding PostgreSQL's
+    parameter limit. Not a GlobalPlanningInputUnstable - a genuine defect
+    or infrastructure error that must still fail the run, not retry it."""
+
+    def __init__(self, exception: Exception):
+        self._exception = exception
+        self.calls = 0
+
+    def compute_pre_routing_bundle(self, *, global_planning_run_id, as_of):
+        return _FakeBundle("sig-failing")
+
+    def build(self, *, global_planning_run_id, as_of, precomputed=None):
+        self.calls += 1
+        raise self._exception
+
+
+def test_successful_planning_activates_and_does_not_mark_run_failed():
+    run_repository = _FakeGlobalPlanningRunRepository()
+    activation_service = _AlwaysSucceedsActivationService()
+    coordinator = _make_coordinator(((1,),), activation_service=activation_service, run_repository=run_repository)
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert activation_service.calls == 1
+    # complete_run(FAILED) must never have been called for a successful cycle;
+    # the ACTIVATED path's own COMPLETED/PARTIAL status is activate()'s
+    # responsibility (see run_history docstring), not the coordinator's.
+    assert run_repository.completed == {}
+
+
+def test_unexpected_planning_exception_marks_run_failed_and_reraises_original():
+    """The core regression test: an unexpected exception raised out of
+    input building (standing in for the road-network parameter-limit
+    error) must mark the run FAILED before propagating, and must not be
+    swallowed - the caller still sees the original exception."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+    original_exception = RuntimeError("simulated road-network parameter-limit failure")
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,),)),
+        global_planning_run_repository=run_repository,
+        input_builder=_FailingInputBuilder(original_exception),
+        optimization_service=_FakeOptimizationService(),
+        activation_service=_AlwaysStaleActivationService(),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated road-network parameter-limit failure"):
+        coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert len(run_repository.created_runs) == 1
+    run_id = run_repository.created_runs[0]
+    # The run must have been finalized (not left absent from `completed`,
+    # which stands in here for "still RUNNING") and specifically FAILED.
+    assert run_id in run_repository.completed
+    assert run_repository.completed[run_id].value == "failed"
+
+
+def test_unexpected_exception_from_optimize_marks_run_failed_and_reraises():
+    """Same guarantee, but the unexpected exception comes from the
+    optimization step rather than input building - the safety net covers
+    the whole cycle, not just build()."""
+
+    class _FailingOptimizationService:
+        def optimize(self, *args, **kwargs):
+            raise RuntimeError("simulated GA failure")
+
+    run_repository = _FakeGlobalPlanningRunRepository()
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,),)),
+        global_planning_run_repository=run_repository,
+        input_builder=_FakeInputBuilder(),
+        optimization_service=_FailingOptimizationService(),
+        activation_service=_AlwaysStaleActivationService(),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated GA failure"):
+        coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    run_id = run_repository.created_runs[0]
+    assert run_repository.completed[run_id].value == "failed"
+
+
+def test_input_unstable_exception_still_returns_none_and_retries_as_before():
+    """The refactor that added a broad safety-net except clause must not
+    change the existing, specifically-handled GlobalPlanningInputUnstable
+    retry behavior: it still returns None (triggering the bounded-retry
+    loop) rather than propagating."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+
+    class _AlwaysUnstableInputBuilder:
+        def __init__(self):
+            self.calls = 0
+
+        def compute_pre_routing_bundle(self, *, global_planning_run_id, as_of):
+            return _FakeBundle("sig-unstable")
+
+        def build(self, *, global_planning_run_id, as_of, precomputed=None):
+            self.calls += 1
+            raise GlobalPlanningInputUnstable(global_planning_run_id=global_planning_run_id, attempts=3)
+
+    input_builder = _AlwaysUnstableInputBuilder()
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,), (1,), (1,))),
+        global_planning_run_repository=run_repository,
+        input_builder=input_builder,
+        optimization_service=_FakeOptimizationService(),
+        activation_service=_AlwaysStaleActivationService(),
+    )
+
+    result = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert result.status is GlobalPlanningRefreshStatus.STALE_RETRY_EXHAUSTED
+    assert len(run_repository.created_runs) == MAX_GLOBAL_STALE_RETRIES + 1
+    for run_id in run_repository.created_runs:
+        assert run_repository.completed[run_id].value == "failed"
+
+
+# --- cheap NO_OP precheck regression tests (Optimization 3) --------------
+#
+# Root cause this section guards against: profiling showed NO_OP cycles
+# paying for the full road-network load + route matrix + Dijkstra before
+# the existing fingerprint comparison ever got a chance to say "nothing
+# changed." _run_one_cycle now asks the input builder for a cheap
+# pre-routing signature FIRST and compares it against this coordinator
+# instance's own settled baseline before ever calling build().
+
+
+def test_identical_semantic_input_produces_cheap_no_op_without_full_build():
+    run_repository = _FakeGlobalPlanningRunRepository()
+    activation_service = _AlwaysSucceedsActivationService()
+    optimization_service = _FakeOptimizationService()
+    input_builder = _FakeInputBuilder(pre_routing_signature="same-signature")
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,), (1,))),
+        global_planning_run_repository=run_repository,
+        input_builder=input_builder,
+        optimization_service=optimization_service,
+        activation_service=activation_service,
+    )
+
+    first = coordinator.refresh(trigger="manual", as_of=AS_OF)
+    second = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert first.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert second.status is GlobalPlanningRefreshStatus.NO_OP
+    # build() only ran for the settling (first) cycle - the second cycle's
+    # cheap precheck alone decided NO_OP.
+    assert input_builder.calls == 1
+    assert input_builder.precheck_calls == 2
+    # Neither optimize() nor activate() ran a second time - proof the cheap
+    # path never touches road-network/route-matrix/Dijkstra/GA.
+    assert activation_service.calls == 1
+    assert optimization_service.calls == 1
+    run_id_2 = run_repository.created_runs[1]
+    assert run_repository.completed[run_id_2].value == "completed"
+    assert (run_id_2, 1, GlobalPlanningRunEventStatus.NO_OP) in run_repository.member_results
+
+
+def test_changed_semantic_input_triggers_full_planning_not_cheap_no_op():
+    """Not a heuristic: a genuinely different signature must always fall
+    through to a full build, never be classified NO_OP."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+    activation_service = _AlwaysSucceedsActivationService()
+    input_builder = _FakeInputBuilder(pre_routing_signature="sig-a")
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,), (1,))),
+        global_planning_run_repository=run_repository,
+        input_builder=input_builder,
+        optimization_service=_FakeOptimizationService(),
+        activation_service=activation_service,
+    )
+
+    first = coordinator.refresh(trigger="manual", as_of=AS_OF)
+    input_builder._pre_routing_signature = "sig-b"  # simulate a real semantic change
+    second = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert first.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert second.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert input_builder.calls == 2
+    assert activation_service.calls == 2
+
+
+def test_failed_cycle_does_not_establish_a_cheap_no_op_baseline():
+    """A cycle that never reaches a genuine terminal success must not seed
+    the cheap precheck - a later cycle with the identical signature must
+    still perform a full build."""
+    run_repository = _FakeGlobalPlanningRunRepository()
+
+    class _FailsFirstRefreshActivationService:
+        def __init__(self):
+            self.calls = 0
+
+        def activate(self, *, global_planning_input, global_optimization_result, as_of, run_history=None):
+            self.calls += 1
+            if self.calls <= MAX_GLOBAL_STALE_RETRIES + 1:
+                raise GlobalPlanningStaleInput("first refresh always fails")
+
+            class _FakeActivation:
+                response_plan_ids_by_event = {}
+
+            return _FakeActivation()
+
+    activation_service = _FailsFirstRefreshActivationService()
+    input_builder = _FakeInputBuilder(pre_routing_signature="sig-x")
+    coordinator = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,),) * 10),
+        global_planning_run_repository=run_repository,
+        input_builder=input_builder,
+        optimization_service=_FakeOptimizationService(),
+        activation_service=activation_service,
+    )
+
+    first = coordinator.refresh(trigger="manual", as_of=AS_OF)
+    assert first.status is GlobalPlanningRefreshStatus.STALE_RETRY_EXHAUSTED
+
+    second = coordinator.refresh(trigger="manual", as_of=AS_OF)
+
+    assert second.status is GlobalPlanningRefreshStatus.ACTIVATED
+    # Every attempt across both refresh() calls did a real build() - the
+    # failed first refresh (despite sharing the identical "sig-x" signature)
+    # never short-circuited the later successful one into a cheap NO_OP.
+    # First refresh() exhausts MAX_GLOBAL_STALE_RETRIES+1 attempts, each a
+    # real build(); the second refresh() succeeds on its first attempt.
+    assert input_builder.calls == (MAX_GLOBAL_STALE_RETRIES + 1) + 1
+
+
+def test_settled_state_does_not_leak_across_coordinator_instances():
+    """Instance-scoped settled state (never module/global): a second,
+    independently-constructed coordinator must not inherit another
+    coordinator's settled baseline, even with the identical signature."""
+    run_repository_1 = _FakeGlobalPlanningRunRepository()
+    coordinator_1 = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,),)),
+        global_planning_run_repository=run_repository_1,
+        input_builder=_FakeInputBuilder(pre_routing_signature="shared-sig"),
+        optimization_service=_FakeOptimizationService(),
+        activation_service=_AlwaysSucceedsActivationService(),
+    )
+    first = coordinator_1.refresh(trigger="manual", as_of=AS_OF)
+    assert first.status is GlobalPlanningRefreshStatus.ACTIVATED
+
+    run_repository_2 = _FakeGlobalPlanningRunRepository()
+    activation_service_2 = _AlwaysSucceedsActivationService()
+    coordinator_2 = GlobalPlanningRefreshCoordinator(
+        fire_event_repository=_FakeFireEventRepository(((1,),)),
+        global_planning_run_repository=run_repository_2,
+        input_builder=_FakeInputBuilder(pre_routing_signature="shared-sig"),
+        optimization_service=_FakeOptimizationService(),
+        activation_service=activation_service_2,
+    )
+    second = coordinator_2.refresh(trigger="manual", as_of=AS_OF)
+
+    assert second.status is GlobalPlanningRefreshStatus.ACTIVATED
+    assert activation_service_2.calls == 1

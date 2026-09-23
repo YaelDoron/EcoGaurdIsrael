@@ -9,17 +9,34 @@ import os
 import feedparser
 import requests
 
+from src.models.news_text_analysis import NewsTextAnalysis
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
+
 logger = logging.getLogger(__name__)
 
-# The prompt template for the LLM to extract a location from the article text.
-_LOCATION_PROMPT_TEMPLATE = """\
-You are a news analyst parsing Hebrew news articles to extract a single geographical location (city, settlement, forest, mountain, or region in Israel) where the described wildfire event is taking place.
+# The prompt template for one structured LLM analysis pass: location + how
+# strongly the article's own text supports an active wildfire. One call
+# covers both, rather than a separate call per field.
+_ANALYSIS_PROMPT_TEMPLATE = """\
+You are a news analyst reading Hebrew news articles about possible wildfires in Israel.
+
+Judge ONLY the supplied title and summary below. Do not use outside knowledge about real events, and do not assume a wildfire is actually happening just because a wildfire-related word appears in the text.
+
+Task 1 - location: extract a single geographical location (city, settlement, forest, mountain, or region in Israel) where the described event is taking place, if any.
+- Clean Hebrew prepositions from the beginning of the location name (e.g., "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
+- If no specific location is mentioned, use null.
+
+Task 2 - wildfireSignalStrength: classify how strongly the ARTICLE TEXT ITSELF claims an active wildfire is occurring right now. Use exactly one of these four values:
+- "none": the text does not actually provide meaningful evidence of an active wildfire (e.g. a retrospective article, a fire-prevention article, an unrelated use of a fire-related word, or an explicit report that a suspected fire was false).
+- "weak": possible or indirect evidence only (e.g. smoke reported, a rumor, an unverified social-media report, "suspected" flames).
+- "moderate": the text directly reports an active wildfire, but the information is still preliminary or indirect.
+- "strong": the text explicitly describes an active wildfire with strong evidence, such as visible flames/active burning, a firefighting response, an evacuation due to an active fire, or an explicit official/emergency-service statement within the text.
+
+Distinguish smoke, rumor, or suspicion ("weak") from explicit, current active-fire reporting ("moderate"/"strong"). A retrospective, preventive, or explicitly-false-alarm article is "none" even if it uses wildfire-related words.
 
 Rules:
 - Return ONLY a valid JSON object, with no extra text, no markdown, and no explanations.
-- The format must be exactly: {{"locationName": "<location_name>"}}
-- Clean Hebrew prepositions from the beginning of the location name (e.g., "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
-- If no specific location is mentioned in the text, return: {{"locationName": null}}
+- The format must be exactly: {{"locationName": "<location_name_or_null>", "wildfireSignalStrength": "<none|weak|moderate|strong>"}}
 
 Title: {title}
 Summary: {summary}
@@ -50,10 +67,16 @@ class TextProcessor:
         text = f"{title} {summary}"
         return any(keyword in text for keyword in self.keywords)
 
-    def extract_location(self, title: str, summary: str) -> str | None:
-        """Ask the LLM for the location mentioned in the article. Returns None on any failure
-        or when no location is present, never raises."""
-        prompt = _LOCATION_PROMPT_TEMPLATE.format(title=title, summary=summary)
+    def analyze(self, title: str, summary: str) -> NewsTextAnalysis:
+        """One LLM call returning location + wildfire signal strength for one article.
+
+        Never raises. On ANY failure (network/API error, malformed JSON, an
+        unrecognized wildfireSignalStrength value) returns
+        NewsTextAnalysis(location_name=None, wildfire_signal_strength=None) -
+        an explicit "analysis unavailable" state. It never fabricates NONE,
+        which has the different meaning "analyzed, no signal found".
+        """
+        prompt = _ANALYSIS_PROMPT_TEMPLATE.format(title=title, summary=summary)
         try:
             if self.provider == "groq":
                 raw_content = self._call_groq(prompt)
@@ -61,10 +84,10 @@ class TextProcessor:
                 raw_content = self._call_gemini(prompt)
             else:
                 raise ValueError(f"Unsupported llm.provider in config: '{self.provider}'")
-            return self._parse_location(raw_content)
+            return self._parse_analysis(raw_content)
         except Exception:
-            logger.exception("LLM location extraction failed for title: %r", title[:80])
-            return None
+            logger.exception("LLM structured news analysis failed for title: %r", title[:80])
+            return NewsTextAnalysis(location_name=None, wildfire_signal_strength=None)
 
     # Call the Groq API (or Gemini) to extract location information from the article.
     def _call_groq(self, prompt: str) -> str:
@@ -103,9 +126,11 @@ class TextProcessor:
         response.raise_for_status()
         return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-    # Parse the raw LLM response into a location name. Returns None on any failure or if no location is found.
+    # Parse the raw LLM response into a NewsTextAnalysis. Raises on malformed JSON, a
+    # non-string locationName, or a missing/unrecognized wildfireSignalStrength -
+    # analyze() catches this and converts it to the "unavailable" state.
     @staticmethod
-    def _parse_location(raw_content: str) -> str | None:
+    def _parse_analysis(raw_content: str) -> NewsTextAnalysis:
         content = raw_content.strip()
         if content.startswith("```"):
             content = content.strip("`")
@@ -114,11 +139,22 @@ class TextProcessor:
             content = content.strip()
 
         data = json.loads(content)
+
         location = data.get("locationName")
-        if location is None:
-            return None
-        location = location.strip()
-        return location or None
+        if location is not None:
+            if not isinstance(location, str):
+                raise ValueError(f"locationName must be a string or null, got {location!r}")
+            location = location.strip() or None
+
+        raw_strength = data.get("wildfireSignalStrength")
+        if not isinstance(raw_strength, str):
+            raise ValueError(f"wildfireSignalStrength must be a string, got {raw_strength!r}")
+        try:
+            strength = NewsWildfireSignalStrength(raw_strength.strip().lower())
+        except ValueError:
+            raise ValueError(f"Unsupported wildfireSignalStrength value: {raw_strength!r}") from None
+
+        return NewsTextAnalysis(location_name=location, wildfire_signal_strength=strength)
 
 # Initialization of the RSSFetcher is handled in the NewsMonitoringAgent constructor.
 class RSSFetcher:

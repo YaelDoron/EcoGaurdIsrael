@@ -12,6 +12,7 @@ import ast
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
@@ -19,6 +20,7 @@ from src.api.dependencies import get_active_fire_events_service
 from src.api.routers.fire_events import fire_events_router
 from src.database.connection import DatabaseConfigurationError
 from src.models.active_fire_events import (
+    ActiveFireEventMLSummary,
     ActiveFireEventSeveritySummary,
     ActiveFireEventsResult,
     ActiveFireEventSummary,
@@ -119,6 +121,7 @@ def test_happy_path_returns_suspected_and_confirmed_events():
         "created_at": "2026-09-17T13:28:00Z",
         "severity": None,
         "location_name": None,
+        "ml_summary": None,
     }
     assert body["items"][1]["fire_event_id"] == 2
     assert body["items"][1]["status"] == "confirmed"
@@ -158,6 +161,59 @@ def test_missing_severity_serializes_as_null():
     response = client.get(ENDPOINT)
 
     assert response.json()["items"][0]["severity"] is None
+
+
+# ---------------------------------------------------------------------------
+# ML summary serialization (dashboard Active Fire cards, ML Task 7)
+# ---------------------------------------------------------------------------
+
+
+def test_ml_summary_available_serializes_correctly():
+    event = make_event(ml_summary=ActiveFireEventMLSummary(available=True, model_score=0.9933510680894274))
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+    client = client_for(FakeActiveFireEventsService(result))
+
+    body = client.get(ENDPOINT).json()
+
+    ml_summary = body["items"][0]["ml_summary"]
+    assert ml_summary == {"available": True, "model_score": 0.9933510680894274}
+
+
+def test_ml_summary_missing_serializes_as_null():
+    event = make_event(ml_summary=None)
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+    client = client_for(FakeActiveFireEventsService(result))
+
+    body = client.get(ENDPOINT).json()
+
+    assert body["items"][0]["ml_summary"] is None
+
+
+def test_ml_summary_unavailable_never_substitutes_zero():
+    event = make_event(ml_summary=ActiveFireEventMLSummary(available=False, model_score=None))
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+    client = client_for(FakeActiveFireEventsService(result))
+
+    body = client.get(ENDPOINT).json()
+
+    ml_summary = body["items"][0]["ml_summary"]
+    assert ml_summary["available"] is False
+    assert ml_summary["model_score"] is None
+
+
+def test_several_active_events_each_keep_their_own_ml_summary():
+    first = make_event(fire_event_id=1, ml_summary=ActiveFireEventMLSummary(available=True, model_score=0.2))
+    second = make_event(fire_event_id=2, ml_summary=ActiveFireEventMLSummary(available=True, model_score=0.8))
+    third = make_event(fire_event_id=3, ml_summary=None)
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(first, second, third))
+    client = client_for(FakeActiveFireEventsService(result))
+
+    body = client.get(ENDPOINT).json()
+
+    by_id = {item["fire_event_id"]: item for item in body["items"]}
+    assert by_id[1]["ml_summary"]["model_score"] == pytest.approx(0.2)
+    assert by_id[2]["ml_summary"]["model_score"] == pytest.approx(0.8)
+    assert by_id[3]["ml_summary"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +318,7 @@ def test_response_contains_only_defined_dto_fields():
         "created_at",
         "severity",
         "location_name",
+        "ml_summary",
     }
     assert set(body["items"][0]["severity"].keys()) == {
         "assessment_id",

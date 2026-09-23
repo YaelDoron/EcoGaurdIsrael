@@ -87,6 +87,20 @@ def make_builder() -> GlobalRouteMatrixBuilder:
     return GlobalRouteMatrixBuilder(node_mapping_service=NodeMappingService(), dijkstra_calculator=DijkstraCalculator())
 
 
+class _CountingDijkstraCalculator(DijkstraCalculator):
+    """Spies on build_graph() calls (Optimization 1) so a test can assert
+    the adjacency list is built exactly once per route-matrix build,
+    regardless of how many (resource, target) pairs it searches."""
+
+    def __init__(self):
+        super().__init__()
+        self.build_graph_calls = 0
+
+    def build_graph(self, edges):
+        self.build_graph_calls += 1
+        return super().build_graph(edges)
+
+
 # ---------------------------------------------------------------------------
 # Task 16 - the critical cross-event matrix test
 # ---------------------------------------------------------------------------
@@ -232,3 +246,25 @@ def test_empty_targets_produces_empty_matrix():
 
     assert len(result.matrix) == 0
     assert result.dijkstra_call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Optimization 1 (performance pass) - one adjacency build per matrix build
+# ---------------------------------------------------------------------------
+
+
+def test_adjacency_graph_is_built_exactly_once_per_route_matrix_build():
+    counting_calculator = _CountingDijkstraCalculator()
+    builder = GlobalRouteMatrixBuilder(
+        node_mapping_service=NodeMappingService(), dijkstra_calculator=counting_calculator
+    )
+    resource_a = _resource("R1", "STATION-A", 32.70, 35.00)
+    resource_b = _resource("R2", "STATION-B", 32.90, 35.20)
+    target_a1 = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
+    target_b1 = _target(fire_event_id=2, response_target_id=201, lat=32.91, lon=35.21)
+    nodes, edges = _nodes_and_edges()
+
+    result = builder.build((resource_a, resource_b), (target_a1, target_b1), nodes, edges)
+
+    assert counting_calculator.build_graph_calls == 1  # once for the whole matrix, not once per pair
+    assert result.dijkstra_call_count == 4  # 2 resources x 2 targets, all distinct (source, target) pairs

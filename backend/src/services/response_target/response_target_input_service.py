@@ -46,13 +46,43 @@ class ResponseTargetInputService:
         self._fire_spread_prediction_repository = fire_spread_prediction_repository or FireSpreadPredictionRepository()
 
     def prepare_input(self, fire_event_id: int, as_of: datetime) -> ResponseTargetInputResult:
-        """Prepare ResponseTargetInput for one FireEvent at a timezone-aware instant."""
+        """Prepare ResponseTargetInput for one FireEvent at a timezone-aware instant.
+
+        Fetches the FireEvent by id, then delegates to prepare_input_for_event()
+        - unchanged behavior/signature for existing callers.
+        """
         _validate_fire_event_id(fire_event_id)
         _validate_aware_datetime("as_of", as_of)
 
         stored_event = self._fire_event_repository.get_by_id(fire_event_id)
         if stored_event is None:
             raise ValueError(f"FireEvent {fire_event_id!r} was not found.")
+        return self.prepare_input_for_event(stored_event, as_of)
+
+    def prepare_input_for_event(
+        self,
+        stored_event,
+        as_of: datetime,
+        *,
+        resolved_severity=None,
+        resolved_spread_by_horizon: dict[int, StoredFireSpreadPredictionWithCells | None] | None = None,
+    ) -> ResponseTargetInputResult:
+        """Same preparation as prepare_input(), but for an ALREADY-LOADED
+        StoredFireEvent, and optionally ALREADY-RESOLVED severity/spread
+        results (performance pass: avoids a redundant FireEvent fetch, and
+        - when supplied - the "latest severity"/"latest spread per horizon"
+        repository reads, since OperationalRefreshOrchestrator has just
+        established these authoritative results earlier in the same cycle).
+
+        `resolved_severity=None` and `resolved_spread_by_horizon=None` (the
+        defaults) fall back to repository reads, exactly like prepare_input().
+        A horizon absent from `resolved_spread_by_horizon` also falls back
+        to a repository read for just that horizon - the internal caller is
+        expected to supply every requested horizon, but this stays correct
+        even if it only supplies a subset.
+        """
+        _validate_aware_datetime("as_of", as_of)
+        fire_event_id = stored_event.id
 
         if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
             return ResponseTargetInputResult(
@@ -63,8 +93,8 @@ class ResponseTargetInputService:
         if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
             raise ValueError(f"Unsupported FireEvent status for response targets: {stored_event.event.status!r}")
 
-        severity_score = self._select_severity_score(fire_event_id, as_of)
-        predicted_candidates = self._select_predicted_candidates(fire_event_id, as_of)
+        severity_score = self._select_severity_score(fire_event_id, as_of, resolved_severity)
+        predicted_candidates = self._select_predicted_candidates(fire_event_id, as_of, resolved_spread_by_horizon)
 
         return ResponseTargetInputResult(
             status=ResponseTargetInputStatus.READY,
@@ -78,10 +108,11 @@ class ResponseTargetInputService:
             fire_event_id=fire_event_id,
         )
 
-    def _select_severity_score(self, fire_event_id: int, as_of: datetime) -> float | None:
-        latest_assessment = self._fire_severity_assessment_repository.get_latest_for_event_as_of(
-            fire_event_id,
-            as_of,
+    def _select_severity_score(self, fire_event_id: int, as_of: datetime, resolved_severity=None) -> float | None:
+        latest_assessment = (
+            resolved_severity
+            if resolved_severity is not None
+            else self._fire_severity_assessment_repository.get_latest_for_event_as_of(fire_event_id, as_of)
         )
         if latest_assessment is None:
             return None
@@ -98,13 +129,27 @@ class ResponseTargetInputService:
         self,
         fire_event_id: int,
         as_of: datetime,
+        resolved_spread_by_horizon: dict[int, StoredFireSpreadPredictionWithCells | None] | None = None,
     ) -> tuple[PredictedRiskTargetCandidate, ...]:
+        resolved_spread_by_horizon = resolved_spread_by_horizon or {}
+        missing_horizons = tuple(h for h in SUPPORTED_HORIZON_MINUTES if h not in resolved_spread_by_horizon)
+        # Performance pass: any horizon not already resolved by the caller is
+        # fetched in ONE batched call (window-function "latest per horizon"),
+        # not one get_latest_for_event_and_horizon_as_of() call per horizon.
+        fetched_by_horizon = (
+            self._fire_spread_prediction_repository.get_latest_for_event_and_horizons_as_of(
+                fire_event_id, missing_horizons, as_of
+            )
+            if missing_horizons
+            else {}
+        )
+
         candidates: list[PredictedRiskTargetCandidate] = []
         for horizon_minutes in SUPPORTED_HORIZON_MINUTES:
-            stored_prediction = self._fire_spread_prediction_repository.get_latest_for_event_and_horizon_as_of(
-                fire_event_id=fire_event_id,
-                horizon_minutes=horizon_minutes,
-                as_of=as_of,
+            stored_prediction = (
+                resolved_spread_by_horizon[horizon_minutes]
+                if horizon_minutes in resolved_spread_by_horizon
+                else fetched_by_horizon.get(horizon_minutes)
             )
             if stored_prediction is None:
                 continue

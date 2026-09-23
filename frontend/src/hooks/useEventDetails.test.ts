@@ -27,6 +27,7 @@ function makeResult(overrides: Partial<EventDetailsResult> = {}): EventDetailsRe
       methodology_version: "1.0",
     },
     severity: null,
+    ml_assessment: null,
     danger: null,
     detection_evidence: { satellite: [], news: [] },
     spread_predictions: [],

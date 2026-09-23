@@ -6,6 +6,8 @@ from unittest.mock import Mock
 
 from src.agents.collection.news_monitoring_agent import PROJECT_ROOT, NewsMonitoringAgent
 from src.models.fire_report import WildfireReport
+from src.models.news_text_analysis import NewsTextAnalysis
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 from src.repositories.exceptions import NewsRepositoryError
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult
 
@@ -46,7 +48,10 @@ def make_agent(
 
 def _wire_success(text_processor: Mock, geocoder: Mock, news_repository: Mock) -> None:
     text_processor.is_relevant.return_value = True
-    text_processor.extract_location.return_value = "Haifa"
+    text_processor.analyze.return_value = NewsTextAnalysis(
+        location_name="Haifa",
+        wildfire_signal_strength=NewsWildfireSignalStrength.STRONG,
+    )
     geocoder.geocode.return_value = (32.794, 34.9896)
     news_repository.exists_by_source_url.return_value = False
     news_repository.save_report.side_effect = lambda report: SaveNewsReportResult(
@@ -112,6 +117,25 @@ def test_valid_relevant_article_is_saved():
     assert report.published_at == EXPECTED_PUBLISHED_AT
     assert isinstance(report.fetched_at, datetime)
     assert report.fetched_at.tzinfo is not None
+    assert report.wildfire_signal_strength is NewsWildfireSignalStrength.STRONG
+
+
+def test_unavailable_analysis_saves_report_with_unknown_signal():
+    rss_fetcher = Mock()
+    text_processor = Mock()
+    geocoder = Mock()
+    news_repository = Mock(spec=NewsRepository)
+    rss_fetcher.fetch_all.return_value = [make_entry()]
+    _wire_success(text_processor, geocoder, news_repository)
+    text_processor.analyze.return_value = NewsTextAnalysis(location_name=None, wildfire_signal_strength=None)
+    geocoder.geocode.return_value = (None, None)
+    agent = make_agent(rss_fetcher, text_processor, geocoder, news_repository)
+
+    saved_count = agent.run_once()
+
+    assert saved_count == 1
+    report = news_repository.save_report.call_args.args[0]
+    assert report.wildfire_signal_strength is None
 
 
 def test_irrelevant_article_is_not_saved():
@@ -128,7 +152,7 @@ def test_irrelevant_article_is_not_saved():
     assert saved_count == 0
     news_repository.exists_by_source_url.assert_not_called()
     news_repository.save_report.assert_not_called()
-    text_processor.extract_location.assert_not_called()
+    text_processor.analyze.assert_not_called()
     geocoder.geocode.assert_not_called()
 
 
@@ -146,7 +170,7 @@ def test_duplicate_article_is_skipped_before_external_processing():
 
     assert saved_count == 0
     news_repository.save_report.assert_not_called()
-    text_processor.extract_location.assert_not_called()
+    text_processor.analyze.assert_not_called()
     geocoder.geocode.assert_not_called()
 
 
@@ -176,7 +200,10 @@ def test_missing_location_still_saves_report_with_null_coordinates():
     news_repository = Mock(spec=NewsRepository)
     rss_fetcher.fetch_all.return_value = [make_entry()]
     _wire_success(text_processor, geocoder, news_repository)
-    text_processor.extract_location.return_value = None
+    text_processor.analyze.return_value = NewsTextAnalysis(
+        location_name=None,
+        wildfire_signal_strength=NewsWildfireSignalStrength.WEAK,
+    )
     geocoder.geocode.return_value = (None, None)
     agent = make_agent(rss_fetcher, text_processor, geocoder, news_repository)
 

@@ -5,6 +5,7 @@ from src.services.operational_refresh.operational_refresh_policy import (
     SPREAD_REEVALUATION_TRIGGER_TYPES,
     requires_spread_reevaluation,
 )
+from src.services.operational_refresh.fire_severity_refresh_orchestrator import FireSeverityRefreshOrchestrator
 from src.services.operational_refresh.fire_spread_refresh_orchestrator import FireSpreadRefreshOrchestrator
 from src.services.operational_refresh.fire_spread_refresh_result import (
     FireSpreadRefreshHorizonResult,
@@ -24,6 +25,7 @@ from src.services.operational_refresh.resource_status_update_service import Reso
 
 __all__ = [
     "SPREAD_REEVALUATION_TRIGGER_TYPES",
+    "FireSeverityRefreshOrchestrator",
     "FireSpreadRefreshHorizonResult",
     "FireSpreadRefreshHorizonStatus",
     "FireSpreadRefreshOrchestrator",

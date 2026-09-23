@@ -28,6 +28,26 @@ export interface FireEventSummary {
   methodology_version: string;
 }
 
+/**
+ * The FireEvent's latest persisted runtime ML/decision trace (ML Task 6).
+ * Trimmed to the fields the existing Fire Detection display actually uses -
+ * see backend/src/api/schemas/event_details.py's `FireEventMLAssessmentResponse`
+ * for the full backend shape (also includes model_name/model_version/
+ * feature_schema_version/failure_reason/rule_status/updated_at).
+ *
+ * `model_score` is a model-estimated score from the synthetic-trained
+ * Logistic Regression V3 classifier - NOT a calibrated real-world
+ * probability of wildfire occurrence. Never label it "confidence" or
+ * "probability of fire" in the UI.
+ */
+export interface FireEventMLAssessment {
+  available: boolean;
+  mode: string;
+  rule_confidence: number;
+  model_score: number | null;
+  agreement: string;
+}
+
 export interface SeverityAssessment {
   assessment_id: number;
   status: FireSeverityAssessmentStatus;
@@ -172,6 +192,7 @@ export interface EventDetailsResult {
   as_of: string;
   fire_event: FireEventSummary;
   severity: SeverityAssessment | null;
+  ml_assessment: FireEventMLAssessment | null;
   danger: DangerAssessment | null;
   detection_evidence: DetectionEvidence;
   spread_predictions: SpreadPrediction[];

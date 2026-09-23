@@ -158,8 +158,20 @@ class PersistingSeverityAgent:
         self.satellite_ids_by_event[fire_event_id] = (satellite_hotspot_id,)
         self.score_by_event[fire_event_id] = score
 
-    def assess(self, fire_event_id: int, assessed_at: datetime):
+    def refresh(self, fire_event_id: int, assessed_at: datetime):
         self.calls.append((fire_event_id, assessed_at))
+        return self._persist(fire_event_id, assessed_at)
+
+    def refresh_for_event(self, stored_event, assessed_at: datetime):
+        """Same persistence as refresh(), but accepting an already-loaded
+        StoredFireEvent - matches the production FireSeverityRefreshOrchestrator's
+        `_for_event` overload that OperationalRefreshOrchestrator now calls
+        when it has already fetched the FireEvent once for the whole cycle."""
+        fire_event_id = stored_event.id
+        self.calls.append((fire_event_id, assessed_at))
+        return self._persist(fire_event_id, assessed_at)
+
+    def _persist(self, fire_event_id: int, assessed_at: datetime):
         weather_ids = self.weather_ids_by_event[fire_event_id]
         satellite_ids = self.satellite_ids_by_event[fire_event_id]
         score = self.score_by_event.get(fire_event_id, 70.0)
@@ -239,6 +251,13 @@ class CountingInputService:
         self.calls.append(horizon_minutes)
         return self.results[horizon_minutes]
 
+    def prepare_shared_context(self, fire_event_id: int, as_of: datetime):
+        return {"fire_event_id": fire_event_id, "as_of": as_of}
+
+    def build_input_for_horizon(self, shared_context, horizon_minutes: int) -> FireSpreadInputResult:
+        self.calls.append(horizon_minutes)
+        return self.results[horizon_minutes]
+
 
 @pytest.fixture
 def stack(sqlite_session_factory) -> AcceptanceStack:
@@ -263,7 +282,7 @@ def stack(sqlite_session_factory) -> AcceptanceStack:
         repository=targets,
     )
     orchestrator = OperationalRefreshOrchestrator(
-        severity_agent=severity_agent,
+        severity_refresh_orchestrator=severity_agent,
         spread_refresh_orchestrator=spread_refresh,
         response_target_agent=target_agent,
         resource_status_service=ResourceStatusUpdateService(resources),

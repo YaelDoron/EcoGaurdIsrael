@@ -14,9 +14,14 @@ from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from src.database.connection import get_session_factory
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_event_ml_assessment_db import FireEventMLAssessmentDB
 from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenceDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event import FireEvent
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
@@ -151,6 +156,80 @@ class FireEventRepository:
                 raise FireEventRepositoryError("FireEvent update failed.") from exc
 
             return self._to_stored_event(db_event, self._get_evidence_refs(session, fire_event_id))
+
+    def upsert_ml_assessment(self, fire_event_id: int, assessment: FireEventMLAssessment) -> FireEventMLAssessment:
+        """Insert or update the single ML/decision trace row for a FireEvent (Task 5).
+
+        One row per FireEvent - reevaluation overwrites it in place, it is
+        never a growing history log. Raises if the FireEvent does not exist.
+        """
+        self._validate_fire_event_id(fire_event_id)
+        if not isinstance(assessment, FireEventMLAssessment):
+            raise FireEventRepositoryError(f"assessment must be a FireEventMLAssessment, got {assessment!r}.")
+        if assessment.fire_event_id != fire_event_id:
+            raise FireEventRepositoryError("assessment.fire_event_id must match fire_event_id.")
+
+        with self._session_scope() as session:
+            if self._get_db_event(session, fire_event_id) is None:
+                raise FireEventRepositoryError(f"FireEvent {fire_event_id!r} was not found.")
+
+            db_assessment = self._get_db_ml_assessment(session, fire_event_id)
+            if db_assessment is None:
+                db_assessment = FireEventMLAssessmentDB(fire_event_id=fire_event_id)
+                session.add(db_assessment)
+
+            db_assessment.decision_mode = assessment.decision_mode.value
+            db_assessment.rule_status = assessment.rule_status.value
+            db_assessment.rule_confidence = assessment.rule_confidence
+            db_assessment.ml_available = assessment.ml_available
+            db_assessment.ml_probability = assessment.ml_probability
+            db_assessment.ml_model_name = assessment.ml_model_name
+            db_assessment.ml_model_version = assessment.ml_model_version
+            db_assessment.ml_feature_schema_version = assessment.ml_feature_schema_version
+            db_assessment.ml_failure_reason = assessment.ml_failure_reason
+            db_assessment.agreement = assessment.agreement.value
+            db_assessment.updated_at = assessment.updated_at
+
+            try:
+                session.flush()
+            except SQLAlchemyError as exc:
+                raise FireEventRepositoryError("FireEvent ML assessment upsert failed.") from exc
+
+            return self._to_domain_ml_assessment(db_assessment)
+
+    def get_ml_assessment(self, fire_event_id: int) -> FireEventMLAssessment | None:
+        """Return the FireEvent's latest ML/decision trace, or None if it was never evaluated with ML."""
+        self._validate_fire_event_id(fire_event_id)
+        with self._session_scope() as session:
+            db_assessment = self._get_db_ml_assessment(session, fire_event_id)
+            return self._to_domain_ml_assessment(db_assessment) if db_assessment is not None else None
+
+    def get_ml_assessments_for_events(self, fire_event_ids: Iterable[int]) -> dict[int, FireEventMLAssessment]:
+        """Return each event's ML/decision trace, batched in one query.
+
+        `fire_event_ml_assessments` already has one row per FireEvent (a
+        unique FK, upserted in place - see FireEventMLAssessmentDB), so this
+        is a plain `WHERE fire_event_id IN (...)`, not a "latest of many"
+        window-function query like FireSeverityAssessmentRepository's
+        get_latest_for_events - there is only ever one row per event to
+        begin with. Added to avoid one get_ml_assessment() call per event
+        when listing many active FireEvents (dashboard Active Fire cards).
+        FireEvent ids with no persisted assessment are simply absent from
+        the returned mapping - never a fabricated entry.
+        """
+        ids = self._normalize_fire_event_ids("fire_event_ids", tuple(fire_event_ids))
+        if not ids:
+            return {}
+        with self._session_scope() as session:
+            db_assessments = (
+                session.execute(select(FireEventMLAssessmentDB).where(FireEventMLAssessmentDB.fire_event_id.in_(ids)))
+                .scalars()
+                .all()
+            )
+            return {
+                db_assessment.fire_event_id: self._to_domain_ml_assessment(db_assessment)
+                for db_assessment in db_assessments
+            }
 
     def find_matching_active_event(
         self,
@@ -399,6 +478,29 @@ class FireEventRepository:
         )
 
     @staticmethod
+    def _get_db_ml_assessment(session: Session, fire_event_id: int) -> FireEventMLAssessmentDB | None:
+        return session.execute(
+            select(FireEventMLAssessmentDB).where(FireEventMLAssessmentDB.fire_event_id == fire_event_id)
+        ).scalar_one_or_none()
+
+    @classmethod
+    def _to_domain_ml_assessment(cls, db_assessment: FireEventMLAssessmentDB) -> FireEventMLAssessment:
+        return FireEventMLAssessment(
+            fire_event_id=db_assessment.fire_event_id,
+            decision_mode=FireDetectionDecisionMode(db_assessment.decision_mode),
+            rule_status=FireDetectionStatus(db_assessment.rule_status),
+            rule_confidence=db_assessment.rule_confidence,
+            ml_available=db_assessment.ml_available,
+            ml_probability=db_assessment.ml_probability,
+            ml_model_name=db_assessment.ml_model_name,
+            ml_model_version=db_assessment.ml_model_version,
+            ml_feature_schema_version=db_assessment.ml_feature_schema_version,
+            ml_failure_reason=db_assessment.ml_failure_reason,
+            agreement=FireDetectionMLRuleAgreement(db_assessment.agreement),
+            updated_at=cls._ensure_aware_datetime(db_assessment.updated_at),
+        )
+
+    @staticmethod
     def _get_db_event(session: Session, fire_event_id: int) -> FireEventDB | None:
         return (
             session.execute(
@@ -459,6 +561,17 @@ class FireEventRepository:
     def _validate_fire_event_id(fire_event_id: int) -> None:
         if isinstance(fire_event_id, bool) or not isinstance(fire_event_id, int) or fire_event_id <= 0:
             raise FireEventRepositoryError(f"fire_event_id must be a positive integer, got {fire_event_id!r}.")
+
+    @staticmethod
+    def _normalize_fire_event_ids(field_name: str, ids: tuple[int, ...]) -> tuple[int, ...]:
+        try:
+            values = tuple(ids)
+        except TypeError as exc:
+            raise FireEventRepositoryError(f"{field_name} must be iterable.") from exc
+        for value in values:
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise FireEventRepositoryError(f"{field_name} must contain positive integer ids, got {value!r}.")
+        return values
 
     @staticmethod
     def _validate_limit(limit: int) -> None:

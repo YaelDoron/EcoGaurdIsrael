@@ -8,6 +8,7 @@ for the reuse-first architectural rule this service implements.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from src.calculators.fire_danger.ffwi_calculator import _celsius_to_fahrenheit, _equilibrium_moisture_content
@@ -58,6 +59,28 @@ _DOMINANT_LAND_COVER_TO_FUEL_CLASS: dict[str, FireSpreadFuelClass] = {
 }
 
 
+@dataclass(frozen=True)
+class FireSpreadSharedContext:
+    """Every FireSpreadInput-determining value that does NOT depend on
+    horizon_minutes (performance pass: profiling showed prepare_input() was
+    called once per horizon - 2x per refresh - independently re-loading the
+    identical FireEvent/severity/weather each time, a pure N+1). Loaded once
+    per FireEvent+as_of by prepare_shared_context() and reused across every
+    horizon via build_input_for_horizon(). Opaque to callers - only
+    FireSpreadInputService itself interprets these fields."""
+
+    status: FireSpreadInputStatus
+    fire_event_id: int
+    origin_latitude: float | None = None
+    origin_longitude: float | None = None
+    wind_speed_kmh: float | None = None
+    wind_direction_deg: float | None = None
+    fuel_moisture_percent: float | None = None
+    fuel_class: FireSpreadFuelClass | None = None
+    severity_assessment_id: int | None = None
+    weather_observation_id: int | None = None
+
+
 class FireSpreadInputService:
     """Gather mandatory inputs for FireSpreadCalculator from already-persisted data.
 
@@ -86,62 +109,135 @@ class FireSpreadInputService:
         as_of: datetime,
         horizon_minutes: int,
     ) -> FireSpreadInputResult:
-        """Prepare a FireSpreadInput for an active FireEvent at a timezone-aware instant."""
+        """Prepare a FireSpreadInput for an active FireEvent at a timezone-aware instant.
+
+        Unchanged behavior/signature for single-horizon callers - internally
+        now just composes prepare_shared_context() + build_input_for_horizon()
+        (performance pass: see FireSpreadSharedContext's docstring). Validates
+        horizon_minutes before any I/O, exactly as before.
+        """
+        _validate_horizon_minutes(horizon_minutes)
+        context = self.prepare_shared_context(fire_event_id, as_of)
+        return self.build_input_for_horizon(context, horizon_minutes)
+
+    def prepare_shared_context(self, fire_event_id: int, as_of: datetime) -> FireSpreadSharedContext:
+        """Load every horizon-independent input ONCE - reused across every
+        horizon by a multi-horizon caller (FireSpreadRefreshOrchestrator) to
+        avoid re-fetching the identical FireEvent/severity/weather once per
+        horizon. Fetches the FireEvent by id and reads the latest severity
+        assessment from persistence - unchanged behavior/signature for
+        existing callers. See prepare_shared_context_for_event() for the
+        performance-pass overload used by OperationalRefreshOrchestrator.
+        """
         _validate_fire_event_id(fire_event_id)
         _validate_aware_datetime("as_of", as_of)
-        _validate_horizon_minutes(horizon_minutes)
 
         stored_event = self._fire_event_repository.get_by_id(fire_event_id)
         if stored_event is None:
-            return _insufficient_result(fire_event_id)
-        if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
-            return FireSpreadInputResult(
-                status=FireSpreadInputStatus.INACTIVE_EVENT,
-                input_data=None,
-                fire_event_id=fire_event_id,
-            )
-        if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
-            return _insufficient_result(fire_event_id)
+            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
+        return self.prepare_shared_context_for_event(stored_event, as_of)
 
-        latest_assessment = self._fire_severity_assessment_repository.get_latest_for_event_as_of(
-            fire_event_id,
-            as_of,
+    def prepare_shared_context_for_event(
+        self,
+        stored_event: StoredFireEvent,
+        as_of: datetime,
+        *,
+        resolved_severity: StoredFireSeverityAssessment | None = None,
+    ) -> FireSpreadSharedContext:
+        """Same preparation as prepare_shared_context(), but for an
+        ALREADY-LOADED StoredFireEvent, and optionally an ALREADY-RESOLVED
+        severity assessment (performance pass: avoids a redundant FireEvent
+        fetch, and - when `resolved_severity` is supplied - a redundant
+        "latest severity" query, since OperationalRefreshOrchestrator has
+        just established the authoritative severity result for this exact
+        refresh cycle, whether newly computed or reused).
+
+        `resolved_severity=None` (the default) falls back to reading the
+        latest persisted severity from the repository, exactly like
+        prepare_shared_context() - used when the caller has no fresher
+        in-cycle result (e.g. severity was not re-evaluated this trigger)
+        or is an external/legacy caller.
+        """
+        _validate_aware_datetime("as_of", as_of)
+        fire_event_id = stored_event.id
+        if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
+            return FireSpreadSharedContext(status=FireSpreadInputStatus.INACTIVE_EVENT, fire_event_id=fire_event_id)
+        if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
+            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
+
+        latest_assessment = (
+            resolved_severity
+            if resolved_severity is not None
+            else self._fire_severity_assessment_repository.get_latest_for_event_as_of(fire_event_id, as_of)
         )
-        if latest_assessment is None:
-            return _insufficient_result(fire_event_id)
-        if latest_assessment.assessment.fire_event_id != fire_event_id:
-            return _insufficient_result(fire_event_id)
+        if latest_assessment is None or latest_assessment.assessment.fire_event_id != fire_event_id:
+            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
         if latest_assessment.assessment.status is not FireSeverityAssessmentStatus.VALID:
-            return _insufficient_result(fire_event_id, severity_assessment_id=latest_assessment.assessment_id)
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
+                severity_assessment_id=latest_assessment.assessment_id,
+            )
 
         selected_weather = self._select_weather(stored_event, latest_assessment, as_of)
         if selected_weather is None:
-            return _insufficient_result(fire_event_id, severity_assessment_id=latest_assessment.assessment_id)
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
+                severity_assessment_id=latest_assessment.assessment_id,
+            )
 
         fuel_class = _map_dominant_land_cover(latest_assessment.assessment.vegetation_dominant_land_cover)
         if fuel_class is None:
-            return _insufficient_result(
-                fire_event_id,
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
                 severity_assessment_id=latest_assessment.assessment_id,
                 weather_observation_id=selected_weather.observation_id,
             )
 
-        input_data = FireSpreadInput(
+        return FireSpreadSharedContext(
+            status=FireSpreadInputStatus.READY,
+            fire_event_id=fire_event_id,
             origin_latitude=stored_event.event.latitude,
             origin_longitude=stored_event.event.longitude,
             wind_speed_kmh=selected_weather.observation.wind_speed * _MS_TO_KMH,
             wind_direction_deg=selected_weather.observation.wind_direction,
             fuel_moisture_percent=_equilibrium_moisture_percent(selected_weather.observation),
             fuel_class=fuel_class,
-            horizon_minutes=horizon_minutes,
+            severity_assessment_id=latest_assessment.assessment_id,
+            weather_observation_id=selected_weather.observation_id,
         )
 
+    @staticmethod
+    def build_input_for_horizon(context: FireSpreadSharedContext, horizon_minutes: int) -> FireSpreadInputResult:
+        """Pure, no I/O: build the horizon-specific FireSpreadInputResult from
+        an already-loaded FireSpreadSharedContext."""
+        _validate_horizon_minutes(horizon_minutes)
+        if context.status is not FireSpreadInputStatus.READY:
+            return FireSpreadInputResult(
+                status=context.status,
+                input_data=None,
+                fire_event_id=context.fire_event_id,
+                severity_assessment_id=context.severity_assessment_id,
+                weather_observation_id=context.weather_observation_id,
+            )
+
+        input_data = FireSpreadInput(
+            origin_latitude=context.origin_latitude,
+            origin_longitude=context.origin_longitude,
+            wind_speed_kmh=context.wind_speed_kmh,
+            wind_direction_deg=context.wind_direction_deg,
+            fuel_moisture_percent=context.fuel_moisture_percent,
+            fuel_class=context.fuel_class,
+            horizon_minutes=horizon_minutes,
+        )
         return FireSpreadInputResult(
             status=FireSpreadInputStatus.READY,
             input_data=input_data,
-            fire_event_id=fire_event_id,
-            severity_assessment_id=latest_assessment.assessment_id,
-            weather_observation_id=selected_weather.observation_id,
+            fire_event_id=context.fire_event_id,
+            severity_assessment_id=context.severity_assessment_id,
+            weather_observation_id=context.weather_observation_id,
         )
 
     def _select_weather(
@@ -233,20 +329,6 @@ def _is_fresh(timestamp: datetime, as_of: datetime) -> bool:
     observed_at = _ensure_aware(timestamp)
     age = as_of - observed_at
     return timedelta(0) <= age <= timedelta(minutes=MAX_SEVERITY_WEATHER_AGE_MINUTES)
-
-
-def _insufficient_result(
-    fire_event_id: int,
-    severity_assessment_id: int | None = None,
-    weather_observation_id: int | None = None,
-) -> FireSpreadInputResult:
-    return FireSpreadInputResult(
-        status=FireSpreadInputStatus.INSUFFICIENT_DATA,
-        input_data=None,
-        fire_event_id=fire_event_id,
-        severity_assessment_id=severity_assessment_id,
-        weather_observation_id=weather_observation_id,
-    )
 
 
 def _ensure_aware(value: datetime) -> datetime:

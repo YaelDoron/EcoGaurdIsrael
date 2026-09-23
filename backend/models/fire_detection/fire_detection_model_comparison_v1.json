@@ -1,0 +1,133 @@
+{
+  "dataset": "training_v1.csv",
+  "total_samples": 2000,
+  "positive_samples": 1000,
+  "negative_samples": 1000,
+  "held_out_split": {
+    "test_size": 0.2,
+    "random_state": 42,
+    "train_samples": 1600,
+    "test_samples": 400
+  },
+  "cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "shuffle": true
+  },
+  "logistic_regression": {
+    "config": {
+      "scaler": "StandardScaler",
+      "max_iter": 1000,
+      "random_state": 42
+    },
+    "held_out_metrics": {
+      "accuracy": 0.715,
+      "precision": 0.7067307692307693,
+      "recall": 0.735,
+      "f1": 0.7205882352941176,
+      "roc_auc": 0.8514249999999999,
+      "true_positive": 147,
+      "true_negative": 139,
+      "false_positive": 61,
+      "false_negative": 53
+    },
+    "cross_validation_metrics": {
+      "accuracy": {
+        "mean": 0.7425,
+        "std": 0.004183300132670395
+      },
+      "precision": {
+        "mean": 0.7398563788995285,
+        "std": 0.016336173467412125
+      },
+      "recall": {
+        "mean": 0.75,
+        "std": 0.02915475947422653
+      },
+      "f1": {
+        "mean": 0.7442136215041335,
+        "std": 0.007969060970559409
+      },
+      "roc_auc": {
+        "mean": 0.86541,
+        "std": 0.016581571849496084
+      }
+    }
+  },
+  "random_forest": {
+    "config": {
+      "n_estimators": 300,
+      "random_state": 42,
+      "class_weight": null,
+      "note": "sklearn defaults otherwise (max_depth=None, min_samples_leaf=1) - no held-out-test-driven tuning applied"
+    },
+    "train_metrics": {
+      "accuracy": 0.915625,
+      "f1": 0.9078498293515358
+    },
+    "held_out_metrics": {
+      "accuracy": 0.835,
+      "precision": 0.8895348837209303,
+      "recall": 0.765,
+      "f1": 0.8225806451612904,
+      "roc_auc": 0.922275,
+      "true_positive": 153,
+      "true_negative": 181,
+      "false_positive": 19,
+      "false_negative": 47
+    },
+    "cross_validation_metrics": {
+      "accuracy": {
+        "mean": 0.8254999999999999,
+        "std": 0.02045727254547878
+      },
+      "precision": {
+        "mean": 0.8720366840461852,
+        "std": 0.018951642616012922
+      },
+      "recall": {
+        "mean": 0.7629999999999999,
+        "std": 0.03370459909270543
+      },
+      "f1": {
+        "mean": 0.8135698160118109,
+        "std": 0.0238114015083444
+      },
+      "roc_auc": {
+        "mean": 0.9213725,
+        "std": 0.01659576640291133
+      }
+    },
+    "feature_importances_impurity": {
+      "satellite_low_count": 0.22289168479701882,
+      "time_span_minutes": 0.2051879992665141,
+      "max_pairwise_distance_km": 0.20305691841761708,
+      "satellite_high_count": 0.16905535279440936,
+      "news_count": 0.08388873178960798,
+      "satellite_count": 0.06705937867968954,
+      "satellite_nominal_count": 0.048859934255143074
+    },
+    "permutation_importances_held_out_f1": {
+      "satellite_low_count": 0.12944965427281216,
+      "time_span_minutes": 0.0656296908977795,
+      "satellite_high_count": 0.059330546374867385,
+      "max_pairwise_distance_km": 0.05695635534821554,
+      "news_count": 0.039976223717814764,
+      "satellite_nominal_count": 0.018192470119054262,
+      "satellite_count": 0.01038960193684364
+    }
+  },
+  "rule_based_calculator": {
+    "accuracy": 0.57,
+    "precision": 0.5376344086021505,
+    "recall": 1.0,
+    "f1": 0.6993006993006993,
+    "true_positive": 200,
+    "true_negative": 28,
+    "false_positive": 172,
+    "false_negative": 0,
+    "roc_auc_using_rule_based_confidence_as_score": 0.768275
+  },
+  "rule_based_calculator_skipped_reason": null,
+  "note": "Dataset is synthetic (Part V1 proof-of-concept). These metrics measure relative performance on the synthetic V1 distribution only and are not real-world operational wildfire-detection accuracy. No runtime classifier is selected by this comparison."
+}

@@ -7,6 +7,7 @@ import math
 from numbers import Real
 
 from src.models.fire_evidence_type import FireEvidenceType
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 
 _ALLOWED_SATELLITE_CONFIDENCE = {"low", "nominal", "high"}
 
@@ -16,8 +17,13 @@ class FireDetectionEvidence:
     """One direct evidence item that may support active wildfire detection.
 
     This model intentionally does not duplicate raw satellite/news domain
-    objects. FRP is excluded from Task 1 confidence calculation and remains
-    available on SatelliteHotspot for future severity assessment.
+    objects. `satellite_frp`/`satellite_brightness`/`satellite_day_night` and
+    `news_wildfire_signal_strength` are optional, source-specific enrichment
+    (Task 4 / V3): selected existing satellite measurements and the LLM-derived
+    news signal, exposed here so the ML feature layer can use them. They are
+    NOT used by FireDetectionCalculator's Task 1 confidence methodology, which
+    is unchanged and continues to use only `satellite_confidence` and evidence
+    presence/correlation.
 
     `location_name` is optional, trustworthy provenance carried forward from
     `SatelliteHotspot.location_name` ONLY (never from news evidence - see
@@ -34,6 +40,10 @@ class FireDetectionEvidence:
     observed_at: datetime
     satellite_confidence: str | None = None
     location_name: str | None = None
+    satellite_frp: float | None = None
+    satellite_brightness: float | None = None
+    satellite_day_night: str | None = None
+    news_wildfire_signal_strength: NewsWildfireSignalStrength | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.evidence_id, bool) or not isinstance(self.evidence_id, int) or self.evidence_id <= 0:
@@ -51,8 +61,28 @@ class FireDetectionEvidence:
                     "satellite_confidence must be one of "
                     f"{sorted(_ALLOWED_SATELLITE_CONFIDENCE)}, got {self.satellite_confidence!r}"
                 )
-        elif self.satellite_confidence is not None:
-            raise ValueError("NEWS evidence must not include satellite_confidence.")
+            if self.news_wildfire_signal_strength is not None:
+                raise ValueError("SATELLITE evidence must not include news_wildfire_signal_strength.")
+            self._validate_non_negative_optional_number("satellite_frp", self.satellite_frp)
+            self._validate_non_negative_optional_number("satellite_brightness", self.satellite_brightness)
+            if self.satellite_day_night is not None and not isinstance(self.satellite_day_night, str):
+                raise ValueError(f"satellite_day_night must be a string or None, got {self.satellite_day_night!r}")
+        else:
+            if self.satellite_confidence is not None:
+                raise ValueError("NEWS evidence must not include satellite_confidence.")
+            if self.satellite_frp is not None:
+                raise ValueError("NEWS evidence must not include satellite_frp.")
+            if self.satellite_brightness is not None:
+                raise ValueError("NEWS evidence must not include satellite_brightness.")
+            if self.satellite_day_night is not None:
+                raise ValueError("NEWS evidence must not include satellite_day_night.")
+            if self.news_wildfire_signal_strength is not None and not isinstance(
+                self.news_wildfire_signal_strength, NewsWildfireSignalStrength
+            ):
+                raise ValueError(
+                    "news_wildfire_signal_strength must be a NewsWildfireSignalStrength or None, "
+                    f"got {self.news_wildfire_signal_strength!r}"
+                )
 
         if self.location_name is not None and not isinstance(self.location_name, str):
             raise ValueError(f"location_name must be a string or None, got {self.location_name!r}")
@@ -63,3 +93,10 @@ class FireDetectionEvidence:
             raise ValueError(f"{field_name} must be a finite number, got {value!r}")
         if not minimum <= value <= maximum:
             raise ValueError(f"{field_name} must be within [{minimum}, {maximum}], got {value!r}")
+
+    @staticmethod
+    def _validate_non_negative_optional_number(field_name: str, value: object) -> None:
+        if value is None:
+            return
+        if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(value) or value < 0:
+            raise ValueError(f"{field_name} must be a non-negative finite number or None, got {value!r}")

@@ -25,3 +25,7 @@ class WildfireReportDB(Base):
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # NewsWildfireSignalStrength.value ("none"/"weak"/"moderate"/"strong") or
+    # NULL. NULL means unknown/unavailable (including every row saved before
+    # this column existed) - never backfilled, never fabricated as "none".
+    wildfire_signal_strength: Mapped[Optional[str]] = mapped_column(String, nullable=True)
