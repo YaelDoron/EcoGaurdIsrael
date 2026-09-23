@@ -43,6 +43,16 @@ DEFAULT_FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD = 0.50
 # path. Empty string means "no threshold configured" -> escalation disabled.
 DEFAULT_FIRE_DETECTION_ML_SUSPECT_THRESHOLD = "0.70"
 
+# Gemini (Google Generative Language API) client defaults. Only
+# GEMINI_API_KEY is expected in .env - model/timeout fall back to these
+# defaults and are only overridden if explicitly set in the environment.
+DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_REQUEST_TIMEOUT = 30
+# Used only for the final bounded retry attempt, and only after the primary
+# model has already failed transiently (see GeminiClient.generate_content) -
+# never a general model switch.
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -142,6 +152,15 @@ class Settings:
     FIRE_DETECTION_ML_SUSPECT_THRESHOLD: str = os.getenv(
         "FIRE_DETECTION_ML_SUSPECT_THRESHOLD", DEFAULT_FIRE_DETECTION_ML_SUSPECT_THRESHOLD
     )
+
+    # Gemini (Google Generative Language API) client. GEMINI_API_KEY may be
+    # empty in environments that don't use the chatbot feature; GeminiClient
+    # handles that case explicitly when a request is attempted. MODEL/TIMEOUT
+    # are not required in .env - they default here and may be overridden.
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+    GEMINI_REQUEST_TIMEOUT: int = int(os.getenv("GEMINI_REQUEST_TIMEOUT", str(DEFAULT_GEMINI_REQUEST_TIMEOUT)))
+    GEMINI_FALLBACK_MODEL: str = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_FALLBACK_MODEL)
 
 
 settings = Settings()

@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { AskAiChat } from "../chatbot/AskAiChat";
 import "./AppShell.css";
 
 /**
@@ -31,6 +32,7 @@ export function AppShell() {
       <main className="app-main">
         <Outlet />
       </main>
+      <AskAiChat />
     </div>
   );
 }
