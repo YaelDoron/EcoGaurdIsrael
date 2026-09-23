@@ -70,7 +70,6 @@ global_planning_refresh_production_factory.py):
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import replace
 from dataclasses import dataclass, replace
 from datetime import datetime
 import functools
@@ -373,7 +372,7 @@ class GlobalPlanningInputBuilder:
         required_resource_ids = bundle.required_resource_ids
         resources = bundle.resources
 
-        road_nodes, road_edges = self._load_road_network(anchors, resources)
+        road_nodes, road_edges = self._load_road_network(anchors, resources, incident_demands)
         matrix_result = self._route_matrix_builder.build(resources, targets, road_nodes, road_edges)
 
         for attempt in range(_MAX_REBUILD_ATTEMPTS + 1):
@@ -512,7 +511,6 @@ class GlobalPlanningInputBuilder:
         resources: tuple[GlobalPlanningResource, ...],
         incident_demands: tuple[GlobalIncidentDemand, ...],
     ):
-    def _load_road_network(self, anchors, resources: tuple[GlobalPlanningResource, ...]):
         """Return the road-network subgraph covering every anchor + candidate
         station, reusing the single most-recently-loaded subgraph when the
         exact same bbox is requested again (Optimization 2 - see this
@@ -520,6 +518,19 @@ class GlobalPlanningInputBuilder:
         node/edge returned - on both a cache miss (stored copy) and a hit
         (served copy) - is `model_copy()`-d, so nothing a caller does to
         the returned lists can ever corrupt the cached copy or a later hit.
+
+        The cached entry is always the FULLY topped-up graph, captured only
+        after `_ensure_per_anchor_coverage` (Steps 1-4, including Step 4's
+        targeted origin fetching) has already run below - never the raw
+        combined-bbox read alone. Caching the pre-Step-4 result would mean
+        every subsequent cache hit for this same bbox silently re-served a
+        graph with the exact per-station gaps Step 4 exists to close, for
+        the remainder of this builder instance's lifetime.
+
+        Runs entirely inside `_load_road_network`'s outer try/except - a
+        cache-population bug is exactly the kind of "not yet seen" failure
+        that safety net exists for, so this method is never called any
+        other way.
         """
         latitudes = [latitude for _fire_event_id, latitude, _longitude in anchors] + [
             resource.station_latitude for resource in resources
@@ -565,6 +576,7 @@ class GlobalPlanningInputBuilder:
                     self._road_network_repository.save_network(session, road_nodes, road_edges)
             road_nodes, road_edges = self._ensure_per_anchor_coverage(
                 session, anchors, resources, incident_demands, road_nodes, road_edges
+            )
             self._road_network_cache = _RoadNetworkCacheEntry(
                 bbox=bbox,
                 nodes=tuple(node.model_copy() for node in road_nodes),

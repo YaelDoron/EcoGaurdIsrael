@@ -1573,7 +1573,7 @@ def test_load_road_network_returns_empty_without_touching_cache_when_no_anchors(
     counting_repo = _CountingRoadNetworkRepository()
     builder = _make_builder(sqlite_session_factory, road_network_repository=counting_repo)
 
-    nodes, edges = builder._load_road_network((), ())
+    nodes, edges = builder._load_road_network((), (), ())
 
     assert nodes == []
     assert edges == []
@@ -1594,7 +1594,7 @@ def test_load_road_network_cache_hit_is_not_corrupted_by_mutating_returned_objec
     )
     resources = ()
 
-    nodes_1, edges_1 = builder._load_road_network(anchors, resources)
+    nodes_1, edges_1 = builder._load_road_network(anchors, resources, ())
     original_node_count = len(nodes_1)
     original_edge_count = len(edges_1)
     assert original_node_count > 0 and original_edge_count > 0
@@ -1604,7 +1604,7 @@ def test_load_road_network_cache_hit_is_not_corrupted_by_mutating_returned_objec
     for edge in edges_1:
         edge.distance_meters = -1.0
 
-    nodes_2, edges_2 = builder._load_road_network(anchors, resources)  # cache hit (same bbox)
+    nodes_2, edges_2 = builder._load_road_network(anchors, resources, ())  # cache hit (same bbox)
 
     assert len(nodes_2) == original_node_count
     assert len(edges_2) == original_edge_count

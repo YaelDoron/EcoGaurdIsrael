@@ -35,6 +35,14 @@ from src.models.graph_node import GraphNode
 # how large the cached graph or the requested bbox grows.
 EDGE_QUERY_CHUNK_SIZE = 2000
 
+# Separate from EDGE_QUERY_CHUNK_SIZE (that one bounds a single-column
+# `.in_()` lookup, 1 param/row): node upserts bind 3 params/row (id,
+# latitude, longitude) in one combined multi-row VALUES statement, so a
+# single large OSM fetch's worth of nodes in one INSERT can exceed
+# PostgreSQL's ~65,535-parameter limit on its own. 10,000 rows/batch keeps
+# every batch at 30,000 params, comfortably under that limit.
+_BULK_OPERATION_BATCH_SIZE = 10_000
+
 
 class RoadNetworkRepository:
     """Persists and retrieves the road network graph via SQLAlchemy."""

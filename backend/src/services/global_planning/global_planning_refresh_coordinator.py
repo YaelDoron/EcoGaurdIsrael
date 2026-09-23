@@ -27,13 +27,6 @@ manually edited chromosome. If retries are exhausted, the previous
 authoritative generation's ResponsePlans/commitments/dispatch locks remain
 fully intact and current; this cycle is recorded as failed and
 STALE_RETRY_EXHAUSTED is returned.
-Bounded retry (Task 33): GlobalPlanningInputUnstable or a stale-input
-rejection from activation rebuilds the ENTIRE cycle (a fresh GlobalPlanningRun,
-a fresh GlobalPlanningInput, a fresh GA run) up to MAX_GLOBAL_STALE_RETRIES
-times - never a per-event patch, never manually edited chromosome. If
-retries are exhausted, the previous authoritative generation's ResponsePlans/
-commitments/dispatch locks remain fully intact and current; this cycle is
-recorded as failed and STALE_RETRY_EXHAUSTED is returned.
 
 Cheap NO_OP precheck (performance pass, "Implement the first
 performance-optimization pass" task, Optimization 3): profiling showed
@@ -387,14 +380,14 @@ class GlobalPlanningRefreshCoordinator:
         # If retries are exhausted, the previous authoritative generation's
         # ResponsePlans/commitments/dispatch locks remain fully intact -
         # never a crashed server, never a silently dropped or guessed lock.
-        try:
-            ga_result = self._optimization_service.optimize(
-                global_planning_input,
-                self._config,
-                self._demand_scoring_policy,
-                self._severity_demand_policy,
-                self._stability_policy,
+        # Caught here, as its OWN specific clause ahead of the general
+        # `except Exception` below, so it returns None (bounded retry)
+        # instead of being re-raised as an unhandled infrastructure failure.
+        except GlobalPlanningInputUnstable:
+            self._global_planning_run_repository.complete_run(
+                stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of
             )
+            return None
         except GlobalHardDispatchLockInfeasible:
             logger.warning(
                 "GlobalPlanningRun %s: a hard-dispatched resource has no feasible route to its locked "
@@ -403,37 +396,6 @@ class GlobalPlanningRefreshCoordinator:
                 stored_run.id,
                 exc_info=True,
             )
-            self._global_planning_run_repository.complete_run(
-                stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of
-            )
-            return None
-
-        # Final-closure atomicity fix: the required GlobalPlanningRunEvent
-        # member results, the run's optimization metadata, and its final
-        # COMPLETED/PARTIAL status are written by activate() itself, in the
-        # SAME transaction as the ResponsePlan/ResourceCommitment writes -
-        # never as separate, later, independently-committed calls. This
-        # closes a crash window where activation could commit (making a
-        # generation authoritative) while a later, separate write of its
-        # required history never happens.
-        run_history = GlobalRunHistoryContext(
-            combined_fingerprint=combined_fingerprint,
-            optimization_policy_fingerprint=optimization_policy_fingerprint,
-            demand_scoring_policy_methodology=self._demand_scoring_policy.methodology,
-            demand_scoring_policy_version=self._demand_scoring_policy.methodology_version,
-            severity_demand_policy_methodology=self._severity_demand_policy.methodology,
-            severity_demand_policy_version=self._severity_demand_policy.methodology_version,
-            stability_policy_methodology=self._stability_policy.methodology,
-            stability_policy_version=self._stability_policy.methodology_version,
-        )
-        try:
-            activation = self._activation_service.activate(
-                global_planning_input=global_planning_input,
-                global_optimization_result=ga_result,
-                as_of=as_of,
-                run_history=run_history,
-            )
-        except (GlobalPlanningStaleInput, ResourceCommitmentConflict):
             self._global_planning_run_repository.complete_run(
                 stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of
             )
