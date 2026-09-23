@@ -37,10 +37,40 @@ class FireSeverityAssessmentAgent:
         self._repository = repository
 
     def assess(self, fire_event_id: int, assessed_at: datetime) -> StoredFireSeverityAssessment:
-        """Assess active wildfire severity for one FireEvent at a timezone-aware instant."""
-        self._validate_request(fire_event_id, assessed_at)
+        """Assess active wildfire severity for one FireEvent at a timezone-aware instant.
 
+        Fetches the FireEvent by id, then delegates to the shared assessment
+        body - unchanged behavior/signature for existing callers.
+        """
+        self._validate_request(fire_event_id, assessed_at)
         input_result = self._input_service.prepare_input(fire_event_id=fire_event_id, as_of=assessed_at)
+        return self._assess_from_input_result(input_result, assessed_at)
+
+    def assess_for_event(self, stored_event, assessed_at: datetime) -> StoredFireSeverityAssessment:
+        """Same assessment as assess(), but for an ALREADY-LOADED StoredFireEvent
+        (performance pass: avoids a redundant FireEvent fetch when the caller,
+        FireSeverityRefreshOrchestrator, already has one for this refresh cycle
+        and has determined a fresh compute is actually needed)."""
+        self._validate_request(stored_event.id, assessed_at)
+        input_result = self._input_service.prepare_input_for_event(stored_event, assessed_at)
+        return self._assess_from_input_result(input_result, assessed_at)
+
+    def assess_from_input_result(
+        self, input_result: FireSeverityInputResult, assessed_at: datetime
+    ) -> StoredFireSeverityAssessment:
+        """Same assessment as assess()/assess_for_event(), but for an
+        ALREADY-PREPARED FireSeverityInputResult (performance pass: avoids
+        re-running input preparation - weather/satellite lookups and a real
+        Copernicus vegetation call - when the caller, FireSeverityRefreshOrchestrator,
+        already prepared this exact input_result to make its reuse decision
+        and is now falling through to a fresh compute)."""
+        self._validate_request(input_result.fire_event_id, assessed_at)
+        return self._assess_from_input_result(input_result, assessed_at)
+
+    def _assess_from_input_result(
+        self, input_result: FireSeverityInputResult, assessed_at: datetime
+    ) -> StoredFireSeverityAssessment:
+        fire_event_id = input_result.fire_event_id
         logger.info(
             "Prepared fire-severity input for FireEvent %s with status %s",
             fire_event_id,

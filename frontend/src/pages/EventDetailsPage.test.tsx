@@ -35,6 +35,7 @@ function makeResult(overrides: Partial<EventDetailsResult> = {}): EventDetailsRe
       methodology_version: "1.0",
     },
     severity: null,
+    ml_assessment: null,
     danger: null,
     detection_evidence: { satellite: [], news: [] },
     spread_predictions: [],
@@ -131,8 +132,125 @@ describe("EventDetailsPage", () => {
     const scoped = within(fireEventSection);
     expect(scoped.getByText("Suspected")).toBeInTheDocument();
     expect(scoped.getByText("32.5000, 35.1000")).toBeInTheDocument();
-    expect(scoped.getByText("72%")).toBeInTheDocument();
+    expect(scoped.getByText("0.72")).toBeInTheDocument();
     expect(fireEventSection.querySelectorAll("time")).toHaveLength(1); // detected_at only
+  });
+
+  // -------------------------------------------------------------------------
+  // ML assessment (ML Task 6 frontend exposure)
+  // -------------------------------------------------------------------------
+
+  it("shows Rule Score and AI Model Score when an ML assessment is available", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: { ...makeResult().fire_event, status: "confirmed" },
+        ml_assessment: { available: true, mode: "shadow", rule_confidence: 0.8, model_score: 0.993351, agreement: "agree_fire" },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    const scoped = within(fireEventSection);
+    expect(scoped.getByText("Confirmed")).toBeInTheDocument();
+    expect(scoped.getByText("Rule Score")).toBeInTheDocument();
+    expect(scoped.getByText("0.80")).toBeInTheDocument();
+    expect(scoped.getByText("AI Model Score")).toBeInTheDocument();
+    expect(scoped.getByText("0.99")).toBeInTheDocument();
+    // Never the raw unrounded float.
+    expect(scoped.queryByText("0.993351")).not.toBeInTheDocument();
+  });
+
+  it("omits AI Model Score (but keeps Rule Score) when there is no ml_assessment row", async () => {
+    getEventDetailsMock.mockResolvedValue(makeResult({ ml_assessment: null }));
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    const scoped = within(fireEventSection);
+    expect(scoped.getByText("Rule Score")).toBeInTheDocument();
+    expect(scoped.queryByText("AI Model Score")).not.toBeInTheDocument();
+  });
+
+  it('shows "Unavailable" (never 0) for AI Model Score when the ML classifier failed', async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        ml_assessment: { available: false, mode: "shadow", rule_confidence: 0.8, model_score: null, agreement: "ml_unavailable" },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    const scoped = within(fireEventSection);
+    expect(scoped.getByText("AI Model Score")).toBeInTheDocument();
+    expect(scoped.getByText("Unavailable")).toBeInTheDocument();
+    expect(scoped.queryByText("0.00")).not.toBeInTheDocument();
+    expect(scoped.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("falls back to fire_event.detection_confidence for Rule Score when there is no ml_assessment", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: { ...makeResult().fire_event, detection_confidence: 0.65 },
+        ml_assessment: null,
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    expect(within(fireEventSection).getByText("0.65")).toBeInTheDocument();
+  });
+
+  it("prefers ml_assessment.rule_confidence over fire_event.detection_confidence when both are present", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: { ...makeResult().fire_event, detection_confidence: 0.5 },
+        ml_assessment: { available: true, mode: "shadow", rule_confidence: 0.8, model_score: 0.6, agreement: "agree_fire" },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    const scoped = within(fireEventSection);
+    expect(scoped.getByText("0.80")).toBeInTheDocument();
+    expect(scoped.queryByText("0.50")).not.toBeInTheDocument();
+  });
+
+  it("never renders an AI Confidence/Fire Probability/Certainty label", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        ml_assessment: { available: true, mode: "shadow", rule_confidence: 0.8, model_score: 0.99, agreement: "agree_fire" },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    for (const forbidden of ["AI Confidence", "Fire Probability", "AI Probability of Fire", "Certainty"]) {
+      expect(screen.queryByText(forbidden)).not.toBeInTheDocument();
+    }
+  });
+
+  it("does not add a second Detection Status / AI section elsewhere on the page", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        ml_assessment: { available: true, mode: "shadow", rule_confidence: 0.8, model_score: 0.99, agreement: "agree_fire" },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.getAllByText("AI Model Score")).toHaveLength(1);
+    expect(screen.queryByRole("heading", { name: /AI/i })).not.toBeInTheDocument();
   });
 
   it('shows "Not available" for severity when there is no assessment at all', async () => {
@@ -716,7 +834,7 @@ describe("EventDetailsPage", () => {
     expect(within(card).queryByText("12")).not.toBeInTheDocument();
   });
 
-  it("lays the Fire Event facts out as a compact 2-column grid including confidence", async () => {
+  it("lays the Fire Event facts out as a compact 2-column grid including rule score", async () => {
     getEventDetailsMock.mockResolvedValue(makeResult());
 
     renderPage();
@@ -724,7 +842,7 @@ describe("EventDetailsPage", () => {
 
     const card = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
     expect(card.querySelector("dl.event-details-page__facts--grid")).not.toBeNull();
-    for (const label of ["Status", "Coordinates", "Detected", "Confidence"]) {
+    for (const label of ["Status", "Coordinates", "Detected", "Rule Score"]) {
       expect(within(card).getByText(label)).toBeInTheDocument();
     }
   });

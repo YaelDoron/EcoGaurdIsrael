@@ -10,6 +10,7 @@ import ast
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.app import create_app
@@ -20,6 +21,7 @@ from src.api.schemas.event_details import (
     CurrentResponsePlanResponse,
     DetectionEvidenceResponse,
     EventDetailsResult,
+    FireEventMLAssessmentResponse,
     FireEventSummaryResponse,
     FirefightingResourceResponse,
     FireStationResponse,
@@ -34,6 +36,9 @@ from src.api.schemas.event_details import (
     StationSummaryResponse,
 )
 from src.database.connection import DatabaseConfigurationError
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
 from src.models.fire_severity_level import FireSeverityLevel
@@ -95,6 +100,24 @@ def make_severity(**overrides) -> SeverityAssessmentResponse:
     )
     values.update(overrides)
     return SeverityAssessmentResponse(**values)
+
+
+def make_ml_assessment(**overrides) -> FireEventMLAssessmentResponse:
+    values = dict(
+        available=True,
+        mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.80,
+        model_score=0.75,
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+        model_name="fire_detection_logistic_v3",
+        model_version="3.0",
+        feature_schema_version="v3",
+        failure_reason=None,
+        updated_at=UPDATED_AT,
+    )
+    values.update(overrides)
+    return FireEventMLAssessmentResponse(**values)
 
 
 def make_spread_prediction(**overrides) -> SpreadPredictionResponse:
@@ -359,6 +382,156 @@ def test_no_detection_evidence_serializes_as_empty_lists():
 
 
 # ---------------------------------------------------------------------------
+# ML assessment (ML Task 6: API exposure only)
+# ---------------------------------------------------------------------------
+
+
+def test_shadow_ml_assessment_is_exposed_with_all_fields():
+    result = make_result(ml_assessment=make_ml_assessment())
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    ml = body["ml_assessment"]
+    assert ml is not None
+    assert ml["available"] is True
+    assert ml["mode"] == "shadow"
+    assert ml["rule_status"] == "confirmed"
+    assert ml["rule_confidence"] == pytest.approx(0.80)
+    assert ml["model_score"] == pytest.approx(0.75)
+    assert ml["agreement"] == "agree_fire"
+    assert ml["model_name"] == "fire_detection_logistic_v3"
+    assert ml["model_version"] == "3.0"
+    assert ml["feature_schema_version"] == "v3"
+    assert ml["failure_reason"] is None
+    # ML did not control the FireEvent's own final status.
+    assert body["fire_event"]["status"] == "confirmed"
+
+
+def test_rule_stronger_ml_assessment_is_exposed():
+    result = make_result(
+        fire_event=make_fire_event(status=FireEventStatus.SUSPECTED),
+        ml_assessment=make_ml_assessment(
+            rule_status=FireDetectionStatus.SUSPECTED,
+            rule_confidence=0.60,
+            model_score=0.18,
+            agreement=FireDetectionMLRuleAgreement.RULE_STRONGER,
+        ),
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    ml = body["ml_assessment"]
+    assert ml["rule_confidence"] == pytest.approx(0.60)
+    assert ml["model_score"] == pytest.approx(0.18)
+    assert ml["agreement"] == "rule_stronger"
+    assert body["fire_event"]["status"] == "suspected"
+
+
+def test_no_ml_assessment_row_serializes_as_null():
+    """Legacy FireEvents (created before ML integration) must still return
+    a valid 200 response, with ml_assessment as null - not an error, and
+    not a fabricated zero-valued object."""
+    result = make_result(ml_assessment=None)
+    client = client_for(FakeEventDetailsService(result))
+
+    response = client.get(endpoint_for(12))
+
+    assert response.status_code == 200
+    assert response.json()["ml_assessment"] is None
+
+
+def test_ml_unavailable_does_not_substitute_zero():
+    result = make_result(
+        ml_assessment=make_ml_assessment(
+            available=False,
+            model_score=None,
+            model_name=None,
+            model_version=None,
+            feature_schema_version=None,
+            failure_reason="ML model artifact could not be loaded.",
+            agreement=FireDetectionMLRuleAgreement.ML_UNAVAILABLE,
+        )
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    ml = body["ml_assessment"]
+    assert ml["available"] is False
+    assert ml["model_score"] is None
+    assert ml["model_score"] != 0
+    assert ml["agreement"] == "ml_unavailable"
+    assert ml["failure_reason"] == "ML model artifact could not be loaded."
+
+
+def test_rule_only_event_with_no_ml_row_remains_valid():
+    """RULE_ONLY mode never writes a FireEventMLAssessment row."""
+    result = make_result(ml_assessment=None)
+    client = client_for(FakeEventDetailsService(result))
+
+    response = client.get(endpoint_for(12))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ml_assessment"] is None
+    assert body["fire_event"]["fire_event_id"] == 12
+
+
+def test_hybrid_mode_serializes_without_special_case_failure():
+    """Schema supports HYBRID even though it is not the current default."""
+    result = make_result(ml_assessment=make_ml_assessment(mode=FireDetectionDecisionMode.HYBRID))
+    client = client_for(FakeEventDetailsService(result))
+
+    response = client.get(endpoint_for(12))
+
+    assert response.status_code == 200
+    assert response.json()["ml_assessment"]["mode"] == "hybrid"
+
+
+def test_model_version_and_feature_schema_version_are_exposed_unchanged():
+    result = make_result(
+        ml_assessment=make_ml_assessment(model_version="3.0", feature_schema_version="v3")
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    assert body["ml_assessment"]["model_version"] == "3.0"
+    assert body["ml_assessment"]["feature_schema_version"] == "v3"
+
+
+def test_ml_assessment_updated_at_serializes_with_timezone_information():
+    result = make_result(ml_assessment=make_ml_assessment())
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    updated_at = body["ml_assessment"]["updated_at"]
+    assert updated_at.endswith("Z") or "+" in updated_at[-6:]
+    assert parse_dt(updated_at).tzinfo is not None
+
+
+def test_ml_assessment_does_not_leak_internal_diagnostic_text():
+    """Defense in depth at the API test layer: even if a caller passed a
+    raw exception-shaped string through, this test documents the contract
+    that failure_reason must read as a short, safe, generic category -
+    real sanitization happens in EventDetailsService (see its own tests)."""
+    result = make_result(
+        ml_assessment=make_ml_assessment(
+            available=False, model_score=None, failure_reason="ML model artifact could not be loaded."
+        )
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body_text = client.get(endpoint_for(12)).text
+
+    for leaked in ("Traceback", "joblib", "FileNotFoundError", ".pkl", ":\\", "/etc/"):
+        assert leaked not in body_text
+
+
+# ---------------------------------------------------------------------------
 # Not found
 # ---------------------------------------------------------------------------
 
@@ -525,3 +698,32 @@ def test_endpoint_is_registered_in_openapi_schema():
     assert "200" in get_op["responses"]
     response_schema_ref = get_op["responses"]["200"]["content"]["application/json"]["schema"]
     assert "EventDetailsResult" in str(response_schema_ref)
+
+
+def test_ml_assessment_schema_is_registered_as_an_optional_nested_object():
+    app = create_app()
+
+    schema = app.openapi()
+
+    components = schema["components"]["schemas"]
+    assert "FireEventMLAssessmentResponse" in components
+    ml_schema = components["FireEventMLAssessmentResponse"]
+    for field in (
+        "available",
+        "mode",
+        "rule_status",
+        "rule_confidence",
+        "model_score",
+        "agreement",
+        "model_version",
+        "feature_schema_version",
+        "failure_reason",
+        "updated_at",
+    ):
+        assert field in ml_schema["properties"]
+
+    event_details_schema = components["EventDetailsResult"]
+    ml_field = event_details_schema["properties"]["ml_assessment"]
+    # Optional: anyOf [ref, null] (Pydantic's Optional[...] shape), not a bare required ref.
+    assert any(option.get("type") == "null" for option in ml_field.get("anyOf", []))
+    assert "ml_assessment" not in event_details_schema.get("required", [])

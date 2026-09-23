@@ -116,7 +116,21 @@ def _persist_commitment(sqlite_session_factory, fire_event_id, target_set_id, re
     return plan_id
 
 
-def _make_builder(sqlite_session_factory) -> GlobalPlanningInputBuilder:
+class _CountingRoadNetworkRepository(RoadNetworkRepository):
+    """Spies on get_network_in_bbox() calls so tests can assert whether the
+    builder's road-network cache (Optimization 2) actually avoided a DB
+    round trip, without depending on timing."""
+
+    def __init__(self):
+        super().__init__()
+        self.get_network_in_bbox_calls = 0
+
+    def get_network_in_bbox(self, db, min_lat, max_lat, min_lon, max_lon):
+        self.get_network_in_bbox_calls += 1
+        return super().get_network_in_bbox(db, min_lat, max_lat, min_lon, max_lon)
+
+
+def _make_builder(sqlite_session_factory, road_network_repository=None) -> GlobalPlanningInputBuilder:
     from src.repositories.fire_station_repository import FireStationRepository
     from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
 
@@ -138,7 +152,7 @@ def _make_builder(sqlite_session_factory) -> GlobalPlanningInputBuilder:
             fire_severity_assessment_repository=FireSeverityAssessmentRepository(sqlite_session_factory)
         ),
         route_matrix_builder=GlobalRouteMatrixBuilder(),
-        road_network_repository=RoadNetworkRepository(),
+        road_network_repository=road_network_repository or RoadNetworkRepository(),
         session_factory=sqlite_session_factory,
     )
 
@@ -1293,3 +1307,306 @@ def test_station_micro_fetch_makes_dijkstra_snap_to_the_genuinely_near_station_n
         "node is exactly the reported 'route starts far from the station's blue "
         f"dot' bug. Got node_path={option.node_path!r}."
     )
+# Optimization 3 (performance pass) - cheap pre-routing signature
+# ---------------------------------------------------------------------------
+
+
+def test_pre_routing_signature_is_stable_across_repeated_calls(two_event_scenario, sqlite_session_factory):
+    builder = _make_builder(sqlite_session_factory)
+
+    first = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    second = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert first.pre_routing_signature == second.pre_routing_signature
+
+
+def test_pre_routing_signature_unaffected_by_build_and_still_stable(two_event_scenario, sqlite_session_factory):
+    """The cheap signature must remain exactly as stable as the full
+    fingerprint (see test_fingerprint_is_stable_across_repeated_builds)
+    for the identical, unchanged scenario - including across a real
+    build() call in between (build() must not itself mutate any state the
+    signature depends on)."""
+    builder = _make_builder(sqlite_session_factory)
+
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    builder.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    after = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert before.pre_routing_signature == after.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_active_event_added(sqlite_session_factory):
+    session = sqlite_session_factory()
+    event_a = _persist_fire_event(session, 32.70, 35.00)
+    _persist_target_set(session, event_a, 32.701, 35.001)
+    _persist_station_and_resources(session, "STATION-A", 32.70, 35.00, ["R1"])
+    session.commit()
+    session.close()
+    _persist_road_network(sqlite_session_factory)
+
+    run_repository = GlobalPlanningRunRepository(sqlite_session_factory)
+    run_before = run_repository.create_run(
+        started_at=AS_OF, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(event_a,),
+    )
+    builder = _make_builder(sqlite_session_factory)
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=run_before.id, as_of=AS_OF)
+
+    session = sqlite_session_factory()
+    event_b = _persist_fire_event(session, 32.90, 35.20)
+    _persist_target_set(session, event_b, 32.901, 35.201)
+    _persist_station_and_resources(session, "STATION-B", 32.90, 35.20, ["R2"])
+    session.commit()
+    session.close()
+
+    run_after = run_repository.create_run(
+        started_at=AS_OF, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(event_a, event_b),
+    )
+    after = builder.compute_pre_routing_bundle(global_planning_run_id=run_after.id, as_of=AS_OF)
+
+    assert before.pre_routing_signature != after.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_active_event_removed(two_event_scenario, sqlite_session_factory):
+    builder = _make_builder(sqlite_session_factory)
+    both = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    run_repository = GlobalPlanningRunRepository(sqlite_session_factory)
+    run_one_event = run_repository.create_run(
+        started_at=AS_OF, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(two_event_scenario["event_a"],),
+    )
+    one = builder.compute_pre_routing_bundle(global_planning_run_id=run_one_event.id, as_of=AS_OF)
+
+    assert both.pre_routing_signature != one.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_target_priority_changes(two_event_scenario, sqlite_session_factory):
+    builder = _make_builder(sqlite_session_factory)
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    session = sqlite_session_factory()
+    target_set = ResponseTargetSetDB(
+        fire_event_id=two_event_scenario["event_a"], generated_at=AS_OF + timedelta(seconds=1),
+        methodology="m", methodology_version="1.0",
+    )
+    session.add(target_set)
+    session.flush()
+    session.add(
+        ResponseTargetDB(
+            response_target_set_id=target_set.id, fire_event_id=two_event_scenario["event_a"], target_order=1,
+            target_type="active_fire", latitude=32.701, longitude=35.001, priority_score=250.0,
+        )
+    )
+    session.commit()
+    session.close()
+
+    after = builder.compute_pre_routing_bundle(
+        global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF + timedelta(seconds=2)
+    )
+
+    assert before.pre_routing_signature != after.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_resource_availability_changes(two_event_scenario, sqlite_session_factory):
+    from src.database.models.firefighting_resource_db import FirefightingResourceDB
+
+    builder = _make_builder(sqlite_session_factory)
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    session = sqlite_session_factory()
+    resource = session.get(FirefightingResourceDB, "R2")
+    resource.status = ResourceStatus.UNAVAILABLE
+    session.commit()
+    session.close()
+
+    after = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert before.pre_routing_signature != after.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_commitment_changes(two_event_scenario, sqlite_session_factory):
+    builder = _make_builder(sqlite_session_factory)
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    _persist_commitment(
+        sqlite_session_factory, two_event_scenario["event_b"], two_event_scenario["target_set_b"], "R2"
+    )
+
+    after = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert before.pre_routing_signature != after.pre_routing_signature
+
+
+def test_pre_routing_signature_changes_when_demand_changes(two_event_scenario, sqlite_session_factory):
+    """Same severity-appears scenario as test_fingerprint_changes_when_a_severity_assessment_appears -
+    the cheap signature must agree with the full fingerprint that this is
+    a real change (it must never omit incident_demands)."""
+    from src.calculators.fire_severity.fire_severity_config import (
+        FIRE_SEVERITY_METHODOLOGY_NAME,
+        FIRE_SEVERITY_METHODOLOGY_VERSION,
+    )
+    from src.models import FireSeverityAssessment, FireSeverityAssessmentStatus, FireSeverityLevel, SatelliteHotspot
+    from src.models.weather_observation import WeatherObservation
+    from src.models.weather_station import WeatherStation
+    from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
+    from src.repositories.weather_repository import WeatherRepository
+
+    builder = _make_builder(sqlite_session_factory)
+    before = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    weather_repository = WeatherRepository(sqlite_session_factory)
+    satellite_repository = SatelliteHotspotRepository(sqlite_session_factory)
+    station = WeatherStation(external_station_id=930001, name="Station", latitude=32.70, longitude=35.00)
+    weather_repository.save_station(station)
+    weather_repository.save_observation(
+        WeatherObservation(
+            station_external_id=station.external_station_id, timestamp=AS_OF - timedelta(minutes=5),
+            temperature=30.0, relative_humidity=25.0, wind_speed=20.0,
+        )
+    )
+    weather_id = next(
+        record.observation_id
+        for record in weather_repository.get_recent_observations_for_area_candidates(
+            latitude=32.70, longitude=35.00, radius_km=5.0,
+            start_time=AS_OF - timedelta(minutes=30), end_time=AS_OF,
+        )
+        if record.observation.station_external_id == station.external_station_id
+    )
+    satellite_repository.save_hotspot(
+        SatelliteHotspot(latitude=32.70, longitude=35.00, detected_at=AS_OF - timedelta(minutes=20), confidence="h", frp=72.0, satellite="N20")
+    )
+    hotspot_id = satellite_repository.get_recent_hotspots(as_of=AS_OF, lookback_minutes=360)[0].id
+
+    FireSeverityAssessmentRepository(sqlite_session_factory).save_assessment(
+        FireSeverityAssessment(
+            fire_event_id=two_event_scenario["event_a"],
+            assessed_at=AS_OF,
+            status=FireSeverityAssessmentStatus.VALID,
+            score=95.0,
+            level=FireSeverityLevel.CRITICAL,
+            methodology=FIRE_SEVERITY_METHODOLOGY_NAME,
+            methodology_version=FIRE_SEVERITY_METHODOLOGY_VERSION,
+        ),
+        weather_observation_ids=(weather_id,),
+        satellite_hotspot_ids=(hotspot_id,),
+        selected_frp_hotspot_id=hotspot_id,
+    )
+
+    after = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert before.pre_routing_signature != after.pre_routing_signature
+
+
+def test_build_with_precomputed_bundle_matches_build_without_it(two_event_scenario, sqlite_session_factory):
+    """build(precomputed=...) must produce an input identical (same
+    fingerprint) to build() computing everything itself - the precomputed
+    path is a pure optimization, never a different code path semantically."""
+    builder = _make_builder(sqlite_session_factory)
+
+    direct = builder.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    bundle = builder.compute_pre_routing_bundle(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    via_bundle = builder.build(
+        global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF, precomputed=bundle
+    )
+
+    assert direct.input_fingerprint == via_bundle.input_fingerprint
+
+
+# ---------------------------------------------------------------------------
+# Optimization 2 (performance pass) - road-network subgraph reuse
+# ---------------------------------------------------------------------------
+
+
+def test_load_road_network_reuses_cached_subgraph_for_same_bbox(two_event_scenario, sqlite_session_factory):
+    counting_repo = _CountingRoadNetworkRepository()
+    builder = _make_builder(sqlite_session_factory, road_network_repository=counting_repo)
+
+    builder.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    calls_after_first = counting_repo.get_network_in_bbox_calls
+    builder.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    calls_after_second = counting_repo.get_network_in_bbox_calls
+
+    assert calls_after_first >= 1
+    assert calls_after_second == calls_after_first  # second build reused the cache - no new DB query
+
+
+def test_load_road_network_reloads_when_bbox_changes(two_event_scenario, sqlite_session_factory):
+    counting_repo = _CountingRoadNetworkRepository()
+    builder = _make_builder(sqlite_session_factory, road_network_repository=counting_repo)
+    two_event_result = builder.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    calls_after_first = counting_repo.get_network_in_bbox_calls
+
+    # A run over just event_a alone spans a smaller/different bbox.
+    run_repository = GlobalPlanningRunRepository(sqlite_session_factory)
+    run_single = run_repository.create_run(
+        started_at=AS_OF, trigger="manual", methodology="m", methodology_version="1.0",
+        input_fingerprint=None, fire_event_ids=(two_event_scenario["event_a"],),
+    )
+    single_event_result = builder.build(global_planning_run_id=run_single.id, as_of=AS_OF)
+
+    assert counting_repo.get_network_in_bbox_calls > calls_after_first
+    # The reload actually reflects the DB, not a stale/blindly-reused copy:
+    # dropping event_b/STATION-B out of scope must be visible in the result.
+    assert len(single_event_result.route_matrix) < len(two_event_result.route_matrix)
+
+
+def test_road_network_cache_does_not_leak_across_builder_instances(two_event_scenario, sqlite_session_factory):
+    counting_repo_1 = _CountingRoadNetworkRepository()
+    counting_repo_2 = _CountingRoadNetworkRepository()
+    builder_1 = _make_builder(sqlite_session_factory, road_network_repository=counting_repo_1)
+    builder_2 = _make_builder(sqlite_session_factory, road_network_repository=counting_repo_2)
+
+    builder_1.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+    builder_2.build(global_planning_run_id=two_event_scenario["run_id"], as_of=AS_OF)
+
+    assert counting_repo_1.get_network_in_bbox_calls >= 1
+    # builder_2 must NOT have inherited builder_1's cache - a fresh builder
+    # instance always starts with an empty cache (Optimization 2 is never
+    # global/module-level state).
+    assert counting_repo_2.get_network_in_bbox_calls >= 1
+
+
+def test_load_road_network_returns_empty_without_touching_cache_when_no_anchors(sqlite_session_factory):
+    counting_repo = _CountingRoadNetworkRepository()
+    builder = _make_builder(sqlite_session_factory, road_network_repository=counting_repo)
+
+    nodes, edges = builder._load_road_network((), ())
+
+    assert nodes == []
+    assert edges == []
+    assert counting_repo.get_network_in_bbox_calls == 0
+    assert builder._road_network_cache is None
+
+
+def test_load_road_network_cache_hit_is_not_corrupted_by_mutating_returned_objects(
+    two_event_scenario, sqlite_session_factory
+):
+    """Defends against a consumer (route-matrix building, node mapping)
+    mutating the list/objects `_load_road_network` returns - that must
+    never leak into the cached copy or a later cache hit (Optimization 2)."""
+    builder = _make_builder(sqlite_session_factory)
+    anchors = (
+        (two_event_scenario["event_a"], 32.701, 35.001),
+        (two_event_scenario["event_b"], 32.901, 35.201),
+    )
+    resources = ()
+
+    nodes_1, edges_1 = builder._load_road_network(anchors, resources)
+    original_node_count = len(nodes_1)
+    original_edge_count = len(edges_1)
+    assert original_node_count > 0 and original_edge_count > 0
+
+    for node in nodes_1:
+        node.latitude = -999.0
+    for edge in edges_1:
+        edge.distance_meters = -1.0
+
+    nodes_2, edges_2 = builder._load_road_network(anchors, resources)  # cache hit (same bbox)
+
+    assert len(nodes_2) == original_node_count
+    assert len(edges_2) == original_edge_count
+    assert all(node.latitude != -999.0 for node in nodes_2)
+    assert all(edge.distance_meters != -1.0 for edge in edges_2)

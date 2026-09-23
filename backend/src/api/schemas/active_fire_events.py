@@ -28,6 +28,7 @@ from typing import Optional
 from pydantic import BaseModel
 
 from src.models.active_fire_events import (
+    ActiveFireEventMLSummary,
     ActiveFireEventSeveritySummary,
     ActiveFireEventsResult,
     ActiveFireEventSummary,
@@ -47,6 +48,18 @@ class ActiveFireEventSeverityResponse(BaseModel):
     assessed_at: datetime
 
 
+class ActiveFireEventMLSummaryResponse(BaseModel):
+    """Lightweight ML assessment summary for the Active Fire dashboard cards
+    (ML Task 7). Trimmed to `available`/`model_score` only - see Event
+    Details' `FireEventMLAssessmentResponse` for the full persisted trace.
+    `model_score` is a model-estimated score, not a calibrated real-world
+    probability of wildfire occurrence.
+    """
+
+    available: bool
+    model_score: Optional[float]
+
+
 class ActiveFireEventResponse(BaseModel):
     """One currently-active FireEvent, as sent over HTTP."""
 
@@ -60,6 +73,7 @@ class ActiveFireEventResponse(BaseModel):
     created_at: datetime
     severity: Optional[ActiveFireEventSeverityResponse]
     location_name: Optional[str] = None
+    ml_summary: Optional[ActiveFireEventMLSummaryResponse] = None
 
 
 class ActiveFireEventsResponse(BaseModel):
@@ -89,7 +103,12 @@ def _to_event_response(item: ActiveFireEventSummary) -> ActiveFireEventResponse:
         created_at=item.created_at,
         severity=_to_severity_response(item.severity) if item.severity is not None else None,
         location_name=item.location_name,
+        ml_summary=_to_ml_summary_response(item.ml_summary) if item.ml_summary is not None else None,
     )
+
+
+def _to_ml_summary_response(ml_summary: ActiveFireEventMLSummary) -> ActiveFireEventMLSummaryResponse:
+    return ActiveFireEventMLSummaryResponse(available=ml_summary.available, model_score=ml_summary.model_score)
 
 
 def _to_severity_response(severity: ActiveFireEventSeveritySummary) -> ActiveFireEventSeverityResponse:

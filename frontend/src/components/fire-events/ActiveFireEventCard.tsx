@@ -3,7 +3,7 @@ import { translateIfUntranslated } from "../map/stationTranslations";
 import { TimestampDisplay } from "../data/TimestampDisplay";
 import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
-import type { ActiveFireEvent } from "../../types/activeFireEvents";
+import type { ActiveFireEvent, ActiveFireEventMLSummary } from "../../types/activeFireEvents";
 import { SEVERITY_STATUS_CAPTION } from "./severityStatusCaption";
 import "./ActiveFireEventCard.css";
 
@@ -11,11 +11,32 @@ export interface ActiveFireEventCardProps {
   event: ActiveFireEvent;
 }
 
+// AI Model Score is an experimental Logistic Regression V3 score, never a
+// calibrated real-world probability - see
+// backend/docs/fire_detection_runtime_ml.md, "Probability interpretation".
+// "-" (not "AI 0.00") is used both when there is no ml_summary row at all
+// (legacy/RULE_ONLY event) and when a row exists but the classifier could
+// not produce a score - one consistent convention for "no AI score to show".
+const AI_SCORE_UNAVAILABLE = "-";
+
+function formatAiScore(mlSummary: ActiveFireEventMLSummary | null): string {
+  if (mlSummary && mlSummary.available && mlSummary.model_score !== null) {
+    return mlSummary.model_score.toFixed(2);
+  }
+  return AI_SCORE_UNAVAILABLE;
+}
+
 /**
  * One active FireEvent's presentation card. Pure display: formats the
- * fields it is given (confidence as a percentage, timestamps) but never
- * recalculates status/severity - those always come straight from the API
- * response.
+ * fields it is given (Rule/AI scores, timestamps) but never recalculates
+ * status/severity - those always come straight from the API response.
+ *
+ * ML Task 7: the old single "Confidence: 80%" row is now a compact
+ * "Rule 0.88 | AI 0.90" row - Rule from the unchanged `detection_confidence`
+ * field (decimal, matching Event Details' terminology instead of a
+ * percentage), AI from the lightweight `ml_summary` the active-events API
+ * now also returns (batched server-side - see ActiveFireEventsService - so
+ * this card never issues its own per-event details request).
  *
  * This card is a DASHBOARD SUMMARY only - full detail (coordinates,
  * updated time, evidence, etc.) already lives on Event Details
@@ -40,7 +61,11 @@ export interface ActiveFireEventCardProps {
  * merely from a SUSPECTED event's severity (status must also be confirmed).
  */
 export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
-  const confidencePercent = Math.round(event.detection_confidence * 100);
+  // Rule score: the existing Fire Detection rule-based score, unchanged
+  // field/semantics (detection_confidence) - only the presentation (decimal,
+  // not percent) and label ("Rule") match Event Details' terminology now.
+  const ruleScore = event.detection_confidence.toFixed(2);
+  const aiScore = formatAiScore(event.ml_summary);
   const severity = event.severity;
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
   const emphasize = event.status === "confirmed" && (severity?.level === "high" || severity?.level === "critical");
@@ -75,8 +100,14 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
         </div>
 
         <div className="fire-event-card__row">
-          <dt>Confidence</dt>
-          <dd>{confidencePercent}%</dd>
+          <dt>Detection</dt>
+          <dd className="fire-event-card__scores">
+            <span>Rule {ruleScore}</span>
+            <span className="fire-event-card__scores-divider" aria-hidden="true">
+              |
+            </span>
+            <span>AI {aiScore}</span>
+          </dd>
         </div>
 
         <div className="fire-event-card__row">

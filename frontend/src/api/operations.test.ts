@@ -98,6 +98,7 @@ describe("getOperationsOverview", () => {
           created_at: "2026-09-20T11:00:30Z",
           severity: null,
           location_name: null,
+          ml_summary: null,
         },
       ],
       activity_feed: { items: [], limit: 30 },
@@ -153,6 +154,7 @@ describe("getOperationsOverview", () => {
       created_at: "2026-09-20T11:00:30Z",
       severity: null,
       location_name: null,
+      ml_summary: null,
     }));
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(body)) as unknown as typeof fetch;
 
@@ -182,6 +184,7 @@ describe("getOperationsOverview", () => {
         assessed_at: "2026-09-20T11:00:00Z",
       },
       location_name: null,
+      ml_summary: null,
     }));
     globalThis.fetch = vi.fn().mockResolvedValue(jsonResponse(body)) as unknown as typeof fetch;
 

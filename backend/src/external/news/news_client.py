@@ -10,6 +10,9 @@ import time
 import feedparser
 import requests
 
+from src.models.news_text_analysis import NewsTextAnalysis
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
+
 logger = logging.getLogger(__name__)
 
 # Retry only genuinely transient failures - a network-level error (timeout,
@@ -38,9 +41,7 @@ You are a news analyst parsing Hebrew news articles to extract a single geograph
 
 Rules:
 - Return ONLY a valid JSON object, with no extra text, no markdown, and no explanations.
-- The format must be exactly: {{"locationName": "<location_name>"}}
-- Clean Hebrew prepositions from the beginning of the location name (e.g., "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
-- If no specific location is mentioned in the text, return: {{"locationName": null}}
+- The format must be exactly: {{"locationName": "<location_name_or_null>", "wildfireSignalStrength": "<none|weak|moderate|strong>"}}
 
 Title: {title}
 Summary: {summary}
@@ -137,16 +138,22 @@ class TextProcessor:
         text = f"{title} {summary}"
         return any(keyword in text for keyword in self.keywords)
 
-    def extract_location(self, title: str, summary: str) -> str | None:
-        """Ask the LLM for the location mentioned in the article. Returns None on any failure
-        or when no location is present, never raises."""
-        prompt = _LOCATION_PROMPT_TEMPLATE.format(title=title, summary=summary)
+    def analyze(self, title: str, summary: str) -> NewsTextAnalysis:
+        """One LLM call returning location + wildfire signal strength for one article.
+
+        Never raises. On ANY failure (network/API error, malformed JSON, an
+        unrecognized wildfireSignalStrength value) returns
+        NewsTextAnalysis(location_name=None, wildfire_signal_strength=None) -
+        an explicit "analysis unavailable" state. It never fabricates NONE,
+        which has the different meaning "analyzed, no signal found".
+        """
+        prompt = _ANALYSIS_PROMPT_TEMPLATE.format(title=title, summary=summary)
         try:
             raw_content = self._call_llm(prompt, max_tokens=self.max_tokens)
             return self._parse_location(raw_content)
         except Exception:
-            logger.exception("LLM location extraction failed for title: %r", title[:80])
-            return None
+            logger.exception("LLM structured news analysis failed for title: %r", title[:80])
+            return NewsTextAnalysis(location_name=None, wildfire_signal_strength=None)
 
     def translate_report(self, title: str, summary: str, location_name: str | None) -> tuple[str, str, str | None]:
         """Translate a Hebrew article's title/summary/location_name to English via the LLM.
@@ -312,7 +319,9 @@ class TextProcessor:
         response.raise_for_status()
         return response.json()["candidates"][0]["content"]["parts"][0]["text"]
 
-    # Parse the raw LLM response into a location name. Returns None on any failure or if no location is found.
+    # Parse the raw LLM response into a NewsTextAnalysis. Raises on malformed JSON, a
+    # non-string locationName, or a missing/unrecognized wildfireSignalStrength -
+    # analyze() catches this and converts it to the "unavailable" state.
     @staticmethod
     def _parse_location(raw_content: str) -> str | None:
         data = TextProcessor._parse_json_object(raw_content)

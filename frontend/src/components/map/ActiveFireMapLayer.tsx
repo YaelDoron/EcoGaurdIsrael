@@ -38,6 +38,15 @@ export interface ActiveFireMapLayerProps {
  * detection status and High/Critical/etc. is the (distinct) Severity value -
  * never "Confidence: Suspected" (Suspected is not a numeric confidence).
  * Same compact popup, same badges, same colors - labels only.
+ *
+ * Dashboard Part 4/5: a small "Active Fire Event" label (same `<small>`
+ * treatment as FireDangerLayer's "Fire Danger Assessment") makes the two
+ * popup kinds distinguishable by label/heading, not color alone. This
+ * popup deliberately never shows FFWI - that is Fire Danger's own concept
+ * (environmental risk), not evidence of an active fire (detection +
+ * severity) - and the AI Model Score is deliberately kept out of this
+ * lightweight popup too (already available on the dashboard card and Event
+ * Details).
  */
 export function ActiveFireMapLayer({ activeFires }: ActiveFireMapLayerProps) {
   if (activeFires.length === 0) {
@@ -56,6 +65,9 @@ export function ActiveFireMapLayer({ activeFires }: ActiveFireMapLayerProps) {
         return (
           <Marker key={fire.fire_event_id} position={[fire.latitude, fire.longitude]} icon={icon}>
             <Popup>
+              <p>
+                <small>Active Fire Event</small>
+              </p>
               <strong>Fire Event #{fire.fire_event_id}</strong>
               {fire.location_name !== null ? <p>{translateIfUntranslated(fire.location_name)}</p> : null}
               <p>

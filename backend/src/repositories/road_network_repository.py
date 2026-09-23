@@ -23,19 +23,17 @@ from src.database.models.graph_node_db import GraphNodeDB
 from src.models.graph_edge import GraphEdge
 from src.models.graph_node import GraphNode
 
-# PostgreSQL hard-limits a single prepared statement to 65535 bind
-# parameters. get_network_in_bbox's edge lookup used to pass one parameter
-# per node id per IN(...) clause, and _upsert_nodes' multi-row VALUES
-# INSERT passes 3 parameters per node in ONE statement; with several
-# concurrent, geographically spread FireEvents (Global Multi-Incident
-# Optimizer) plus accumulated per-region OSM coverage, both can now exceed
-# that limit outright - observed live as psycopg.OperationalError ("number
-# of parameters must be between 0 and 65535") on a real 4-event bbox (a
-# single per-anchor OSM fetch alone was seen returning 29,000+ nodes, i.e.
-# 87,000+ params for an unbatched 3-column VALUES insert). 10,000 is
-# comfortably under the limit for both the 1-param-per-row IN(...) lookup
-# and the 3-param-per-row node upsert (30,000 params/batch).
-_BULK_OPERATION_BATCH_SIZE = 10_000
+# Regression this guards against: a bbox spanning multiple active incidents
+# over the (intentionally never-purged, ever-growing) road-network cache can
+# select tens of thousands of nodes. Filtering edges with
+# `source_node_id.in_(node_ids)` AND `target_node_id.in_(node_ids)` in one
+# query binds ~2x that many parameters, which exceeds PostgreSQL's ~65,535
+# per-statement parameter limit long before the node count itself becomes
+# unreasonable. Only `source_node_id` is chunked into an `.in_()` clause
+# here; the target-node check is done in Python against a `set`, so no
+# query ever binds more than EDGE_QUERY_CHUNK_SIZE parameters, regardless of
+# how large the cached graph or the requested bbox grows.
+EDGE_QUERY_CHUNK_SIZE = 2000
 
 
 class RoadNetworkRepository:
@@ -131,6 +129,15 @@ class RoadNetworkRepository:
         their source and target node fall within that same node set, so the
         returned edges never reference a node outside the returned node
         list (no edges "leading to nowhere").
+
+        Edges are looked up in `EDGE_QUERY_CHUNK_SIZE`-sized chunks of
+        `source_node_id` only (never a joint source+target `.in_()` query -
+        see EDGE_QUERY_CHUNK_SIZE's docstring), with the target-node check
+        done in Python against a `set`. This keeps every query's parameter
+        count bounded regardless of how large the requested bbox or the
+        cached graph is, and never risks missing a "cross-chunk" edge: an
+        edge is found by its source's chunk alone, and its target is then
+        checked against the *complete* node-id set, not the same chunk.
         """
         self._validate_bbox(min_lat, max_lat, min_lon, max_lon)
 
@@ -148,39 +155,38 @@ class RoadNetworkRepository:
         )
         node_ids = {db_node.id for db_node in db_nodes}
 
-        db_edges = self._edges_touching(db, node_ids)
+        db_edges = self._get_edges_within_node_set(db, node_ids)
 
         nodes = [GraphNode.model_validate(db_node) for db_node in db_nodes]
         edges = [GraphEdge.model_validate(db_edge) for db_edge in db_edges]
         return nodes, edges
 
     @staticmethod
-    def _edges_touching(db: Session, node_ids: set[int]) -> list[GraphEdgeDB]:
-        """Return every GraphEdgeDB whose source AND target are both in
-        `node_ids`, batching the lookup to stay under PostgreSQL's 65535
-        bind-parameter limit (see _BULK_OPERATION_BATCH_SIZE).
+    def _get_edges_within_node_set(db: Session, node_ids: set[int]) -> list[GraphEdgeDB]:
+        """Return every edge whose source AND target are both in `node_ids`.
 
-        Only `source_node_id` is filtered in SQL, in chunks; `target_node_id`
-        membership is checked in Python against the already-materialized
-        `node_ids` set instead of a second chunked IN(...) clause - same
-        result as the original single two-clause query (an edge is only
-        included when BOTH endpoints are in node_ids), one query dimension
-        instead of a source x target cross-product of chunks.
+        Queries `source_node_id` in bounded chunks (never both endpoints in
+        one `.in_()` query - see EDGE_QUERY_CHUNK_SIZE) and filters the
+        target endpoint in Python against `node_ids` (a `set`, so each
+        membership check is O(1); never re-queries the database per edge).
+        Deduplicates by primary key, since a node can only appear in one
+        chunk, so this is defensive rather than load-bearing today.
         """
         if not node_ids:
             return []
 
         node_id_list = list(node_ids)
-        edges: list[GraphEdgeDB] = []
-        for start in range(0, len(node_id_list), _BULK_OPERATION_BATCH_SIZE):
-            chunk = node_id_list[start : start + _BULK_OPERATION_BATCH_SIZE]
+        edges_by_id: dict[int, GraphEdgeDB] = {}
+        for start in range(0, len(node_id_list), EDGE_QUERY_CHUNK_SIZE):
+            chunk = node_id_list[start : start + EDGE_QUERY_CHUNK_SIZE]
             chunk_edges = (
-                db.execute(select(GraphEdgeDB).where(GraphEdgeDB.source_node_id.in_(chunk)))
-                .scalars()
-                .all()
+                db.execute(select(GraphEdgeDB).where(GraphEdgeDB.source_node_id.in_(chunk))).scalars().all()
             )
-            edges.extend(edge for edge in chunk_edges if edge.target_node_id in node_ids)
-        return edges
+            for edge in chunk_edges:
+                if edge.target_node_id in node_ids:
+                    edges_by_id[edge.id] = edge
+
+        return list(edges_by_id.values())
 
     @staticmethod
     def _validate_bbox(min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> None:

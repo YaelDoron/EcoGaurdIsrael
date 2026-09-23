@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -182,6 +182,64 @@ class FireSpreadPredictionRepository:
             )
             return self._to_stored_prediction_with_cells(db_prediction) if db_prediction is not None else None
 
+    def get_latest_for_event_and_horizons_as_of(
+        self,
+        fire_event_id: int,
+        horizons: tuple[int, ...],
+        as_of: datetime,
+    ) -> dict[int, StoredFireSpreadPredictionWithCells]:
+        """Return each requested horizon's latest prediction state at or
+        before `as_of`, in one round trip for the winning rows (a window
+        function resolves "latest per horizon" server-side) instead of one
+        get_latest_for_event_and_horizon_as_of() call per horizon (performance
+        pass: ResponseTargetInputService previously queried 30m and 60m
+        independently - a pure N+1 over a fixed, small horizon set).
+        Horizons with no matching row are simply absent from the returned
+        mapping - same "absence means none" contract as get_latest_for_events.
+        """
+        self._validate_fire_event_id(fire_event_id)
+        horizon_values = self._normalize_horizons(horizons)
+        self._validate_aware_datetime("as_of", as_of)
+        if not horizon_values:
+            return {}
+
+        with self._session_scope() as session:
+            row_number = (
+                func.row_number()
+                .over(
+                    partition_by=FireSpreadPredictionDB.horizon_minutes,
+                    order_by=(FireSpreadPredictionDB.predicted_at.desc(), FireSpreadPredictionDB.id.desc()),
+                )
+                .label("row_number")
+            )
+            ranked = (
+                select(FireSpreadPredictionDB.id, row_number)
+                .where(
+                    FireSpreadPredictionDB.fire_event_id == fire_event_id,
+                    FireSpreadPredictionDB.horizon_minutes.in_(horizon_values),
+                    FireSpreadPredictionDB.predicted_at <= as_of,
+                )
+                .subquery()
+            )
+            winning_ids = select(ranked.c.id).where(ranked.c.row_number == 1)
+
+            db_predictions = (
+                session.execute(
+                    select(FireSpreadPredictionDB)
+                    .options(
+                        selectinload(FireSpreadPredictionDB.cells),
+                        selectinload(FireSpreadPredictionDB.weather_inputs),
+                    )
+                    .where(FireSpreadPredictionDB.id.in_(winning_ids))
+                )
+                .scalars()
+                .all()
+            )
+            return {
+                db_prediction.horizon_minutes: self._to_stored_prediction_with_cells(db_prediction)
+                for db_prediction in db_predictions
+            }
+
     @staticmethod
     def _to_db_prediction(prediction: FireSpreadPrediction) -> FireSpreadPredictionDB:
         return FireSpreadPredictionDB(
@@ -344,6 +402,16 @@ class FireSpreadPredictionRepository:
             raise FireSpreadPredictionRepositoryError(
                 f"horizon_minutes must be a positive integer, got {horizon_minutes!r}."
             )
+
+    @classmethod
+    def _normalize_horizons(cls, horizons: tuple[int, ...]) -> tuple[int, ...]:
+        try:
+            values = tuple(horizons)
+        except TypeError as exc:
+            raise FireSpreadPredictionRepositoryError("horizons must be iterable.") from exc
+        for horizon_minutes in values:
+            cls._validate_horizon_minutes(horizon_minutes)
+        return tuple(sorted(set(values)))
 
     @staticmethod
     def _validate_aware_datetime(field_name: str, value: object) -> None:

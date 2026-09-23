@@ -64,10 +64,19 @@ class FakeFireSpreadPredictionRepository:
     def __init__(self, predictions_by_horizon=None) -> None:
         self.predictions_by_horizon = predictions_by_horizon or {}
         self.calls: list[tuple[int, int, datetime]] = []
+        self.batch_calls: list[tuple[int, tuple[int, ...], datetime]] = []
 
     def get_latest_for_event_and_horizon_as_of(self, fire_event_id: int, horizon_minutes: int, as_of: datetime):
         self.calls.append((fire_event_id, horizon_minutes, as_of))
         return self.predictions_by_horizon.get(horizon_minutes)
+
+    def get_latest_for_event_and_horizons_as_of(self, fire_event_id: int, horizons: tuple[int, ...], as_of: datetime):
+        self.batch_calls.append((fire_event_id, tuple(horizons), as_of))
+        return {
+            horizon_minutes: self.predictions_by_horizon[horizon_minutes]
+            for horizon_minutes in horizons
+            if self.predictions_by_horizon.get(horizon_minutes) is not None
+        }
 
 
 def make_event(status=FireEventStatus.CONFIRMED, fire_event_id=10) -> StoredFireEvent:
@@ -232,7 +241,10 @@ def test_as_of_is_passed_to_severity_and_spread_repositories():
     service.prepare_input(10, AS_OF)
 
     assert severity_repo.calls == [(10, AS_OF)]
-    assert spread_repo.calls == [(10, 30, AS_OF), (10, 60, AS_OF)]
+    # Performance pass: both horizons are fetched in one batched call, not
+    # one get_latest_for_event_and_horizon_as_of() call per horizon.
+    assert spread_repo.calls == []
+    assert spread_repo.batch_calls == [(10, (30, 60), AS_OF)]
 
 
 def test_no_severity_returns_ready_with_none_score():
@@ -447,3 +459,85 @@ def test_candidate_ordering_is_deterministic():
     candidates = service.prepare_input(10, AS_OF).input_data.predicted_candidates
 
     assert [candidate.spread_prediction_cell_id for candidate in candidates] == [101, 102]
+
+
+# --- performance pass: prepare_input_for_event() resolved-value handoff ---
+
+
+def test_prepare_input_for_event_uses_no_fire_event_repository_call():
+    service, event_repo, _, _ = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+
+    result = service.prepare_input_for_event(stored_event, AS_OF)
+
+    assert event_repo.calls == []  # the by-id path is never used
+    assert result.status is ResponseTargetInputStatus.READY
+
+
+def test_resolved_severity_skips_severity_repository_read():
+    service, _, severity_repo, _ = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+    resolved = make_assessment(score=42.0)
+
+    result = service.prepare_input_for_event(stored_event, AS_OF, resolved_severity=resolved)
+
+    assert severity_repo.calls == []
+    assert result.input_data.severity_score == 42.0
+
+
+def test_no_resolved_severity_falls_back_to_repository_read():
+    service, _, severity_repo, _ = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+
+    service.prepare_input_for_event(stored_event, AS_OF, resolved_severity=None)
+
+    assert len(severity_repo.calls) == 1
+
+
+def test_resolved_spread_by_horizon_skips_spread_repository_reads():
+    service, _, _, spread_repo = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+    prediction_30 = make_prediction(prediction_id=1, horizon_minutes=30, cells=(make_cell(cell_id=1),))
+    prediction_60 = make_prediction(prediction_id=2, horizon_minutes=60, cells=(make_cell(cell_id=2),))
+
+    result = service.prepare_input_for_event(
+        stored_event, AS_OF, resolved_spread_by_horizon={30: prediction_30, 60: prediction_60}
+    )
+
+    assert spread_repo.calls == []
+    assert spread_repo.batch_calls == []
+    assert {c.spread_prediction_cell_id for c in result.input_data.predicted_candidates} == {1, 2}
+
+
+def test_resolved_spread_with_none_prediction_yields_no_candidates_for_that_horizon():
+    service, *_ = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+    prediction_30 = make_prediction(prediction_id=1, horizon_minutes=30, cells=(make_cell(cell_id=1),))
+
+    result = service.prepare_input_for_event(
+        stored_event, AS_OF, resolved_spread_by_horizon={30: prediction_30, 60: None}
+    )
+
+    assert {c.spread_prediction_cell_id for c in result.input_data.predicted_candidates} == {1}
+
+
+def test_missing_horizon_in_resolved_spread_falls_back_to_batched_repository_read():
+    prediction_60 = make_prediction(prediction_id=2, horizon_minutes=60, cells=(make_cell(cell_id=2),))
+    service, _, _, spread_repo = build_service(predictions_by_horizon={60: prediction_60})
+    stored_event = make_event()
+    prediction_30 = make_prediction(prediction_id=1, horizon_minutes=30, cells=(make_cell(cell_id=1),))
+
+    # Only 30m resolved by the caller - 60m must fall back to a repository read.
+    result = service.prepare_input_for_event(stored_event, AS_OF, resolved_spread_by_horizon={30: prediction_30})
+
+    assert spread_repo.batch_calls == [(10, (60,), AS_OF)]
+    assert {c.spread_prediction_cell_id for c in result.input_data.predicted_candidates} == {1, 2}
+
+
+def test_no_resolved_spread_falls_back_to_batched_repository_read_for_both_horizons():
+    service, _, _, spread_repo = build_service(predictions_by_horizon={})
+    stored_event = make_event()
+
+    service.prepare_input_for_event(stored_event, AS_OF, resolved_spread_by_horizon=None)
+
+    assert spread_repo.batch_calls == [(10, (30, 60), AS_OF)]

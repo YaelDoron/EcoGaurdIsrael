@@ -52,6 +52,7 @@ from src.services.global_planning.global_planning_refresh_production_factory imp
 from src.services.operational_planning_refresh.operational_planning_refresh_coordinator import (
     OperationalPlanningRefreshCoordinator,
 )
+from src.services.operational_refresh.fire_severity_refresh_orchestrator import FireSeverityRefreshOrchestrator
 from src.services.operational_refresh.fire_spread_refresh_orchestrator import FireSpreadRefreshOrchestrator
 from src.services.operational_refresh.operational_refresh_orchestrator import OperationalRefreshOrchestrator
 from src.services.operational_refresh.resource_status_update_service import ResourceStatusUpdateService
@@ -74,10 +75,17 @@ def build_operational_planning_refresh_coordinator(
     """
     fire_event_repository = FireEventRepository(session_factory)
 
+    severity_input_service = FireSeverityInputService(fire_event_repository=fire_event_repository)
+    severity_assessment_repository = FireSeverityAssessmentRepository()
     severity_agent = FireSeverityAssessmentAgent(
-        input_service=FireSeverityInputService(fire_event_repository=fire_event_repository),
+        input_service=severity_input_service,
         calculator=FireSeverityCalculator(),
-        repository=FireSeverityAssessmentRepository(),
+        repository=severity_assessment_repository,
+    )
+    severity_refresh_orchestrator = FireSeverityRefreshOrchestrator(
+        input_service=severity_input_service,
+        assessment_agent=severity_agent,
+        assessment_repository=severity_assessment_repository,
     )
 
     spread_input_service = FireSpreadInputService()
@@ -101,7 +109,7 @@ def build_operational_planning_refresh_coordinator(
 
     resource_repository = FirefightingResourceRepository()
     operational_refresh_orchestrator = OperationalRefreshOrchestrator(
-        severity_agent=severity_agent,
+        severity_refresh_orchestrator=severity_refresh_orchestrator,
         spread_refresh_orchestrator=spread_refresh_orchestrator,
         response_target_agent=response_target_agent,
         resource_status_service=ResourceStatusUpdateService(resource_repository),

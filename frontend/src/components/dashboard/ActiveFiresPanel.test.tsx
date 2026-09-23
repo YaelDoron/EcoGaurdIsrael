@@ -17,6 +17,7 @@ function makeEvent(overrides: Partial<ActiveFireEvent> = {}): ActiveFireEvent {
     created_at: "2026-09-20T11:00:30Z",
     severity: null,
     location_name: null,
+    ml_summary: null,
     ...overrides,
   };
 }

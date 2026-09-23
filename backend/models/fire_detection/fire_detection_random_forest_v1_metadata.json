@@ -1,0 +1,89 @@
+{
+  "model_type": "RandomForestClassifier",
+  "model_role": "nonlinear_ml_comparison_candidate",
+  "model_version": "1.0",
+  "dataset": "training_v1.csv",
+  "random_seed": 42,
+  "held_out_test_size": 0.2,
+  "held_out_split_random_state": 42,
+  "feature_names": [
+    "satellite_count",
+    "news_count",
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "time_span_minutes",
+    "max_pairwise_distance_km"
+  ],
+  "training_configuration": {
+    "n_estimators": 300,
+    "random_state": 42,
+    "class_weight": null,
+    "note": "sklearn defaults otherwise (max_depth=None, min_samples_leaf=1) - no held-out-test-driven tuning applied"
+  },
+  "total_samples": 2000,
+  "positive_samples": 1000,
+  "negative_samples": 1000,
+  "train_samples": 1600,
+  "test_samples": 400,
+  "train_metrics": {
+    "accuracy": 0.915625,
+    "f1": 0.9078498293515358
+  },
+  "held_out_metrics": {
+    "accuracy": 0.835,
+    "precision": 0.8895348837209303,
+    "recall": 0.765,
+    "f1": 0.8225806451612904,
+    "roc_auc": 0.922275,
+    "true_positive": 153,
+    "true_negative": 181,
+    "false_positive": 19,
+    "false_negative": 47
+  },
+  "cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "metrics": {
+      "accuracy": {
+        "mean": 0.8254999999999999,
+        "std": 0.02045727254547878
+      },
+      "precision": {
+        "mean": 0.8720366840461852,
+        "std": 0.018951642616012922
+      },
+      "recall": {
+        "mean": 0.7629999999999999,
+        "std": 0.03370459909270543
+      },
+      "f1": {
+        "mean": 0.8135698160118109,
+        "std": 0.0238114015083444
+      },
+      "roc_auc": {
+        "mean": 0.9213725,
+        "std": 0.01659576640291133
+      }
+    }
+  },
+  "feature_importances_impurity": {
+    "satellite_low_count": 0.22289168479701882,
+    "time_span_minutes": 0.2051879992665141,
+    "max_pairwise_distance_km": 0.20305691841761708,
+    "satellite_high_count": 0.16905535279440936,
+    "news_count": 0.08388873178960798,
+    "satellite_count": 0.06705937867968954,
+    "satellite_nominal_count": 0.048859934255143074
+  },
+  "permutation_importances_held_out_f1": {
+    "satellite_low_count": 0.12944965427281216,
+    "time_span_minutes": 0.0656296908977795,
+    "satellite_high_count": 0.059330546374867385,
+    "max_pairwise_distance_km": 0.05695635534821554,
+    "news_count": 0.039976223717814764,
+    "satellite_nominal_count": 0.018192470119054262,
+    "satellite_count": 0.01038960193684364
+  },
+  "importance_note": "Impurity-based feature_importances_ is biased toward high-cardinality/correlated features and is not a causal measure; permutation importance (held-out, scoring='f1') is reported alongside it for the same reason - the feature set has structural/statistical correlation (see fire_detection_ml.md)."
+}

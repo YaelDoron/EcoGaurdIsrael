@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from src.database.models.wildfire_report_db import WildfireReportDB
 from src.models.fire_report import WildfireReport
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 from src.repositories.exceptions import NewsRepositoryError
 from src.repositories.news_repository import NewsRepository, SaveNewsReportResult
 
@@ -96,6 +97,56 @@ def test_published_at_none_round_trips(repository):
     assert stored is not None
     assert stored.published_at is None
     assert stored.fetched_at == FETCHED_AT
+
+
+def test_new_report_stores_and_reloads_wildfire_signal_strength(repository):
+    report = make_report(wildfire_signal_strength=NewsWildfireSignalStrength.STRONG)
+
+    repository.save_report(report)
+    stored = repository.get_by_source_url(report.source_url)
+
+    assert stored is not None
+    assert stored.wildfire_signal_strength is NewsWildfireSignalStrength.STRONG
+
+
+def test_legacy_row_without_wildfire_signal_strength_loads_as_none(repository, sqlite_session_factory):
+    """Directly insert a row the way a pre-migration row would look: no signal recorded."""
+    session = sqlite_session_factory()
+    session.add(
+        WildfireReportDB(
+            source_url="https://example.com/news/legacy",
+            source_feed="Example Feed",
+            title="Legacy report",
+            summary="No signal recorded for this row.",
+            location_name=None,
+            latitude=None,
+            longitude=None,
+            published_at=None,
+            fetched_at=FETCHED_AT,
+        )
+    )
+    session.commit()
+    session.close()
+
+    stored = repository.get_by_source_url("https://example.com/news/legacy")
+
+    assert stored is not None
+    assert stored.wildfire_signal_strength is None
+
+
+def test_unrecognized_stored_signal_value_loads_as_none_instead_of_raising():
+    assert NewsRepository._to_wildfire_signal_strength("not-a-real-value") is None
+    assert NewsRepository._to_wildfire_signal_strength(None) is None
+
+
+def test_duplicate_report_behavior_is_unaffected_by_signal_field(repository, sqlite_session_factory):
+    first = repository.save_report(make_report(wildfire_signal_strength=NewsWildfireSignalStrength.WEAK))
+    second = repository.save_report(make_report(wildfire_signal_strength=NewsWildfireSignalStrength.STRONG))
+
+    assert first.is_duplicate is False
+    assert second.is_duplicate is True
+    assert second.report.wildfire_signal_strength is NewsWildfireSignalStrength.WEAK  # original row wins
+    assert count_reports(sqlite_session_factory) == 1
 
 
 def test_legacy_postgres_string_timestamp_is_mapped_to_aware_datetime():

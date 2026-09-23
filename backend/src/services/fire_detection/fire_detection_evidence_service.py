@@ -134,6 +134,9 @@ class FireDetectionEvidenceService:
                 observed_at=self._ensure_aware_datetime(stored_hotspot.hotspot.detected_at),
                 satellite_confidence=confidence,
                 location_name=stored_hotspot.hotspot.location_name,
+                satellite_frp=stored_hotspot.hotspot.frp,
+                satellite_brightness=stored_hotspot.hotspot.brightness,
+                satellite_day_night=stored_hotspot.hotspot.day_night,
             )
         except ValueError as exc:
             logger.info("Skipping invalid satellite hotspot %s: %s", stored_hotspot.id, exc)
@@ -159,6 +162,7 @@ class FireDetectionEvidenceService:
                 longitude=stored_report.report.longitude,
                 observed_at=self._ensure_aware_datetime(stored_report.observed_at),
                 satellite_confidence=None,
+                news_wildfire_signal_strength=stored_report.report.wildfire_signal_strength,
             )
         except ValueError as exc:
             logger.info("Skipping invalid wildfire report %s: %s", stored_report.id, exc)

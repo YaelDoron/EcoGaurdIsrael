@@ -136,6 +136,11 @@ class GlobalRouteMatrixBuilder:
         target_node_map = self._node_mapping_service.map_targets(routing_targets, road_nodes, road_edges)
         nodes_by_id = {node.id: node for node in road_nodes}
 
+        # Optimization 1: one adjacency-list build for the whole matrix,
+        # not one per (source, target) search - road_edges never changes
+        # across the loop below.
+        routing_graph = self._dijkstra_calculator.build_graph(road_edges)
+
         dijkstra_cache: dict[tuple[int, int], DijkstraResult] = {}
         dijkstra_call_count = 0
         options: list[GlobalRouteOption] = []
@@ -155,8 +160,8 @@ class GlobalRouteMatrixBuilder:
                 cache_key = (source_node_id, target_node_id)
                 cached_result = dijkstra_cache.get(cache_key)
                 if cached_result is None:
-                    cached_result = self._dijkstra_calculator.calculate_shortest_path(
-                        source_node_id, target_node_id, road_edges
+                    cached_result = self._dijkstra_calculator.calculate_shortest_path_in_graph(
+                        source_node_id, target_node_id, routing_graph
                     )
                     dijkstra_cache[cache_key] = cached_result
                     dijkstra_call_count += 1

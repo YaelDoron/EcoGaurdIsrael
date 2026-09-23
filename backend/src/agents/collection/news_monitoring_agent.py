@@ -108,6 +108,7 @@ class NewsMonitoringAgent:
                 longitude=longitude,
                 published_at=self._parse_published_at(entry.get("published")),
                 fetched_at=datetime.now(timezone.utc),
+                wildfire_signal_strength=analysis.wildfire_signal_strength,
             )
 
             try:
@@ -119,11 +120,12 @@ class NewsMonitoringAgent:
             if not save_result.is_duplicate:
                 saved_count += 1
                 logger.info(
-                    "Saved report: '%s...' -> location=%s (%s, %s)",
+                    "Saved report: '%s...' -> location=%s (%s, %s), signal=%s",
                     report.title[:60],
-                    location_name,
+                    analysis.location_name,
                     latitude,
                     longitude,
+                    analysis.wildfire_signal_strength,
                 )
 
         logger.info("Cycle complete: %d new reports saved", saved_count)

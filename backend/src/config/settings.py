@@ -1,10 +1,13 @@
 """Application configuration, loaded from environment variables (and a local .env file)."""
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_IMS_BASE_URL = "https://api.ims.gov.il/v1/envista"
 DEFAULT_IMS_REQUEST_TIMEOUT = 10
@@ -23,6 +26,22 @@ DEFAULT_COPERNICUS_STATISTICS_URL = "https://sh.dataspace.copernicus.eu/statisti
 DEFAULT_COPERNICUS_LAND_COVER_COLLECTION_ID = "35fecfec-8a73-4723-bb08-b775f283a535"
 DEFAULT_COPERNICUS_REQUEST_TIMEOUT = 20
 DEFAULT_FRONTEND_ORIGINS = "http://localhost:5173"
+
+# Task 5: runtime ML integration for Fire Detection. Defaults are
+# intentionally conservative - SHADOW mode records ML output but never lets
+# it change what FireEvent gets created/updated; RULE_ONLY reproduces
+# pre-Task-5 behavior exactly. See backend/docs/fire_detection_runtime_ml.md.
+DEFAULT_FIRE_DETECTION_DECISION_MODE = "shadow"
+DEFAULT_FIRE_DETECTION_ML_MODEL_PATH = str(_BACKEND_ROOT / "models" / "fire_detection" / "fire_detection_logistic_v3.joblib")
+DEFAULT_FIRE_DETECTION_ML_METADATA_PATH = str(
+    _BACKEND_ROOT / "models" / "fire_detection" / "fire_detection_logistic_v3_metadata.json"
+)
+DEFAULT_FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD = 0.50
+# Selected via scripts.analyze_fire_detection_ml_threshold (out-of-fold CV on
+# training_v3.csv): 0.70 is the smallest candidate threshold reaching
+# precision >= 0.90 for the specific NO_EVENT -> SUSPECTED HYBRID escalation
+# path. Empty string means "no threshold configured" -> escalation disabled.
+DEFAULT_FIRE_DETECTION_ML_SUSPECT_THRESHOLD = "0.70"
 
 
 @dataclass(frozen=True)
@@ -104,6 +123,24 @@ class Settings:
         "1",
         "true",
         "yes",
+    )
+
+    # Task 5: runtime ML integration for Fire Detection.
+    FIRE_DETECTION_DECISION_MODE: str = os.getenv("FIRE_DETECTION_DECISION_MODE", DEFAULT_FIRE_DETECTION_DECISION_MODE)
+    FIRE_DETECTION_ML_MODEL_PATH: str = os.getenv("FIRE_DETECTION_ML_MODEL_PATH", DEFAULT_FIRE_DETECTION_ML_MODEL_PATH)
+    FIRE_DETECTION_ML_METADATA_PATH: str = os.getenv(
+        "FIRE_DETECTION_ML_METADATA_PATH", DEFAULT_FIRE_DETECTION_ML_METADATA_PATH
+    )
+    FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD: float = float(
+        os.getenv("FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD", str(DEFAULT_FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD))
+    )
+    # Empty string means "not configured" -> HYBRID NO_EVENT->SUSPECTED ML
+    # escalation is disabled rather than guessing a threshold. Parsed to
+    # float | None by callers (see src.calculators.fire_detection.
+    # fire_detection_decision_policy), not here, so an invalid/blank value
+    # stays a simple, inspectable string at the settings layer.
+    FIRE_DETECTION_ML_SUSPECT_THRESHOLD: str = os.getenv(
+        "FIRE_DETECTION_ML_SUSPECT_THRESHOLD", DEFAULT_FIRE_DETECTION_ML_SUSPECT_THRESHOLD
     )
 
 

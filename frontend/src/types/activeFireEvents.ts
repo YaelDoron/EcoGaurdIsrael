@@ -25,6 +25,19 @@ export interface ActiveFireEventSeverity {
   assessed_at: string;
 }
 
+/**
+ * Lightweight ML assessment summary for the Active Fire dashboard cards
+ * (ML Task 7) - trimmed to `available`/`model_score` only, unlike Event
+ * Details' fuller `FireEventMLAssessment` (see types/eventDetails.ts).
+ * `model_score` is a model-estimated score from the synthetic-trained
+ * Logistic Regression V3 classifier, not a calibrated real-world
+ * probability of wildfire occurrence.
+ */
+export interface ActiveFireEventMLSummary {
+  available: boolean;
+  model_score: number | null;
+}
+
 export interface ActiveFireEvent {
   fire_event_id: number;
   status: FireEventStatus;
@@ -36,6 +49,7 @@ export interface ActiveFireEvent {
   created_at: string;
   severity: ActiveFireEventSeverity | null;
   location_name: string | null;
+  ml_summary: ActiveFireEventMLSummary | null;
 }
 
 export interface ActiveFireEventsResponse {

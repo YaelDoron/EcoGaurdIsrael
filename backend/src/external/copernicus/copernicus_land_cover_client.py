@@ -169,6 +169,22 @@ class CopernicusLandCoverClient:
         self._timeout = timeout
         self._access_token: str | None = None
         self._token_expires_at = 0.0
+        # Performance pass: profiling one full demo run showed 17 Severity
+        # refreshes issuing 17 live Copernicus statistics calls for only 4
+        # distinct (latitude, longitude) pairs - the same FireEvent location
+        # queried repeatedly across refresh cycles. The queried dataset is a
+        # fixed historical snapshot (COPERNICUS_LAND_COVER_DATASET_YEAR /
+        # _TIME_FROM / _TIME_TO are constants, never `as_of`-dependent), so
+        # the exact same request is provably time-invariant for the life of
+        # this client instance - a request-shaped in-process memo, not a
+        # blind TTL. Keyed on every semantic parameter that could change the
+        # result (coordinates, radius, collection, dataset time range), so a
+        # FireEvent location change (a new latitude/longitude) is a cache
+        # miss, never stale data. Invalidation is simply process restart -
+        # this cache is never persisted, matching every other reuse mechanism
+        # in this codebase which re-derives correctness from persisted state
+        # after a restart.
+        self._statistics_cache: dict[tuple, CopernicusLandCoverStatistics | None] = {}
 
     def get_land_cover_statistics(
         self,
@@ -181,6 +197,27 @@ class CopernicusLandCoverClient:
         _validate_coordinate("longitude", longitude, -180, 180)
         _validate_radius(radius_km)
 
+        cache_key = (
+            latitude,
+            longitude,
+            radius_km,
+            self._collection_id,
+            COPERNICUS_LAND_COVER_TIME_FROM,
+            COPERNICUS_LAND_COVER_TIME_TO,
+        )
+        if cache_key in self._statistics_cache:
+            return self._statistics_cache[cache_key]
+
+        statistics = self._fetch_land_cover_statistics(latitude, longitude, radius_km)
+        self._statistics_cache[cache_key] = statistics
+        return statistics
+
+    def _fetch_land_cover_statistics(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+    ) -> CopernicusLandCoverStatistics | None:
         token = self._get_access_token()
         request_body = self._build_statistics_request(latitude, longitude, radius_km)
         try:

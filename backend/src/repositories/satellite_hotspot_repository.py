@@ -222,6 +222,37 @@ class SatelliteHotspotRepository:
                 created_at=self._ensure_aware_created_at(db_hotspot.created_at),
             )
 
+    def get_by_ids(self, hotspot_ids: tuple[int, ...]) -> tuple[StoredSatelliteHotspot, ...]:
+        """Return persisted hotspots for exact DB ids, in one query.
+
+        Mirrors WeatherRepository.get_observations_by_ids's precedent
+        (performance pass: FireSeverityInputService previously called
+        get_by_id() once per satellite-evidence reference in a Python loop -
+        an N+1 - to select the max-FRP hotspot). Duplicate requested ids are
+        treated as one request. Ids with no matching row are silently
+        omitted - callers can compare returned ids against requested ids to
+        detect a missing hotspot. Deterministic order: ascending id.
+        """
+        ids = self._normalize_hotspot_ids(hotspot_ids)
+        if not ids:
+            return ()
+        with self._session_scope() as session:
+            db_hotspots = (
+                session.execute(
+                    select(SatelliteHotspotDB).where(SatelliteHotspotDB.id.in_(ids)).order_by(SatelliteHotspotDB.id.asc())
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(
+                StoredSatelliteHotspot(
+                    id=db_hotspot.id,
+                    hotspot=self._to_domain_hotspot(db_hotspot),
+                    created_at=self._ensure_aware_created_at(db_hotspot.created_at),
+                )
+                for db_hotspot in db_hotspots
+            )
+
     @staticmethod
     def _find_by_detection_key(session: Session, detection_key: str) -> SatelliteHotspotDB | None:
         return session.execute(
@@ -301,3 +332,14 @@ class SatelliteHotspotRepository:
     def _validate_hotspot_id(hotspot_id: int) -> None:
         if isinstance(hotspot_id, bool) or not isinstance(hotspot_id, int) or hotspot_id <= 0:
             raise SatelliteHotspotRepositoryError(f"hotspot_id must be a positive integer, got {hotspot_id!r}.")
+
+    @staticmethod
+    def _normalize_hotspot_ids(hotspot_ids: tuple[int, ...]) -> tuple[int, ...]:
+        try:
+            ids = tuple(hotspot_ids)
+        except TypeError as exc:
+            raise SatelliteHotspotRepositoryError("hotspot_ids must be iterable.") from exc
+        for value in ids:
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise SatelliteHotspotRepositoryError(f"hotspot_ids must contain positive integers, got {value!r}.")
+        return tuple(sorted(set(ids)))

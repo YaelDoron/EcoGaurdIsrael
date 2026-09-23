@@ -1,0 +1,93 @@
+{
+  "model_type": "RandomForestClassifier",
+  "model_role": "nonlinear_ml_comparison_candidate",
+  "model_version": "2.0",
+  "dataset": "training_v2.csv",
+  "random_seed": 42,
+  "feature_names": [
+    "satellite_count",
+    "news_count",
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "time_span_minutes",
+    "max_pairwise_distance_km"
+  ],
+  "training_configuration": {
+    "n_estimators": 300,
+    "random_state": 42,
+    "class_weight": null
+  },
+  "total_samples": 3000,
+  "positive_samples": 1500,
+  "negative_samples": 1500,
+  "train_samples": 2400,
+  "test_samples": 600,
+  "train_metrics": {
+    "accuracy": 0.9575,
+    "f1": 0.9556135770234987
+  },
+  "held_out_metrics": {
+    "accuracy": 0.7783333333333333,
+    "precision": 0.7684887459807074,
+    "recall": 0.7966666666666666,
+    "f1": 0.7823240589198036,
+    "roc_auc": 0.8524833333333333,
+    "true_positive": 239,
+    "true_negative": 228,
+    "false_positive": 72,
+    "false_negative": 61
+  },
+  "standard_cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "metrics": {
+      "accuracy": {
+        "mean": 0.7676666666666666,
+        "std": 0.008602325267042613
+      },
+      "precision": {
+        "mean": 0.7726003130579402,
+        "std": 0.016443527402952147
+      },
+      "recall": {
+        "mean": 0.76,
+        "std": 0.029135697844549533
+      },
+      "f1": {
+        "mean": 0.7656728483472959,
+        "std": 0.011450191732538141
+      },
+      "roc_auc": {
+        "mean": 0.8485411111111111,
+        "std": 0.009633906557339861
+      }
+    }
+  },
+  "grouped_cross_validation": {
+    "n_splits": 7,
+    "group": "scenario_family",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.3823298296193406,
+        "std": 0.15833631801912484
+      },
+      "precision": {
+        "mean": 0.38236149938595004,
+        "std": 0.22268448466897428
+      },
+      "recall": {
+        "mean": 0.4281360736354256,
+        "std": 0.22490988777560494
+      },
+      "f1": {
+        "mean": 0.3958187595540323,
+        "std": 0.21390473304357077
+      },
+      "roc_auc": {
+        "mean": 0.22333758855551136,
+        "std": 0.2330394315402727
+      }
+    }
+  }
+}
