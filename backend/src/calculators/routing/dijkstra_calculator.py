@@ -30,8 +30,38 @@ class DijkstraResult:
     travel_time_seconds: float | None
 
 
+@dataclass(frozen=True)
+class RoutingGraph:
+    """A precomputed adjacency-list view of one edge set, built once and
+    reused across many shortest-path searches over that SAME edge set
+    (Optimization 1: profiling showed `_build_adjacency_list` - which
+    revalidates and re-indexes every edge - was being rebuilt from scratch
+    on every single (source, target) search within one route-matrix build,
+    even though the edge list never changed across those searches).
+
+    Scoped to whoever holds the reference (typically one route-matrix
+    build) - never global/module-level state. Immutable: the adjacency
+    dict is never mutated after construction, so sharing one RoutingGraph
+    across many searches is safe. `adjacency` is an implementation detail
+    (node id -> list of (neighbor_id, travel_time_seconds, distance_meters))
+    - callers should treat RoutingGraph as opaque and only pass it to
+    `calculate_shortest_path_in_graph`.
+    """
+
+    adjacency: dict[int, list[tuple[int, float, float]]]
+
+
 class DijkstraCalculator:
     """Computes the fastest (lowest total travel_time_seconds) path between two GraphNode ids."""
+
+    def build_graph(self, edges: Sequence[GraphEdge]) -> RoutingGraph:
+        """Validate `edges` and build the adjacency-list representation ONCE,
+        for reuse across many `calculate_shortest_path_in_graph` calls over
+        this same edge set (Optimization 1). Raises the same ValueErrors
+        `calculate_shortest_path` raises for invalid/malformed edges - the
+        validation moves here, not away.
+        """
+        return RoutingGraph(adjacency=_build_adjacency_list(edges))
 
     def calculate_shortest_path(
         self,
@@ -50,10 +80,31 @@ class DijkstraCalculator:
         the target: returns a trivial zero-cost REACHABLE result without
         touching `edges`. Returns an UNREACHABLE result (empty node_path,
         distance/time both None) when no path connects the two nodes.
+
+        Builds a fresh RoutingGraph from `edges` every call - unchanged
+        behavior/signature for existing single-shot callers (e.g.
+        RoutePlanningAgent). A caller performing many searches over the
+        same edge set should use `build_graph()` once plus
+        `calculate_shortest_path_in_graph()` per search instead (Optimization 1).
+        """
+        graph = self.build_graph(edges)
+        return self.calculate_shortest_path_in_graph(source_node_id, target_node_id, graph)
+
+    def calculate_shortest_path_in_graph(
+        self,
+        source_node_id: int,
+        target_node_id: int,
+        graph: RoutingGraph,
+    ) -> DijkstraResult:
+        """Same search/result semantics as `calculate_shortest_path`, but
+        against an already-built `RoutingGraph` (Optimization 1) - no
+        adjacency-list rebuild, so this is safe to call many times in a
+        loop over the same graph.
         """
         _validate_node_id("source_node_id", source_node_id)
         _validate_node_id("target_node_id", target_node_id)
-        adjacency = _build_adjacency_list(edges)
+        if not isinstance(graph, RoutingGraph):
+            raise ValueError(f"graph must be a RoutingGraph (see build_graph()), got {graph!r}")
 
         if source_node_id == target_node_id:
             return DijkstraResult(
@@ -63,7 +114,7 @@ class DijkstraCalculator:
                 travel_time_seconds=0.0,
             )
 
-        return _run_dijkstra(source_node_id, target_node_id, adjacency)
+        return _run_dijkstra(source_node_id, target_node_id, graph.adjacency)
 
 
 def _run_dijkstra(

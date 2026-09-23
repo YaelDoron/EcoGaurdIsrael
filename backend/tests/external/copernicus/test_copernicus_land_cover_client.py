@@ -101,8 +101,12 @@ def test_reuses_valid_cached_token(monkeypatch):
     monkeypatch.setattr(requests, "post", fake_post)
     client = make_client()
 
+    # Different coordinates on the second call - the statistics results cache
+    # (a separate performance pass) is keyed on coordinates, so identical
+    # coordinates would short-circuit before ever reaching requests.post,
+    # which would not exercise token reuse at all.
     client.get_land_cover_statistics(32.731, 35.046, 1.0)
-    client.get_land_cover_statistics(32.731, 35.046, 1.0)
+    client.get_land_cover_statistics(33.0, 36.0, 1.0)
 
     assert [url for url, _ in calls].count("https://token.example.test") == 1
     assert [url for url, _ in calls].count("https://stats.example.test") == 2
@@ -121,10 +125,98 @@ def test_expired_token_is_refreshed(monkeypatch):
     monkeypatch.setattr(requests, "post", fake_post)
     client = make_client()
 
+    # Different coordinates on the second call - see test_reuses_valid_cached_token.
     client.get_land_cover_statistics(32.731, 35.046, 1.0)
-    client.get_land_cover_statistics(32.731, 35.046, 1.0)
+    client.get_land_cover_statistics(33.0, 36.0, 1.0)
 
     assert [url for url, _ in calls].count("https://token.example.test") == 2
+
+
+# --- performance pass: in-process statistics cache -------------------------
+
+
+def test_identical_request_is_served_from_cache_without_a_second_statistics_call(monkeypatch):
+    stats_calls = []
+
+    def fake_post(url, **kwargs):
+        if "token" in url:
+            return FakeResponse(payload=token_payload())
+        stats_calls.append((url, kwargs))
+        return FakeResponse(payload=statistics_payload(tree=0.5))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = make_client()
+
+    first = client.get_land_cover_statistics(32.731, 35.046, 1.0)
+    second = client.get_land_cover_statistics(32.731, 35.046, 1.0)
+
+    assert len(stats_calls) == 1
+    assert second is first
+
+
+def test_different_coordinates_are_not_served_from_cache(monkeypatch):
+    stats_calls = []
+
+    def fake_post(url, **kwargs):
+        if "token" in url:
+            return FakeResponse(payload=token_payload())
+        stats_calls.append((url, kwargs))
+        return FakeResponse(payload=statistics_payload(tree=0.5))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = make_client()
+
+    client.get_land_cover_statistics(32.731, 35.046, 1.0)
+    client.get_land_cover_statistics(32.732, 35.046, 1.0)  # latitude changed
+    client.get_land_cover_statistics(32.731, 35.047, 1.0)  # longitude changed
+    client.get_land_cover_statistics(32.731, 35.046, 2.0)  # radius changed
+
+    assert len(stats_calls) == 4
+
+
+def test_none_result_is_also_cached(monkeypatch):
+    """A location with no Copernicus data is itself a deterministic result
+    for the same fixed dataset - it must not be re-queried on every call."""
+    stats_calls = []
+
+    def fake_post(url, **kwargs):
+        if "token" in url:
+            return FakeResponse(payload=token_payload())
+        stats_calls.append((url, kwargs))
+        return FakeResponse(payload={"data": []})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = make_client()
+
+    first = client.get_land_cover_statistics(32.731, 35.046, 1.0)
+    second = client.get_land_cover_statistics(32.731, 35.046, 1.0)
+
+    assert first is None
+    assert second is None
+    assert len(stats_calls) == 1
+
+
+def test_a_failed_request_is_not_cached_and_the_next_call_retries(monkeypatch):
+    stats_calls = []
+
+    def fake_post(url, **kwargs):
+        if "token" in url:
+            return FakeResponse(payload=token_payload())
+        stats_calls.append((url, kwargs))
+        if len(stats_calls) == 1:
+            return FakeResponse(status_code=503)
+        return FakeResponse(payload=statistics_payload(tree=0.5))
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = make_client()
+
+    with pytest.raises(CopernicusServiceUnavailableError):
+        client.get_land_cover_statistics(32.731, 35.046, 1.0)
+
+    result = client.get_land_cover_statistics(32.731, 35.046, 1.0)
+
+    assert result is not None
+    assert len(stats_calls) == 2
 
 
 def test_statistics_api_called_with_bearer_token_collection_geometry_radius_and_2019_range(monkeypatch):

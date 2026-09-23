@@ -1,0 +1,135 @@
+{
+  "dataset": "training_v3.csv",
+  "cv_methodology": {
+    "n_splits": 5,
+    "random_state": 42,
+    "shuffle": true,
+    "note": "out-of-fold predictions via cross_val_predict - not the held-out test split, and not the saved production model."
+  },
+  "candidate_thresholds": [
+    {
+      "threshold": 0.5,
+      "precision": 0.767342582710779,
+      "recall": 0.719,
+      "false_positive_rate": 0.218,
+      "predicted_positive_count": 1874,
+      "true_positive": 1438,
+      "false_positive": 436,
+      "true_negative": 1564,
+      "false_negative": 562,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.55,
+      "precision": 0.7870699881376038,
+      "recall": 0.6635,
+      "false_positive_rate": 0.1795,
+      "predicted_positive_count": 1686,
+      "true_positive": 1327,
+      "false_positive": 359,
+      "true_negative": 1641,
+      "false_negative": 673,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.6,
+      "precision": 0.831438127090301,
+      "recall": 0.6215,
+      "false_positive_rate": 0.126,
+      "predicted_positive_count": 1495,
+      "true_positive": 1243,
+      "false_positive": 252,
+      "true_negative": 1748,
+      "false_negative": 757,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.65,
+      "precision": 0.8663220088626292,
+      "recall": 0.5865,
+      "false_positive_rate": 0.0905,
+      "predicted_positive_count": 1354,
+      "true_positive": 1173,
+      "false_positive": 181,
+      "true_negative": 1819,
+      "false_negative": 827,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.7,
+      "precision": 0.9083263246425568,
+      "recall": 0.54,
+      "false_positive_rate": 0.0545,
+      "predicted_positive_count": 1189,
+      "true_positive": 1080,
+      "false_positive": 109,
+      "true_negative": 1891,
+      "false_negative": 920,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.75,
+      "precision": 0.9412897016361886,
+      "recall": 0.489,
+      "false_positive_rate": 0.0305,
+      "predicted_positive_count": 1039,
+      "true_positive": 978,
+      "false_positive": 61,
+      "true_negative": 1939,
+      "false_negative": 1022,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.8,
+      "precision": 0.9663677130044843,
+      "recall": 0.431,
+      "false_positive_rate": 0.015,
+      "predicted_positive_count": 892,
+      "true_positive": 862,
+      "false_positive": 30,
+      "true_negative": 1970,
+      "false_negative": 1138,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.85,
+      "precision": 0.9786950732356857,
+      "recall": 0.3675,
+      "false_positive_rate": 0.008,
+      "predicted_positive_count": 751,
+      "true_positive": 735,
+      "false_positive": 16,
+      "true_negative": 1984,
+      "false_negative": 1265,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.9,
+      "precision": 0.9968,
+      "recall": 0.3115,
+      "false_positive_rate": 0.001,
+      "predicted_positive_count": 625,
+      "true_positive": 623,
+      "false_positive": 2,
+      "true_negative": 1998,
+      "false_negative": 1377,
+      "sample_count": 4000
+    },
+    {
+      "threshold": 0.95,
+      "precision": 1.0,
+      "recall": 0.2385,
+      "false_positive_rate": 0.0,
+      "predicted_positive_count": 477,
+      "true_positive": 477,
+      "false_positive": 0,
+      "true_negative": 2000,
+      "false_negative": 1523,
+      "sample_count": 4000
+    }
+  ],
+  "precision_target": 0.9,
+  "selected_threshold": 0.7,
+  "escalation_enabled": true,
+  "note": "If selected_threshold is null, no candidate threshold reached the precision target on this synthetic cross-validated data; HYBRID NO_EVENT->SUSPECTED ML escalation should remain disabled rather than using a fabricated threshold."
+}

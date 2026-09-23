@@ -32,6 +32,7 @@ from src.api.schemas.event_details import (
     CurrentResponsePlanResponse,
     DetectionEvidenceResponse,
     EventDetailsResult,
+    FireEventMLAssessmentResponse,
     FireEventSummaryResponse,
     FirefightingResourceResponse,
     FireStationResponse,
@@ -46,6 +47,7 @@ from src.api.schemas.event_details import (
     StationSummaryResponse,
 )
 from src.models.fire_evidence_type import FireEvidenceType
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.models.fire_spread_prediction import SUPPORTED_HORIZON_MINUTES
 from src.models.resource_status import ResourceStatus
 from src.models.response_plan_details import ResponseActionDetails, ResponsePlanDetails
@@ -61,6 +63,34 @@ from src.repositories.news_repository import NewsRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
 from src.repositories.satellite_hotspot_repository import SatelliteHotspotRepository
 from src.services.response_planning.response_plan_details_service import ResponsePlanDetailsService
+
+# ML Task 6 (API exposure): `FireEventMLAssessment.ml_failure_reason` is an
+# internal diagnostic string - `MLFireDetectionClassifier` sometimes embeds
+# raw exception text in it (e.g. "ML model load failed: [Errno 2] ... 'C:\\
+# ...\\fire_detection_logistic_v3.joblib'"), which can include filesystem
+# paths. That persisted text is intentionally left untouched (it is useful
+# server-side/in logs), but it must never be forwarded to the public API
+# verbatim. This categorizes the known failure-text prefixes (from
+# src/calculators/fire_detection/fire_detection_ml_classifier.py) into a
+# short, safe, generic reason - any unrecognized text (including future
+# failure-text changes) falls back to a fully generic message rather than
+# risk leaking something new.
+_ML_FAILURE_REASON_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("ML model load failed", "ML model artifact could not be loaded."),
+    ("feature extraction failed", "ML feature extraction failed for this event's evidence."),
+    ("predict_proba failed", "ML inference failed for this event's evidence."),
+    ("ML classifier not configured", "ML classifier is not configured for this deployment."),
+)
+_DEFAULT_SANITIZED_ML_FAILURE_REASON = "ML assessment unavailable."
+
+
+def _sanitize_ml_failure_reason(raw_reason: str | None) -> str | None:
+    if raw_reason is None:
+        return None
+    for prefix, sanitized in _ML_FAILURE_REASON_CATEGORIES:
+        if raw_reason.startswith(prefix):
+            return sanitized
+    return _DEFAULT_SANITIZED_ML_FAILURE_REASON
 
 
 class EventDetailsService:
@@ -125,6 +155,7 @@ class EventDetailsService:
             as_of=snapshot_time,
             fire_event=self._to_fire_event_response(stored_event.id, stored_event.event),
             severity=self._load_severity(fire_event_id),
+            ml_assessment=self._load_ml_assessment(fire_event_id),
             danger=None,
             detection_evidence=self._load_detection_evidence(stored_event.supporting_evidence),
             spread_predictions=self._load_spread_predictions(fire_event_id),
@@ -148,6 +179,32 @@ class EventDetailsService:
             score=assessment.score,
             level=assessment.level,
             assessed_at=assessment.assessed_at,
+        )
+
+    def _load_ml_assessment(self, fire_event_id: int) -> FireEventMLAssessmentResponse | None:
+        """Return the FireEvent's persisted runtime ML/decision trace, or
+        None when it was never evaluated with ML (RULE_ONLY mode, or a
+        FireEvent created before ML Task 5's integration) - a pure read via
+        the repository's existing `get_ml_assessment`, never ML inference."""
+        assessment = self._fire_event_repository.get_ml_assessment(fire_event_id)
+        if assessment is None:
+            return None
+        return self._to_ml_assessment_response(assessment)
+
+    @staticmethod
+    def _to_ml_assessment_response(assessment: FireEventMLAssessment) -> FireEventMLAssessmentResponse:
+        return FireEventMLAssessmentResponse(
+            available=assessment.ml_available,
+            mode=assessment.decision_mode,
+            rule_status=assessment.rule_status,
+            rule_confidence=assessment.rule_confidence,
+            model_score=assessment.ml_probability,
+            agreement=assessment.agreement,
+            model_name=assessment.ml_model_name,
+            model_version=assessment.ml_model_version,
+            feature_schema_version=assessment.ml_feature_schema_version,
+            failure_reason=_sanitize_ml_failure_reason(assessment.ml_failure_reason),
+            updated_at=assessment.updated_at,
         )
 
     def _load_detection_evidence(self, supporting_evidence) -> DetectionEvidenceResponse:  # noqa: ANN001

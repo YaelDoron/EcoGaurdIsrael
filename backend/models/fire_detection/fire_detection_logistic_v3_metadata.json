@@ -1,0 +1,120 @@
+{
+  "model_type": "LogisticRegression",
+  "model_role": "interpretable_ml_baseline",
+  "model_version": "3.0",
+  "dataset": "training_v3.csv",
+  "random_seed": 42,
+  "test_size": 0.2,
+  "feature_names": [
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "satellite_frp_available_ratio",
+    "satellite_frp_mean",
+    "satellite_frp_max",
+    "satellite_brightness_available_ratio",
+    "satellite_brightness_mean",
+    "satellite_brightness_max",
+    "news_none_count",
+    "news_weak_count",
+    "news_moderate_count",
+    "news_strong_count",
+    "news_unknown_count",
+    "time_span_minutes",
+    "max_pairwise_distance_km"
+  ],
+  "total_samples": 4000,
+  "positive_samples": 2000,
+  "negative_samples": 2000,
+  "train_samples": 3200,
+  "test_samples": 800,
+  "held_out_metrics": {
+    "accuracy": 0.7575,
+    "precision": 0.764102564102564,
+    "recall": 0.745,
+    "f1": 0.7544303797468355,
+    "roc_auc": 0.8490875,
+    "true_positive": 298,
+    "true_negative": 308,
+    "false_positive": 92,
+    "false_negative": 102
+  },
+  "standard_cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "metrics": {
+      "accuracy": {
+        "mean": 0.7505000000000001,
+        "std": 0.010173494974687875
+      },
+      "precision": {
+        "mean": 0.7676748834067082,
+        "std": 0.014391752214043417
+      },
+      "recall": {
+        "mean": 0.7190000000000001,
+        "std": 0.01933907960581373
+      },
+      "f1": {
+        "mean": 0.7423115329508245,
+        "std": 0.011402328903704462
+      },
+      "roc_auc": {
+        "mean": 0.837673125,
+        "std": 0.013506860612064943
+      }
+    }
+  },
+  "grouped_cross_validation": {
+    "n_splits": 7,
+    "group": "scenario_family",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.584379149686263,
+        "std": 0.09840935584128943
+      },
+      "precision": {
+        "mean": 0.5231429775173051,
+        "std": 0.24246746936273048
+      },
+      "recall": {
+        "mean": 0.5445374200317211,
+        "std": 0.2733617615035937
+      },
+      "f1": {
+        "mean": 0.5199084992047798,
+        "std": 0.23739796817464487
+      },
+      "roc_auc": {
+        "mean": 0.590482950269525,
+        "std": 0.21638924320248534
+      }
+    }
+  },
+  "archetype_holdout": {
+    "n_splits": 5,
+    "group": "scenario_archetype",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.6826571099435854,
+        "std": 0.11953377738935925
+      },
+      "precision": {
+        "mean": 0.6532341933680827,
+        "std": 0.35372858149411984
+      },
+      "recall": {
+        "mean": 0.47917821619616,
+        "std": 0.3962280902146994
+      },
+      "f1": {
+        "mean": 0.4665688074358263,
+        "std": 0.3791880946406815
+      },
+      "roc_auc": {
+        "mean": 0.7209101664720085,
+        "std": 0.1430614702129643
+      }
+    }
+  }
+}

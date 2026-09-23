@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 
-from src.agents.analysis.fire_severity_assessment_agent import FireSeverityAssessmentAgent
 from src.agents.analysis.response_target_generation_agent import ResponseTargetGenerationAgent
 from src.agents.analysis.response_target_generation_result import ResponseTargetGenerationStatus
 from src.models.fire_event_status import FireEventStatus
@@ -13,6 +12,7 @@ from src.models.operational_refresh_trigger_type import OperationalRefreshTrigge
 from src.models.resource_status import ResourceStatus
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.firefighting_resource_repository import FirefightingResourceRepository
+from src.services.operational_refresh.fire_severity_refresh_orchestrator import FireSeverityRefreshOrchestrator
 from src.services.operational_refresh.fire_spread_refresh_orchestrator import FireSpreadRefreshOrchestrator
 from src.services.operational_refresh.fire_spread_refresh_result import (
     FireSpreadRefreshHorizonStatus,
@@ -43,14 +43,14 @@ class OperationalRefreshOrchestrator:
     def __init__(
         self,
         *,
-        severity_agent: FireSeverityAssessmentAgent,
+        severity_refresh_orchestrator: FireSeverityRefreshOrchestrator,
         spread_refresh_orchestrator: FireSpreadRefreshOrchestrator,
         response_target_agent: ResponseTargetGenerationAgent,
         resource_status_service: ResourceStatusUpdateService,
         resource_repository: FirefightingResourceRepository,
         fire_event_repository: FireEventRepository,
     ) -> None:
-        self._severity_agent = severity_agent
+        self._severity_refresh_orchestrator = severity_refresh_orchestrator
         self._spread_refresh_orchestrator = spread_refresh_orchestrator
         self._response_target_agent = response_target_agent
         self._resource_status_service = resource_status_service
@@ -64,13 +64,29 @@ class OperationalRefreshOrchestrator:
         trigger_type: OperationalRefreshTriggerType,
         as_of: datetime,
     ) -> OperationalRefreshResult:
-        """Refresh current severity/spread/targets for one FireEvent operational change."""
+        """Refresh current severity/spread/targets for one FireEvent operational change.
+
+        Performance pass: fetches the FireEvent ONCE here (instead of each
+        stage independently re-fetching the identical row - previously up
+        to 3-4 redundant repository calls per refresh cycle) and threads it,
+        plus the authoritative severity/spread results this cycle just
+        established, through to Spread and Response Targets via their
+        `_for_event`/`resolved_*` overloads. If the FireEvent cannot be
+        found here (a genuine edge case - normally only reachable via a
+        stale/racing id), every stage falls back to its own by-id repository
+        read, exactly matching pre-optimization behavior.
+        """
         self._validate_fire_event_request(fire_event_id, trigger_type, as_of)
+        stored_event = self._fire_event_repository.get_by_id(fire_event_id)
 
         severity_result = None
         try:
-            if self._should_run_severity(fire_event_id, trigger_type):
-                severity_result = self._severity_agent.assess(fire_event_id, as_of)
+            if self._should_run_severity(stored_event, trigger_type):
+                severity_result = (
+                    self._severity_refresh_orchestrator.refresh_for_event(stored_event, as_of)
+                    if stored_event is not None
+                    else self._severity_refresh_orchestrator.refresh(fire_event_id, as_of)
+                )
         except Exception as exc:  # noqa: BLE001 - conservative orchestration failure boundary.
             logger.exception("Severity refresh failed for FireEvent %s", fire_event_id)
             return OperationalRefreshResult(
@@ -82,11 +98,19 @@ class OperationalRefreshOrchestrator:
                 error_message=str(exc) or "Severity refresh failed.",
             )
 
-        spread_result = self._spread_refresh_orchestrator.refresh(
-            fire_event_id=fire_event_id,
-            trigger_type=trigger_type,
-            as_of=as_of,
-        )
+        if stored_event is not None:
+            spread_result = self._spread_refresh_orchestrator.refresh_for_event(
+                stored_event=stored_event,
+                trigger_type=trigger_type,
+                as_of=as_of,
+                resolved_severity=severity_result,
+            )
+        else:
+            spread_result = self._spread_refresh_orchestrator.refresh(
+                fire_event_id=fire_event_id,
+                trigger_type=trigger_type,
+                as_of=as_of,
+            )
         if spread_result.failed:
             return OperationalRefreshResult(
                 trigger_type=trigger_type,
@@ -99,7 +123,24 @@ class OperationalRefreshOrchestrator:
                 error_message="Fire-spread refresh failed.",
             )
 
-        target_result = self._response_target_agent.generate(fire_event_id=fire_event_id, as_of=as_of)
+        # Only ever contains NO_OP/REFRESHED/INSUFFICIENT_DATA/INACTIVE_EVENT
+        # entries here - any FAILED horizon already returned above via
+        # spread_result.failed. A horizon absent from this dict (spread not
+        # reevaluated this trigger) or mapped to None (no usable prediction)
+        # both correctly fall through to ResponseTargetInputService's own
+        # fallback/skip handling.
+        resolved_spread_by_horizon = {
+            result.horizon_minutes: result.resolved_prediction for result in spread_result.horizon_results
+        }
+        if stored_event is not None:
+            target_result = self._response_target_agent.generate_for_event(
+                stored_event=stored_event,
+                as_of=as_of,
+                resolved_severity=severity_result,
+                resolved_spread_by_horizon=resolved_spread_by_horizon,
+            )
+        else:
+            target_result = self._response_target_agent.generate(fire_event_id=fire_event_id, as_of=as_of)
         if target_result.status is ResponseTargetGenerationStatus.FAILED:
             return OperationalRefreshResult(
                 trigger_type=trigger_type,
@@ -170,16 +211,19 @@ class OperationalRefreshOrchestrator:
             error_message=error_message,
         )
 
+    @staticmethod
     def _should_run_severity(
-        self,
-        fire_event_id: int,
+        stored_event,
         trigger_type: OperationalRefreshTriggerType,
     ) -> bool:
+        """Same decision as before, but against an already-loaded
+        StoredFireEvent (or None) - performance pass: no longer fetches the
+        FireEvent itself (refresh_fire_event() now does that once, up front,
+        for every stage to share)."""
         if trigger_type is OperationalRefreshTriggerType.SEVERITY_UPDATE:
             return False
         if trigger_type is OperationalRefreshTriggerType.WEATHER_UPDATE:
             return True
-        stored_event = self._fire_event_repository.get_by_id(fire_event_id)
         return (
             stored_event is not None
             and stored_event.event.status in _ACTIVE_FIRE_EVENT_STATUSES

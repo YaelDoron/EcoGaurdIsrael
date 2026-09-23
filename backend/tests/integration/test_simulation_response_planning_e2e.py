@@ -75,7 +75,11 @@ from src.services.operational import OperationalContextService
 from src.services.operational_planning_refresh.operational_planning_refresh_coordinator import (
     OperationalPlanningRefreshCoordinator,
 )
-from src.services.operational_refresh import FireSpreadRefreshOrchestrator, OperationalRefreshOrchestrator
+from src.services.operational_refresh import (
+    FireSeverityRefreshOrchestrator,
+    FireSpreadRefreshOrchestrator,
+    OperationalRefreshOrchestrator,
+)
 from src.services.operational_refresh.resource_status_update_service import ResourceStatusUpdateService
 from src.services.response_target import ResponseTargetInputService
 from src.simulation import (
@@ -194,16 +198,22 @@ class RealSimulationStack:
         self.fire_detection_coordinator = SimulationFireDetectionCoordinator(detection_agent=detection_agent)
 
         severity_repository = FireSeverityAssessmentRepository(session_factory)
+        severity_input_service = FireSeverityInputService(
+            fire_event_repository=self.fire_event_repository,
+            weather_repository=weather_repository,
+            satellite_hotspot_repository=satellite_repository,
+            land_cover_client=_StaticVegetationProvider(),
+            vegetation_mapper=_StaticVegetationMapper(_MAPPABLE_VEGETATION),
+        )
         severity_agent = FireSeverityAssessmentAgent(
-            input_service=FireSeverityInputService(
-                fire_event_repository=self.fire_event_repository,
-                weather_repository=weather_repository,
-                satellite_hotspot_repository=satellite_repository,
-                land_cover_client=_StaticVegetationProvider(),
-                vegetation_mapper=_StaticVegetationMapper(_MAPPABLE_VEGETATION),
-            ),
+            input_service=severity_input_service,
             calculator=FireSeverityCalculator(),
             repository=severity_repository,
+        )
+        severity_refresh_orchestrator = FireSeverityRefreshOrchestrator(
+            input_service=severity_input_service,
+            assessment_agent=severity_agent,
+            assessment_repository=severity_repository,
         )
 
         spread_input_service = FireSpreadInputService(
@@ -236,7 +246,7 @@ class RealSimulationStack:
 
         self.resource_repository = FirefightingResourceRepository(session_factory)
         operational_refresh_orchestrator = OperationalRefreshOrchestrator(
-            severity_agent=severity_agent,
+            severity_refresh_orchestrator=severity_refresh_orchestrator,
             spread_refresh_orchestrator=spread_refresh_orchestrator,
             response_target_agent=response_target_agent,
             resource_status_service=ResourceStatusUpdateService(self.resource_repository),

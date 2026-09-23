@@ -15,6 +15,7 @@ from src.models import (
     FireEvidenceRef,
     FireEvidenceType,
 )
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 
 OBSERVED_AT = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
 
@@ -124,6 +125,78 @@ def test_evidence_is_immutable():
 
     with pytest.raises(FrozenInstanceError):
         evidence.latitude = 33.0
+
+
+# --- V3 evidence enrichment (Task 4) ---
+
+
+def test_satellite_evidence_carries_frp_and_brightness():
+    evidence = make_evidence(satellite_frp=42.5, satellite_brightness=310.0, satellite_day_night="D")
+
+    assert evidence.satellite_frp == 42.5
+    assert evidence.satellite_brightness == 310.0
+    assert evidence.satellite_day_night == "D"
+
+
+def test_satellite_evidence_physical_measurements_default_to_none():
+    evidence = make_evidence()
+
+    assert evidence.satellite_frp is None
+    assert evidence.satellite_brightness is None
+    assert evidence.satellite_day_night is None
+
+
+@pytest.mark.parametrize("frp", [-1.0, math.nan, math.inf])
+def test_invalid_satellite_frp_rejected(frp):
+    with pytest.raises(ValueError):
+        make_evidence(satellite_frp=frp)
+
+
+@pytest.mark.parametrize("brightness", [-1.0, math.nan, math.inf])
+def test_invalid_satellite_brightness_rejected(brightness):
+    with pytest.raises(ValueError):
+        make_evidence(satellite_brightness=brightness)
+
+
+def test_satellite_evidence_rejects_news_signal_field():
+    with pytest.raises(ValueError):
+        make_evidence(news_wildfire_signal_strength=NewsWildfireSignalStrength.STRONG)
+
+
+def test_satellite_evidence_rejects_string_day_night_type_violation():
+    with pytest.raises(ValueError):
+        make_evidence(satellite_day_night=123)
+
+
+def test_news_evidence_carries_wildfire_signal_strength():
+    evidence = make_evidence(
+        evidence_type=FireEvidenceType.NEWS,
+        satellite_confidence=None,
+        news_wildfire_signal_strength=NewsWildfireSignalStrength.MODERATE,
+    )
+
+    assert evidence.news_wildfire_signal_strength is NewsWildfireSignalStrength.MODERATE
+
+
+def test_news_evidence_signal_defaults_to_none_meaning_unknown():
+    evidence = make_evidence(evidence_type=FireEvidenceType.NEWS, satellite_confidence=None)
+
+    assert evidence.news_wildfire_signal_strength is None
+
+
+def test_news_evidence_rejects_satellite_frp():
+    with pytest.raises(ValueError):
+        make_evidence(evidence_type=FireEvidenceType.NEWS, satellite_confidence=None, satellite_frp=10.0)
+
+
+def test_news_evidence_rejects_satellite_brightness():
+    with pytest.raises(ValueError):
+        make_evidence(evidence_type=FireEvidenceType.NEWS, satellite_confidence=None, satellite_brightness=300.0)
+
+
+def test_news_evidence_rejects_satellite_day_night():
+    with pytest.raises(ValueError):
+        make_evidence(evidence_type=FireEvidenceType.NEWS, satellite_confidence=None, satellite_day_night="D")
 
 
 def test_valid_candidate_construction_allows_overlapping_numeric_ids_across_sources():

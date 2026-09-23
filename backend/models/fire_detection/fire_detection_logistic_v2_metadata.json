@@ -1,0 +1,85 @@
+{
+  "model_type": "LogisticRegression",
+  "model_role": "interpretable_ml_baseline",
+  "model_version": "2.0",
+  "dataset": "training_v2.csv",
+  "random_seed": 42,
+  "test_size": 0.2,
+  "feature_names": [
+    "satellite_count",
+    "news_count",
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "time_span_minutes",
+    "max_pairwise_distance_km"
+  ],
+  "total_samples": 3000,
+  "positive_samples": 1500,
+  "negative_samples": 1500,
+  "train_samples": 2400,
+  "test_samples": 600,
+  "held_out_metrics": {
+    "accuracy": 0.6783333333333333,
+    "precision": 0.6801346801346801,
+    "recall": 0.6733333333333333,
+    "f1": 0.6767169179229481,
+    "roc_auc": 0.7671055555555556,
+    "true_positive": 202,
+    "true_negative": 205,
+    "false_positive": 95,
+    "false_negative": 98
+  },
+  "standard_cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "metrics": {
+      "accuracy": {
+        "mean": 0.6990000000000001,
+        "std": 0.007423685817106705
+      },
+      "precision": {
+        "mean": 0.7106791653830883,
+        "std": 0.006889980953712624
+      },
+      "recall": {
+        "mean": 0.6713333333333333,
+        "std": 0.015577761927397227
+      },
+      "f1": {
+        "mean": 0.6903585719633948,
+        "std": 0.009697475286893456
+      },
+      "roc_auc": {
+        "mean": 0.7788588888888889,
+        "std": 0.00877151858412242
+      }
+    }
+  },
+  "grouped_cross_validation": {
+    "n_splits": 7,
+    "group": "scenario_family",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.5430142400123877,
+        "std": 0.27811017217731465
+      },
+      "precision": {
+        "mean": 0.5390907724843205,
+        "std": 0.36529054789336507
+      },
+      "recall": {
+        "mean": 0.5151524792538217,
+        "std": 0.34518659799949697
+      },
+      "f1": {
+        "mean": 0.5113313903798835,
+        "std": 0.32880524093719216
+      },
+      "roc_auc": {
+        "mean": 0.5814951466296501,
+        "std": 0.36245249175239813
+      }
+    }
+  }
+}

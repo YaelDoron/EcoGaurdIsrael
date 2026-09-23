@@ -13,6 +13,7 @@ from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 from src.models.satellite_hotspot import SatelliteHotspot
 from src.repositories.news_repository import StoredWildfireReport
 from src.repositories.satellite_hotspot_repository import StoredSatelliteHotspot
@@ -64,6 +65,9 @@ def make_hotspot(
     detected_at=AS_OF - timedelta(minutes=10),
     confidence="n",
     location_name=None,
+    frp=None,
+    brightness=None,
+    day_night=None,
 ):
     return StoredSatelliteHotspot(
         id=evidence_id,
@@ -73,6 +77,9 @@ def make_hotspot(
             detected_at=detected_at,
             confidence=confidence,
             location_name=location_name,
+            frp=frp,
+            brightness=brightness,
+            day_night=day_night,
         ),
     )
 
@@ -85,6 +92,7 @@ def make_report(
     observed_at=AS_OF - timedelta(minutes=10),
     published_at=None,
     fetched_at=None,
+    wildfire_signal_strength=None,
 ):
     effective_fetched_at = fetched_at or observed_at
     return StoredWildfireReport(
@@ -100,6 +108,7 @@ def make_report(
             longitude=longitude,
             published_at=published_at,
             fetched_at=effective_fetched_at,
+            wildfire_signal_strength=wildfire_signal_strength,
         ),
     )
 
@@ -195,6 +204,66 @@ def test_news_evidence_uses_stored_observed_at_and_has_no_satellite_confidence()
     assert evidence.evidence_type is FireEvidenceType.NEWS
     assert evidence.observed_at == observed_at
     assert evidence.satellite_confidence is None
+
+
+# --- V3 evidence enrichment (Task 4): FRP/brightness/news signal ---
+
+
+def test_satellite_evidence_carries_frp_and_brightness_forward():
+    service, _, _ = make_service(satellite=[make_hotspot(frp=42.5, brightness=310.0, day_night="D")])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.satellite_frp == 42.5
+    assert evidence.satellite_brightness == 310.0
+    assert evidence.satellite_day_night == "D"
+
+
+def test_satellite_evidence_missing_frp_and_brightness_remain_none():
+    service, _, _ = make_service(satellite=[make_hotspot(frp=None, brightness=None)])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.satellite_frp is None
+    assert evidence.satellite_brightness is None
+
+
+def test_satellite_evidence_never_carries_news_wildfire_signal():
+    service, _, _ = make_service(satellite=[make_hotspot()])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.news_wildfire_signal_strength is None
+
+
+def test_news_evidence_carries_wildfire_signal_strength_forward():
+    service, _, _ = make_service(
+        news=[make_report(wildfire_signal_strength=NewsWildfireSignalStrength.STRONG)]
+    )
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.news_wildfire_signal_strength is NewsWildfireSignalStrength.STRONG
+
+
+def test_historical_news_with_null_signal_remains_valid():
+    """A report saved before this signal existed (wildfire_signal_strength=None) must
+    still normalize into valid evidence - never fabricated as NONE."""
+    service, _, _ = make_service(news=[make_report(wildfire_signal_strength=None)])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.news_wildfire_signal_strength is None
+
+
+def test_news_evidence_never_carries_satellite_physical_measurements():
+    service, _, _ = make_service(news=[make_report()])
+
+    evidence = service.build_candidates(AS_OF)[0].evidence[0]
+
+    assert evidence.satellite_frp is None
+    assert evidence.satellite_brightness is None
+    assert evidence.satellite_day_night is None
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
 
 from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
+
+if TYPE_CHECKING:
+    from src.repositories.fire_spread_prediction_repository import StoredFireSpreadPredictionWithCells
 
 
 class FireSpreadRefreshHorizonStatus(Enum):
@@ -29,6 +33,14 @@ class FireSpreadRefreshHorizonResult:
     previous_prediction_id: int | None = None
     effective_state_fingerprint: str | None = None
     error_message: str | None = None
+    # Performance pass: the authoritative resolved prediction (with cells)
+    # for this horizon - reused (NO_OP) or just-persisted (REFRESHED) -
+    # so ResponseTargetGenerationAgent can consume it directly within the
+    # same OperationalRefreshOrchestrator cycle instead of re-querying.
+    # None for INSUFFICIENT_DATA/INACTIVE_EVENT/FAILED, or when unavailable.
+    # Purely additive/internal-handoff data - never required by external
+    # consumers of this result, who continue to use prediction_id.
+    resolved_prediction: "StoredFireSpreadPredictionWithCells | None" = None
 
     @property
     def prediction_created(self) -> bool:

@@ -33,6 +33,9 @@ from pydantic import BaseModel
 
 from src.models.fire_danger_assessment_status import FireDangerAssessmentStatus
 from src.models.fire_danger_level import FireDangerLevel
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
 from src.models.fire_severity_level import FireSeverityLevel
@@ -63,6 +66,43 @@ class SeverityAssessmentResponse(BaseModel):
     score: Optional[float]
     level: Optional[FireSeverityLevel]
     assessed_at: datetime
+
+
+class FireEventMLAssessmentResponse(BaseModel):
+    """The FireEvent's latest persisted runtime ML/decision trace (ML Task 6, API exposure only).
+
+    Read-only projection of `FireEventMLAssessment`
+    (`src/models/fire_event_ml_assessment.py`) - every field here is copied
+    from that already-persisted row, never recomputed and never triggers ML
+    inference. `model_score` (renamed from the domain field's
+    `ml_probability`) is deliberately distinct from `rule_confidence`: they
+    are different signals (deterministic methodology score vs. a
+    model-estimated score from the synthetic-trained Logistic Regression V3
+    classifier) and must never be collapsed into one generic "confidence"
+    value - see backend/docs/fire_detection_runtime_ml.md, "Probability
+    interpretation". `model_score` is NOT a calibrated real-world
+    probability of wildfire occurrence and must never be presented as such.
+
+    `mode` reflects `FireDetectionDecisionMode` - in `shadow` (the default),
+    ML was evaluated and recorded but never controlled the FireEvent's final
+    `status` (see `EventDetailsResult.fire_event.status`, which is always
+    independently sourced from the persisted FireEvent row, never from this
+    object). `failure_reason` is a sanitized category string, never the raw
+    persisted exception text (which can contain filesystem paths) - see
+    `_sanitize_ml_failure_reason` in event_details_service.py.
+    """
+
+    available: bool
+    mode: FireDetectionDecisionMode
+    rule_status: FireDetectionStatus
+    rule_confidence: float
+    model_score: Optional[float]
+    agreement: FireDetectionMLRuleAgreement
+    model_name: Optional[str]
+    model_version: Optional[str]
+    feature_schema_version: Optional[str]
+    failure_reason: Optional[str]
+    updated_at: datetime
 
 
 class DangerAssessmentResponse(BaseModel):
@@ -232,6 +272,7 @@ class EventDetailsResult(BaseModel):
     as_of: datetime
     fire_event: FireEventSummaryResponse
     severity: Optional[SeverityAssessmentResponse]
+    ml_assessment: Optional[FireEventMLAssessmentResponse] = None
     danger: Optional[DangerAssessmentResponse]
     detection_evidence: DetectionEvidenceResponse
     spread_predictions: list[SpreadPredictionResponse]

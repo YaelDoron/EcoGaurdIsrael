@@ -464,6 +464,27 @@ def print_fire_detection_result(
     print(f"events_created={detection_result.events_created}", file=output)
     print(f"events_updated={detection_result.events_updated}", file=output)
     print(f"event_ids={_format_event_ids(detection_result.event_ids)}", file=output)
+    for assessment in detection_result.candidate_assessments:
+        _print_candidate_assessment(assessment, output)
+
+
+def _print_candidate_assessment(assessment, output: TextIO) -> None:
+    """Task 5: show rule/ML/decision-mode output per evaluated candidate - proof ML
+    inference actually ran, not just a silently-loaded model. Kept compact by design."""
+    print(
+        f"  candidate: event_id={assessment.event_id if assessment.event_id is not None else '-'} "
+        f"rule={assessment.rule_status.value}({assessment.rule_confidence:.2f}) "
+        f"final={assessment.final_status.value} mode={assessment.decision_mode.value}",
+        file=output,
+    )
+    if assessment.ml_available:
+        print(
+            f"    ml: probability={assessment.ml_probability:.2f} "
+            f"model_version={assessment.ml_model_version} agreement={assessment.agreement.value}",
+            file=output,
+        )
+    else:
+        print(f"    ml: unavailable agreement={assessment.agreement.value}", file=output)
 
 
 def print_fire_severity_result(

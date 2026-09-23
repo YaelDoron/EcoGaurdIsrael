@@ -79,6 +79,19 @@
   color: var(--color-text-muted);
 }
 
+/* Compact "Rule 0.88 | AI 0.90" row (ML Task 7): a single line, not the
+   stacked value+caption layout the default .fire-event-card__row dd uses -
+   the scores should not dominate the card. */
+.fire-event-card__row dd.fire-event-card__scores {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.fire-event-card__scores-divider {
+  color: var(--color-text-muted);
+}
+
 .fire-event-card__link {
   align-self: flex-start;
   padding: var(--space-1) var(--space-3);

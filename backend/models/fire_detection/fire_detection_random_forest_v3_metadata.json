@@ -1,0 +1,128 @@
+{
+  "model_type": "RandomForestClassifier",
+  "model_role": "nonlinear_ml_comparison_candidate",
+  "model_version": "3.0",
+  "dataset": "training_v3.csv",
+  "random_seed": 42,
+  "feature_names": [
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "satellite_frp_available_ratio",
+    "satellite_frp_mean",
+    "satellite_frp_max",
+    "satellite_brightness_available_ratio",
+    "satellite_brightness_mean",
+    "satellite_brightness_max",
+    "news_none_count",
+    "news_weak_count",
+    "news_moderate_count",
+    "news_strong_count",
+    "news_unknown_count",
+    "time_span_minutes",
+    "max_pairwise_distance_km"
+  ],
+  "training_configuration": {
+    "n_estimators": 300,
+    "random_state": 42,
+    "class_weight": null
+  },
+  "total_samples": 4000,
+  "positive_samples": 2000,
+  "negative_samples": 2000,
+  "train_samples": 3200,
+  "test_samples": 800,
+  "train_metrics": {
+    "accuracy": 0.975,
+    "f1": 0.9751243781094527
+  },
+  "held_out_metrics": {
+    "accuracy": 0.83125,
+    "precision": 0.8045977011494253,
+    "recall": 0.875,
+    "f1": 0.8383233532934131,
+    "roc_auc": 0.9277999999999998,
+    "true_positive": 350,
+    "true_negative": 315,
+    "false_positive": 85,
+    "false_negative": 50
+  },
+  "standard_cross_validation": {
+    "n_splits": 5,
+    "random_state": 42,
+    "metrics": {
+      "accuracy": {
+        "mean": 0.8275,
+        "std": 0.013851895177195081
+      },
+      "precision": {
+        "mean": 0.8261400164956315,
+        "std": 0.010510195116934382
+      },
+      "recall": {
+        "mean": 0.8295,
+        "std": 0.021874642854227355
+      },
+      "f1": {
+        "mean": 0.8277334318933477,
+        "std": 0.015059639720382004
+      },
+      "roc_auc": {
+        "mean": 0.9117856249999999,
+        "std": 0.008698480156397962
+      }
+    }
+  },
+  "grouped_cross_validation": {
+    "n_splits": 7,
+    "group": "scenario_family",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.46243748940218393,
+        "std": 0.11154548846989117
+      },
+      "precision": {
+        "mean": 0.43046346549715525,
+        "std": 0.24880059365360202
+      },
+      "recall": {
+        "mean": 0.55302252198356,
+        "std": 0.2879650931663381
+      },
+      "f1": {
+        "mean": 0.4673687383246614,
+        "std": 0.2424911795287136
+      },
+      "roc_auc": {
+        "mean": 0.3777247647914093,
+        "std": 0.21476415089972523
+      }
+    }
+  },
+  "archetype_holdout": {
+    "n_splits": 5,
+    "group": "scenario_archetype",
+    "metrics": {
+      "accuracy": {
+        "mean": 0.6478101748599197,
+        "std": 0.10773289038801519
+      },
+      "precision": {
+        "mean": 0.4726055734691652,
+        "std": 0.2975874369605156
+      },
+      "recall": {
+        "mean": 0.5100456600250317,
+        "std": 0.38469459161021574
+      },
+      "f1": {
+        "mean": 0.47089337928519076,
+        "std": 0.33988609552762405
+      },
+      "roc_auc": {
+        "mean": 0.6181248695693071,
+        "std": 0.17050897772009763
+      }
+    }
+  }
+}

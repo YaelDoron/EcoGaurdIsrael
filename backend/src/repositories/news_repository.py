@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.database.connection import get_session_factory
 from src.database.models.wildfire_report_db import WildfireReportDB
 from src.models.fire_report import WildfireReport
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 from src.repositories.exceptions import NewsRepositoryError
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,9 @@ class NewsRepository:
                 longitude=report.longitude,
                 published_at=report.published_at,
                 fetched_at=report.fetched_at,
+                wildfire_signal_strength=(
+                    report.wildfire_signal_strength.value if report.wildfire_signal_strength is not None else None
+                ),
             )
             session.add(db_report)
 
@@ -205,7 +209,19 @@ class NewsRepository:
             longitude=db_report.longitude,
             published_at=NewsRepository._ensure_aware_datetime(db_report.published_at),
             fetched_at=NewsRepository._ensure_aware_datetime(db_report.fetched_at),
+            wildfire_signal_strength=NewsRepository._to_wildfire_signal_strength(db_report.wildfire_signal_strength),
         )
+
+    @staticmethod
+    def _to_wildfire_signal_strength(value: str | None) -> NewsWildfireSignalStrength | None:
+        """None (including every pre-migration row) maps to None ("unknown"), never a fabricated value."""
+        if value is None:
+            return None
+        try:
+            return NewsWildfireSignalStrength(value)
+        except ValueError:
+            logger.warning("Unrecognized stored wildfire_signal_strength value: %r", value)
+            return None
 
     @staticmethod
     def _ensure_aware_datetime(value: datetime | str | None) -> datetime | None:

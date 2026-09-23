@@ -31,6 +31,8 @@ from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.models.fire_report import WildfireReport
+from src.models.news_text_analysis import NewsTextAnalysis
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 from src.models.fire_station import FireStation
 from src.models.firefighting_resource import FirefightingResource
 from src.models.resource_status import ResourceStatus
@@ -150,6 +152,8 @@ __all__ = [
     "WeatherObservation",
     "SatelliteHotspot",
     "WildfireReport",
+    "NewsTextAnalysis",
+    "NewsWildfireSignalStrength",
     "FireDangerInput",
     "FireDangerAssessment",
     "FireDangerAssessmentStatus",

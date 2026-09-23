@@ -297,9 +297,13 @@ def test_at9_identical_effective_input_produces_same_logical_ordered_targets(sta
     first = stack["agent"].generate(fire_event_id=fire_event_id, as_of=AS_OF)
     second = stack["agent"].generate(fire_event_id=fire_event_id, as_of=AS_OF)
 
-    assert first.target_set_id != second.target_set_id
+    # Performance pass: identical effective input now REUSES the existing
+    # target set (append-only history stays at 1 row) instead of minting a
+    # duplicate - "same logical ordered targets" now means the same row,
+    # not merely equal content in two different rows.
+    assert first.target_set_id == second.target_set_id
     assert logical_targets(first.targets) == logical_targets(second.targets)
-    assert len(stack["targets"].get_history_for_event(fire_event_id)) == 2
+    assert len(stack["targets"].get_history_for_event(fire_event_id)) == 1
 
 
 def test_active_fire_overlap_predicted_location_is_removed_but_active_fire_remains(stack):

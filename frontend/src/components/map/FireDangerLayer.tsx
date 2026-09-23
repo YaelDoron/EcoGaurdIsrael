@@ -24,12 +24,19 @@ const METERS_PER_KM = 1000;
  * Data-only: this component does not fetch anything itself - the page
  * supplies `areas` from useOperationsOverview()'s own response.
  *
- * Popup wording (clarity pass): explicitly labels the persisted danger
- * level as "Fire danger" (never "Severity" - that is a distinct FireEvent
- * concept) and the persisted score as "FFWI score" (the current
- * methodology is Fosberg Fire Weather Index) rather than a bare, ambiguous
- * "Score". Still no calculation of any kind - only presentation labels
- * around the exact same persisted `level`/`score`/`assessed_at`.
+ * Popup wording (clarity pass, extended - dashboard Part 3): an explicit
+ * "Fire Danger Assessment" heading makes it unmistakable that this is NOT
+ * a FireEvent popup (see ActiveFireMapLayer's "Fire Event #N" popup, which
+ * shows Detection/Severity and never FFWI) before the area name/level/FFWI
+ * - color alone was not a sufficient signal. "Level" (never "Severity" -
+ * that is a distinct FireEvent concept) and "FFWI" (the current methodology
+ * is Fosberg Fire Weather Index, never a bare ambiguous "Score") are shown
+ * for EVERY level (Low/Moderate/High/Very High/Extreme) whenever the
+ * persisted assessment has a score - rendering is conditioned only on
+ * `assessment.score !== null`, never on `level`, so a High/Extreme reading
+ * is exactly as likely to show FFWI as a Low one. Still no calculation of
+ * any kind - only presentation labels around the exact same persisted
+ * `level`/`score`/`assessed_at`.
  */
 function toTitleCase(label: string): string {
   return label.replace(/\b\w/g, (character) => character.toUpperCase());
@@ -57,6 +64,9 @@ export function FireDangerLayer({ areas }: FireDangerLayerProps) {
             pathOptions={{ color, fillColor: color, fillOpacity: FILL_OPACITY, weight: STROKE_WEIGHT }}
           >
             <Popup>
+              <p>
+                <small>Fire Danger Assessment</small>
+              </p>
               <strong>{area.area_name}</strong>
               {assessment === null ? (
                 <p>No assessment yet</p>
@@ -64,9 +74,9 @@ export function FireDangerLayer({ areas }: FireDangerLayerProps) {
                 <p>Insufficient data for an assessment</p>
               ) : (
                 <>
-                  <p>Fire danger: {toTitleCase(FIRE_DANGER_PRESENTATION[level].label)}</p>
+                  <p>Level: {toTitleCase(FIRE_DANGER_PRESENTATION[level].label)}</p>
                   {assessment.score !== null ? (
-                    <p title={FFWI_SCORE_HELP_TEXT}>FFWI score: {assessment.score.toFixed(1)}</p>
+                    <p title={FFWI_SCORE_HELP_TEXT}>FFWI: {assessment.score.toFixed(1)}</p>
                   ) : null}
                   <p>
                     Assessed: <TimestampDisplay value={assessment.assessed_at} />

@@ -85,8 +85,8 @@ class NewsMonitoringAgent:
             if not source_url or self.news_repository.exists_by_source_url(source_url):
                 continue
 
-            location_name = self.text_processor.extract_location(entry["title"], entry["summary"])
-            latitude, longitude = self.geocoder.geocode(location_name)
+            analysis = self.text_processor.analyze(entry["title"], entry["summary"])
+            latitude, longitude = self.geocoder.geocode(analysis.location_name)
 
             # Create a WildfireReport object with the extracted and geocoded information
             # The object is saved to the database.
@@ -95,11 +95,12 @@ class NewsMonitoringAgent:
                 source_feed=entry["source_feed"],
                 title=entry["title"],
                 summary=entry["summary"],
-                location_name=location_name,
+                location_name=analysis.location_name,
                 latitude=latitude,
                 longitude=longitude,
                 published_at=self._parse_published_at(entry.get("published")),
                 fetched_at=datetime.now(timezone.utc),
+                wildfire_signal_strength=analysis.wildfire_signal_strength,
             )
 
             try:
@@ -111,11 +112,12 @@ class NewsMonitoringAgent:
             if not save_result.is_duplicate:
                 saved_count += 1
                 logger.info(
-                    "Saved report: '%s...' -> location=%s (%s, %s)",
+                    "Saved report: '%s...' -> location=%s (%s, %s), signal=%s",
                     report.title[:60],
-                    location_name,
+                    analysis.location_name,
                     latitude,
                     longitude,
+                    analysis.wildfire_signal_strength,
                 )
 
         logger.info("Cycle complete: %d new reports saved", saved_count)

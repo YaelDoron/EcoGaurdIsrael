@@ -52,13 +52,28 @@ class FireSeverityInputService:
         self._vegetation_mapper = vegetation_mapper or VegetationMapper()
 
     def prepare_input(self, fire_event_id: int, as_of: datetime) -> FireSeverityInputResult:
-        """Prepare FireSeverityInput for an active FireEvent at a timezone-aware instant."""
+        """Prepare FireSeverityInput for an active FireEvent at a timezone-aware instant.
+
+        Fetches the FireEvent by id, then delegates to prepare_input_for_event()
+        - unchanged behavior/signature for existing callers (API routers, the
+        legacy simulation coordinator).
+        """
         _validate_fire_event_id(fire_event_id)
         _validate_aware_datetime("as_of", as_of)
 
         stored_event = self._fire_event_repository.get_by_id(fire_event_id)
         if stored_event is None:
             return _insufficient_result(fire_event_id)
+        return self.prepare_input_for_event(stored_event, as_of)
+
+    def prepare_input_for_event(self, stored_event: StoredFireEvent, as_of: datetime) -> FireSeverityInputResult:
+        """Same preparation as prepare_input(), but for an ALREADY-LOADED
+        StoredFireEvent - performance pass: avoids a redundant FireEvent
+        fetch when the caller (OperationalRefreshOrchestrator) already has
+        one for this refresh cycle. Never touches FireEventRepository.
+        """
+        _validate_aware_datetime("as_of", as_of)
+        fire_event_id = stored_event.id
         if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
             return FireSeverityInputResult(
                 status=FireSeverityInputStatus.INACTIVE_EVENT,
@@ -144,14 +159,19 @@ class FireSeverityInputService:
         stored_event: StoredFireEvent,
         as_of: datetime,
     ) -> tuple[StoredSatelliteHotspot, ...]:
-        satellite_ids = [
+        satellite_ids = tuple(
             ref.evidence_id
             for ref in stored_event.supporting_evidence
             if ref.evidence_type is FireEvidenceType.SATELLITE
-        ]
+        )
+        # Performance pass: batched in one query (get_by_ids) instead of one
+        # get_by_id() round trip per evidence reference - profiling showed
+        # severity's input loading dominated its total cost, and this loop
+        # was a pure N+1 over what is often 1-2 satellite references.
+        by_id = {record.id: record for record in self._satellite_hotspot_repository.get_by_ids(satellite_ids)}
         records = []
         for hotspot_id in sorted(satellite_ids):
-            record = self._satellite_hotspot_repository.get_by_id(hotspot_id)
+            record = by_id.get(hotspot_id)
             if record is None:
                 continue
             if not _satellite_hotspot_is_recent(record, as_of):

@@ -12,6 +12,7 @@ from src.calculators.fire_detection.fire_detection_config import (
     FIRE_DETECTION_METHODOLOGY_NAME,
     FIRE_DETECTION_METHODOLOGY_VERSION,
 )
+from src.calculators.fire_detection.fire_detection_decision_policy import FireDetectionHybridPolicy
 from src.models import (
     FireDetectionCandidate,
     FireDetectionDecision,
@@ -22,7 +23,13 @@ from src.models import (
     FireEvidenceRef,
     FireEvidenceType,
 )
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_assessment import FireDetectionMLAssessment
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.repositories.fire_event_repository import StoredFireEvent
+
+RULE_ONLY_POLICY = FireDetectionHybridPolicy(mode=FireDetectionDecisionMode.RULE_ONLY)
 
 AS_OF = datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc)
 OBSERVED_AT = AS_OF - timedelta(minutes=10)
@@ -138,6 +145,8 @@ class FakeFireEventRepository:
         self.get_ref_calls = []
         self.next_id = 10
         self.refs_by_event_id = {}
+        self.ml_assessments = {}
+        self.ml_assessment_writes = []
 
     def find_matching_active_event(self, latitude, longitude, observed_at):
         self.match_calls.append((latitude, longitude, observed_at))
@@ -170,16 +179,42 @@ class FakeFireEventRepository:
         self.updated.append((fire_event_id, fire_event))
         return StoredFireEvent(fire_event_id, fire_event, self.refs_by_event_id[fire_event_id])
 
+    def upsert_ml_assessment(self, fire_event_id, assessment):
+        self.ml_assessment_writes.append((fire_event_id, assessment))
+        self.ml_assessments[fire_event_id] = assessment
+        return assessment
+
+    def get_ml_assessment(self, fire_event_id):
+        return self.ml_assessments.get(fire_event_id)
+
+
+class FakeMLClassifier:
+    def __init__(self, assessment=None, assessments=None):
+        self.assessment = assessment
+        self.assessments = list(assessments) if assessments is not None else None
+        self.calls = []
+
+    def assess(self, evidence):
+        self.calls.append(tuple(evidence))
+        if self.assessments is not None:
+            return self.assessments.pop(0)
+        return self.assessment
+
 
 def candidate(*evidence):
     return FireDetectionCandidate(tuple(evidence))
 
 
-def make_agent(evidence_service, calculator, repository):
+def make_agent(evidence_service, calculator, repository, decision_policy=RULE_ONLY_POLICY, ml_classifier=None):
+    # RULE_ONLY by default: these tests exercise the deterministic rule-based
+    # orchestration exactly as before Task 5 - ML mode/agreement behavior has
+    # its own dedicated tests below.
     return FireDetectionAgent(
         evidence_service=evidence_service,
         calculator=calculator,
         fire_event_repository=repository,
+        decision_policy=decision_policy,
+        ml_classifier=ml_classifier,
     )
 
 
@@ -552,3 +587,252 @@ def test_result_validation_and_immutability():
         FireDetectionResult(True, 0, 0, 0, 0, (), "unexpected")
     with pytest.raises(ValueError):
         FireDetectionResult(False, 0, 0, 0, 0, ())
+
+
+# --- Task 5: decision modes ---
+
+
+def ml_available(probability=0.86):
+    return FireDetectionMLAssessment(
+        available=True,
+        probability=probability,
+        model_name="fire_detection_logistic_v3",
+        model_version="3.0",
+        feature_schema_version="v3",
+        failure_reason=None,
+    )
+
+
+def ml_unavailable(reason="ML model unavailable."):
+    return FireDetectionMLAssessment(
+        available=False,
+        probability=None,
+        model_name=None,
+        model_version=None,
+        feature_schema_version=None,
+        failure_reason=reason,
+    )
+
+
+SHADOW_POLICY = FireDetectionHybridPolicy(mode=FireDetectionDecisionMode.SHADOW, ml_suspect_threshold=0.70)
+HYBRID_POLICY = FireDetectionHybridPolicy(mode=FireDetectionDecisionMode.HYBRID, ml_suspect_threshold=0.70)
+
+
+def test_rule_only_never_calls_ml_classifier():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available())
+
+    agent = make_agent(service, calculator, repository, decision_policy=RULE_ONLY_POLICY, ml_classifier=ml_classifier)
+    agent.detect(AS_OF)
+
+    assert ml_classifier.calls == []
+    assert repository.ml_assessment_writes == []  # RULE_ONLY writes no ML trace row at all
+
+
+def test_shadow_calls_ml_but_final_equals_rule():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.05))  # low ML, disagrees with rule
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)
+
+    assert len(ml_classifier.calls) == 1
+    assert repository.created[0][0].status is FireEventStatus.CONFIRMED  # rule wins, unchanged
+    assert result.candidate_assessments[0].final_status is FireDetectionStatus.CONFIRMED
+    assert result.candidate_assessments[0].ml_probability == pytest.approx(0.05)
+
+
+def test_shadow_records_ml_assessment_metadata_on_created_event():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.9))
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    agent.detect(AS_OF)
+
+    event_id, stored_assessment = repository.ml_assessment_writes[0]
+    assert stored_assessment.ml_available is True
+    assert stored_assessment.ml_probability == pytest.approx(0.9)
+    assert stored_assessment.decision_mode is FireDetectionDecisionMode.SHADOW
+    assert stored_assessment.rule_status is FireDetectionStatus.CONFIRMED
+
+
+def test_hybrid_confirmed_stays_confirmed_regardless_of_ml():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.01))
+
+    agent = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier)
+    agent.detect(AS_OF)
+
+    assert repository.created[0][0].status is FireEventStatus.CONFIRMED
+
+
+def test_hybrid_suspected_never_downgraded_or_auto_confirmed():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.99))
+
+    agent = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier)
+    agent.detect(AS_OF)
+
+    assert repository.created[0][0].status is FireEventStatus.SUSPECTED  # not auto-CONFIRMED
+
+
+def test_hybrid_no_event_below_threshold_stays_no_event():
+    evidence = satellite(confidence="low")
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.NO_EVENT, 0.0, ())])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.5))
+
+    agent = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)
+
+    assert result.no_event_count == 1
+    assert repository.created == []
+
+
+def test_hybrid_no_event_above_suspect_threshold_escalates_to_suspected():
+    evidence = satellite(confidence="low")
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.NO_EVENT, 0.0, ())])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.9))
+
+    agent = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)
+
+    assert result.no_event_count == 0
+    assert result.events_created == 1
+    assert repository.created[0][0].status is FireEventStatus.SUSPECTED
+
+
+def test_hybrid_ml_unavailable_falls_back_to_rule():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_unavailable())
+
+    agent = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier)
+    agent.detect(AS_OF)
+
+    assert repository.created[0][0].status is FireEventStatus.CONFIRMED
+
+
+def test_disagreement_rule_confirmed_ml_non_fire_does_not_raise():
+    evidence = satellite()
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.CONFIRMED, 0.8, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.02))
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)  # must not raise
+
+    assert result.success is True
+    assert result.candidate_assessments[0].agreement is FireDetectionMLRuleAgreement.RULE_STRONGER
+
+
+def test_disagreement_rule_no_event_ml_predicts_fire_does_not_raise():
+    evidence = satellite(confidence="low")
+    service = FakeEvidenceService(candidates=[candidate(evidence)])
+    calculator = FakeCalculator([decision(FireDetectionStatus.NO_EVENT, 0.0, ())])
+    repository = FakeFireEventRepository()
+    ml_classifier = FakeMLClassifier(assessment=ml_available(probability=0.95))
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)  # must not raise
+
+    assert result.success is True
+    assert result.candidate_assessments[0].agreement is FireDetectionMLRuleAgreement.ML_STRONGER
+    assert result.candidate_assessments[0].final_status is FireDetectionStatus.NO_EVENT
+
+
+def test_new_evidence_triggers_ml_reevaluation_on_existing_event():
+    existing = StoredFireEvent(7, event(status=FireEventStatus.CONFIRMED, confidence=0.8), (sat_ref(1),))
+    new_evidence = news()
+    service = FakeEvidenceService(
+        candidates=[candidate(satellite(), new_evidence)],
+        resolved={(news_ref(2), sat_ref(1)): (satellite(), new_evidence)},
+    )
+    calculator = FakeCalculator(
+        [
+            decision(FireDetectionStatus.CONFIRMED, 0.875, (sat_ref(1), news_ref(2))),  # candidate decision
+            decision(FireDetectionStatus.CONFIRMED, 0.875, (sat_ref(1), news_ref(2))),  # combined-evidence reevaluation
+        ]
+    )
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    # One assessment for the initial candidate-level check, one for the actual
+    # combined-evidence reevaluation that gets persisted.
+    ml_classifier = FakeMLClassifier(assessments=[ml_available(probability=0.4), ml_available(probability=0.9)])
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)
+
+    assert result.success is True
+    # ML is called again on the combined (unioned) evidence - never left stale
+    # after new evidence arrives - and the FRESH (combined) probability is what
+    # gets persisted, not the stale candidate-only one.
+    assert len(ml_classifier.calls) == 2
+    stored_probability = repository.ml_assessment_writes[-1][1].ml_probability
+    assert stored_probability == pytest.approx(0.9)
+
+
+def test_unchanged_reevaluation_does_not_rewrite_ml_assessment():
+    existing = StoredFireEvent(7, event(status=FireEventStatus.CONFIRMED, confidence=0.875), (sat_ref(1), news_ref(2)))
+    both_evidence = (satellite(), news())
+    service = FakeEvidenceService(
+        candidates=[candidate(*both_evidence)],
+        resolved={(news_ref(2), sat_ref(1)): both_evidence},
+    )
+    calculator = FakeCalculator(
+        [
+            decision(FireDetectionStatus.CONFIRMED, 0.875, (sat_ref(1), news_ref(2))),
+            decision(FireDetectionStatus.CONFIRMED, 0.875, (sat_ref(1), news_ref(2))),
+        ]
+    )
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1), news_ref(2))
+    same_probability_assessment = ml_available(probability=0.9)
+    # Pre-seed the repository with the assessment the reevaluation will recompute identically.
+    repository.ml_assessments[7] = FireEventMLAssessment(
+        fire_event_id=7,
+        decision_mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.875,
+        ml_available=True,
+        ml_probability=0.9,
+        ml_model_name="fire_detection_logistic_v3",
+        ml_model_version="3.0",
+        ml_feature_schema_version="v3",
+        ml_failure_reason=None,
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+        updated_at=OBSERVED_AT,
+    )
+    # Called twice (candidate-level check, then the combined-evidence
+    # reevaluation) - both return the same probability as what is already stored.
+    ml_classifier = FakeMLClassifier(assessments=[same_probability_assessment, same_probability_assessment])
+
+    agent = make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier)
+    result = agent.detect(AS_OF)
+
+    assert result.success is True
+    # Reprocessing identical evidence -> no newly_added_refs -> event unchanged ->
+    # and the ML assessment is materially the same, so no rewrite.
+    assert repository.ml_assessment_writes == []
+    assert repository.updated == []

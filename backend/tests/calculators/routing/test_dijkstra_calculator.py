@@ -190,3 +190,93 @@ def test_negative_distance_meters_rejected():
 
     with pytest.raises(ValueError):
         DijkstraCalculator().calculate_shortest_path(1, 2, edges)
+
+
+# ---------------------------------------------------------------------------
+# RoutingGraph reuse (Optimization 1) - build_graph() + calculate_shortest_path_in_graph()
+# ---------------------------------------------------------------------------
+
+
+def test_build_graph_then_search_matches_calculate_shortest_path():
+    edges = [
+        make_edge(1, 2, distance_meters=900.0, travel_time_seconds=60.0),
+        make_edge(2, 3, distance_meters=900.0, travel_time_seconds=60.0),
+    ]
+    calculator = DijkstraCalculator()
+    graph = calculator.build_graph(edges)
+
+    direct = calculator.calculate_shortest_path(1, 3, edges)
+    via_graph = calculator.calculate_shortest_path_in_graph(1, 3, graph)
+
+    assert direct == via_graph
+
+
+def test_one_graph_supports_multiple_correct_searches():
+    edges = [
+        make_edge(1, 2, distance_meters=500.0, travel_time_seconds=60.0),
+        make_edge(1, 3, distance_meters=5000.0, travel_time_seconds=600.0),
+        make_edge(2, 1, distance_meters=500.0, travel_time_seconds=60.0),
+    ]
+    calculator = DijkstraCalculator()
+    graph = calculator.build_graph(edges)
+
+    result_1_to_2 = calculator.calculate_shortest_path_in_graph(1, 2, graph)
+    result_1_to_3 = calculator.calculate_shortest_path_in_graph(1, 3, graph)
+    result_2_to_1 = calculator.calculate_shortest_path_in_graph(2, 1, graph)
+
+    assert result_1_to_2.status is RouteStatus.REACHABLE
+    assert result_1_to_2.travel_time_seconds == 60.0
+    assert result_1_to_3.status is RouteStatus.REACHABLE
+    assert result_1_to_3.travel_time_seconds == 600.0
+    assert result_2_to_1.status is RouteStatus.REACHABLE
+    assert result_2_to_1.travel_time_seconds == 60.0
+
+
+def test_directed_edges_are_not_reversed_via_graph_reuse():
+    edges = [make_edge(1, 2, distance_meters=500.0, travel_time_seconds=30.0)]  # only 1 -> 2
+    calculator = DijkstraCalculator()
+    graph = calculator.build_graph(edges)
+
+    forward = calculator.calculate_shortest_path_in_graph(1, 2, graph)
+    backward = calculator.calculate_shortest_path_in_graph(2, 1, graph)
+
+    assert forward.status is RouteStatus.REACHABLE
+    assert backward.status is RouteStatus.UNREACHABLE
+
+
+def test_source_equal_to_target_in_graph_is_trivially_reachable():
+    calculator = DijkstraCalculator()
+    graph = calculator.build_graph([])
+
+    result = calculator.calculate_shortest_path_in_graph(5, 5, graph)
+
+    assert result == DijkstraResult(
+        status=RouteStatus.REACHABLE, node_path=(5,), distance_meters=0.0, travel_time_seconds=0.0
+    )
+
+
+def test_calculate_shortest_path_in_graph_rejects_non_routing_graph():
+    calculator = DijkstraCalculator()
+    with pytest.raises(ValueError):
+        calculator.calculate_shortest_path_in_graph(1, 2, "not-a-graph")
+
+
+def test_build_graph_validates_edges_same_as_calculate_shortest_path():
+    calculator = DijkstraCalculator()
+    with pytest.raises(ValueError):
+        calculator.build_graph([{"source_node_id": 1, "target_node_id": 2}])
+
+
+def test_reused_graph_result_is_deterministic_across_repeated_searches():
+    edges = [
+        make_edge(1, 2, distance_meters=900.0, travel_time_seconds=60.0),
+        make_edge(2, 3, distance_meters=900.0, travel_time_seconds=60.0),
+        make_edge(1, 3, distance_meters=2500.0, travel_time_seconds=200.0),
+    ]
+    calculator = DijkstraCalculator()
+    graph = calculator.build_graph(edges)
+
+    first = calculator.calculate_shortest_path_in_graph(1, 3, graph)
+    second = calculator.calculate_shortest_path_in_graph(1, 3, graph)
+
+    assert first == second

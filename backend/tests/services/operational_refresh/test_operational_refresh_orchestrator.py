@@ -47,24 +47,49 @@ class FakeSeverityAgent:
         self.fail = fail
         self.score = score
         self.calls = []
+        # Performance pass tracking: which path was used per call, parallel
+        # to `calls` - existing tests keep asserting on `calls` unchanged.
+        self.used_for_event_path = []
 
-    def assess(self, fire_event_id: int, assessed_at: datetime) -> StoredFireSeverityAssessment:
+    def refresh(self, fire_event_id: int, assessed_at: datetime) -> StoredFireSeverityAssessment:
         self.log.append("severity")
         self.calls.append({"fire_event_id": fire_event_id, "assessed_at": assessed_at})
+        self.used_for_event_path.append(False)
         if self.fail:
             raise RuntimeError("severity database failed")
         return make_severity_result(fire_event_id=fire_event_id, assessed_at=assessed_at, score=self.score)
+
+    def refresh_for_event(self, stored_event, assessed_at: datetime) -> StoredFireSeverityAssessment:
+        self.log.append("severity")
+        self.calls.append({"fire_event_id": stored_event.id, "assessed_at": assessed_at})
+        self.used_for_event_path.append(True)
+        if self.fail:
+            raise RuntimeError("severity database failed")
+        return make_severity_result(fire_event_id=stored_event.id, assessed_at=assessed_at, score=self.score)
 
 
 class FakeSpreadRefreshOrchestrator:
     def __init__(self, log: list[str], result: FireSpreadRefreshResult | None = None) -> None:
         self.log = log
         self.calls = []
+        self.used_for_event_path = []
+        self.resolved_severities = []
         self.result = result
 
     def refresh(self, *, fire_event_id: int, trigger_type: OperationalRefreshTriggerType, as_of: datetime):
         self.log.append("spread")
         self.calls.append({"fire_event_id": fire_event_id, "trigger_type": trigger_type, "as_of": as_of})
+        self.used_for_event_path.append(False)
+        self.resolved_severities.append(None)
+        return self.result or spread_result(trigger_type=trigger_type)
+
+    def refresh_for_event(
+        self, *, stored_event, trigger_type: OperationalRefreshTriggerType, as_of: datetime, resolved_severity=None
+    ):
+        self.log.append("spread")
+        self.calls.append({"fire_event_id": stored_event.id, "trigger_type": trigger_type, "as_of": as_of})
+        self.used_for_event_path.append(True)
+        self.resolved_severities.append(resolved_severity)
         return self.result or spread_result(trigger_type=trigger_type)
 
 
@@ -72,12 +97,28 @@ class FakeResponseTargetAgent:
     def __init__(self, log: list[str], result: ResponseTargetGenerationResult | None = None) -> None:
         self.log = log
         self.calls = []
+        self.used_for_event_path = []
+        self.resolved_severities = []
+        self.resolved_spreads_by_horizon = []
         self.result = result
 
     def generate(self, *, fire_event_id: int, as_of: datetime) -> ResponseTargetGenerationResult:
         self.log.append("targets")
         self.calls.append({"fire_event_id": fire_event_id, "as_of": as_of})
+        self.used_for_event_path.append(False)
+        self.resolved_severities.append(None)
+        self.resolved_spreads_by_horizon.append(None)
         return self.result or target_result(fire_event_id=fire_event_id)
+
+    def generate_for_event(
+        self, *, stored_event, as_of: datetime, resolved_severity=None, resolved_spread_by_horizon=None
+    ) -> ResponseTargetGenerationResult:
+        self.log.append("targets")
+        self.calls.append({"fire_event_id": stored_event.id, "as_of": as_of})
+        self.used_for_event_path.append(True)
+        self.resolved_severities.append(resolved_severity)
+        self.resolved_spreads_by_horizon.append(resolved_spread_by_horizon)
+        return self.result or target_result(fire_event_id=stored_event.id)
 
 
 class FakeResourceStatusService:
@@ -277,7 +318,7 @@ def make_orchestrator(
 ):
     log = log if log is not None else []
     return OperationalRefreshOrchestrator(
-        severity_agent=severity_agent or FakeSeverityAgent(log),
+        severity_refresh_orchestrator=severity_agent or FakeSeverityAgent(log),
         spread_refresh_orchestrator=spread or FakeSpreadRefreshOrchestrator(log),
         response_target_agent=targets or FakeResponseTargetAgent(log),
         resource_status_service=resource_service
@@ -314,7 +355,13 @@ def test_active_environmental_triggers_run_severity_spread_then_targets(trigger_
     assert result.response_target_result is not None
 
 
-def test_weather_update_reuses_severity_before_spread_without_fire_event_lookup():
+def test_weather_update_reuses_severity_before_spread_with_exactly_one_fire_event_lookup():
+    """WEATHER_UPDATE runs severity unconditionally, regardless of the
+    FireEvent's own status (_should_run_severity's WEATHER_UPDATE branch
+    never inspects it). Performance pass: the orchestrator itself now
+    fetches the FireEvent exactly ONCE, up front, and shares it with every
+    downstream stage - never zero (the pre-performance-pass behavior for
+    this trigger type) and never more than one."""
     log: list[str] = []
     fire_event_repository = FakeFireEventRepository(status=FireEventStatus.RESOLVED)
     orchestrator = make_orchestrator(log=log, fire_event_repository=fire_event_repository)
@@ -326,7 +373,209 @@ def test_weather_update_reuses_severity_before_spread_without_fire_event_lookup(
     )
 
     assert log == ["severity", "spread", "targets"]
-    assert fire_event_repository.calls == []
+    assert fire_event_repository.calls == [FIRE_EVENT_ID]
+
+
+# --- performance pass: shared FireEvent / Severity / Spread handoff -------
+
+
+def test_fire_event_update_fetches_fire_event_exactly_once():
+    """FIRE_EVENT_UPDATE's _should_run_severity branch used to fetch the
+    FireEvent itself; severity/spread/targets' own input services each
+    fetched it AGAIN independently - up to 4 fetches per refresh cycle.
+    Now the orchestrator fetches once and shares it with every stage."""
+    log: list[str] = []
+    fire_event_repository = FakeFireEventRepository(status=FireEventStatus.CONFIRMED)
+    orchestrator = make_orchestrator(log=log, fire_event_repository=fire_event_repository)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.FIRE_EVENT_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert fire_event_repository.calls == [FIRE_EVENT_ID]
+
+
+def test_all_three_stages_use_the_for_event_path_when_fire_event_exists():
+    log: list[str] = []
+    severity = FakeSeverityAgent(log)
+    spread = FakeSpreadRefreshOrchestrator(log)
+    targets = FakeResponseTargetAgent(log)
+    orchestrator = make_orchestrator(log=log, severity_agent=severity, spread=spread, targets=targets)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert severity.used_for_event_path == [True]
+    assert spread.used_for_event_path == [True]
+    assert targets.used_for_event_path == [True]
+
+
+def test_all_three_stages_fall_back_to_by_id_path_when_fire_event_missing():
+    log: list[str] = []
+    severity = FakeSeverityAgent(log)
+    spread = FakeSpreadRefreshOrchestrator(log)
+    targets = FakeResponseTargetAgent(log)
+    fire_event_repository = FakeFireEventRepository(status=None)  # get_by_id returns None
+    orchestrator = make_orchestrator(
+        log=log, severity_agent=severity, spread=spread, targets=targets, fire_event_repository=fire_event_repository
+    )
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert severity.used_for_event_path == [False]
+    assert spread.used_for_event_path == [False]
+    assert targets.used_for_event_path == [False]
+
+
+def test_newly_computed_severity_is_handed_directly_to_spread():
+    log: list[str] = []
+    severity = FakeSeverityAgent(log, score=88.0)
+    spread = FakeSpreadRefreshOrchestrator(log)
+    orchestrator = make_orchestrator(log=log, severity_agent=severity, spread=spread)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    severity_result = severity.calls  # confirm severity actually ran
+    assert len(severity_result) == 1
+    assert len(spread.resolved_severities) == 1
+    assert spread.resolved_severities[0] is not None
+    assert spread.resolved_severities[0].assessment.score == 88.0
+
+
+def test_severity_not_run_this_cycle_means_spread_gets_no_resolved_severity():
+    """SEVERITY_UPDATE skips severity this cycle - Spread must fall back to
+    its own repository lookup (resolved_severity=None), not receive a
+    stale/fabricated value."""
+    log: list[str] = []
+    spread = FakeSpreadRefreshOrchestrator(log)
+    orchestrator = make_orchestrator(log=log, spread=spread)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert spread.resolved_severities == [None]
+
+
+def test_failed_severity_never_reaches_spread_handoff():
+    """Severity raising must still short-circuit before Spread runs at all -
+    unchanged behavior, now additionally proving no resolved_severity is
+    ever computed or passed in this path."""
+    log: list[str] = []
+    severity = FakeSeverityAgent(log, fail=True)
+    spread = FakeSpreadRefreshOrchestrator(log)
+    orchestrator = make_orchestrator(log=log, severity_agent=severity, spread=spread)
+
+    result = orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert result.status is OperationalRefreshStatus.FAILED
+    assert spread.calls == []
+    assert spread.resolved_severities == []
+
+
+def test_spread_resolved_predictions_are_handed_directly_to_targets():
+    log: list[str] = []
+    resolved_30 = object()
+    resolved_60 = object()
+    custom_spread_result = FireSpreadRefreshResult(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+        reevaluation_required=True,
+        horizon_results=(
+            FireSpreadRefreshHorizonResult(
+                fire_event_id=FIRE_EVENT_ID,
+                horizon_minutes=30,
+                status=FireSpreadRefreshHorizonStatus.NO_OP,
+                previous_prediction_id=1,
+                resolved_prediction=resolved_30,
+            ),
+            FireSpreadRefreshHorizonResult(
+                fire_event_id=FIRE_EVENT_ID,
+                horizon_minutes=60,
+                status=FireSpreadRefreshHorizonStatus.REFRESHED,
+                prediction_id=2,
+                resolved_prediction=resolved_60,
+            ),
+        ),
+    )
+    spread = FakeSpreadRefreshOrchestrator(log, result=custom_spread_result)
+    targets = FakeResponseTargetAgent(log)
+    orchestrator = make_orchestrator(log=log, spread=spread, targets=targets)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert len(targets.resolved_spreads_by_horizon) == 1
+    resolved = targets.resolved_spreads_by_horizon[0]
+    assert resolved == {30: resolved_30, 60: resolved_60}
+
+
+def test_insufficient_horizon_yields_none_not_missing_key_for_targets():
+    log: list[str] = []
+    custom_spread_result = FireSpreadRefreshResult(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+        reevaluation_required=True,
+        horizon_results=(
+            FireSpreadRefreshHorizonResult(
+                fire_event_id=FIRE_EVENT_ID,
+                horizon_minutes=30,
+                status=FireSpreadRefreshHorizonStatus.INSUFFICIENT_DATA,
+                resolved_prediction=None,
+            ),
+        ),
+    )
+    spread = FakeSpreadRefreshOrchestrator(log, result=custom_spread_result)
+    targets = FakeResponseTargetAgent(log)
+    orchestrator = make_orchestrator(log=log, spread=spread, targets=targets)
+
+    orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert targets.resolved_spreads_by_horizon[0] == {30: None}
+
+
+def test_failed_spread_never_reaches_target_handoff():
+    log: list[str] = []
+    spread = FakeSpreadRefreshOrchestrator(log, result=spread_result(statuses=(FireSpreadRefreshHorizonStatus.FAILED,) * 2))
+    targets = FakeResponseTargetAgent(log)
+    orchestrator = make_orchestrator(log=log, spread=spread, targets=targets)
+
+    result = orchestrator.refresh_fire_event(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.WEATHER_UPDATE,
+        as_of=AS_OF,
+    )
+
+    assert result.status is OperationalRefreshStatus.FAILED
+    assert targets.calls == []
 
 
 def test_severity_update_skips_severity_and_runs_spread_then_targets_once():

@@ -33,10 +33,43 @@ itself (not a race condition to correct for). Resource state, by
 contrast, is genuinely volatile at route-matrix-computation timescales
 (activation elsewhere can commit/release/disable a candidate resource
 mid-build) and is what this revalidation protects against.
+
+Performance pass (demo-simulation profiling, Task: "Implement the first
+performance-optimization pass"): two additions, both scoped to THIS
+builder INSTANCE's lifetime only (never a module-level/process-global
+cache) - safe because production wires exactly one GlobalPlanningInputBuilder
+per GlobalPlanningRefreshCoordinator, itself constructed once per running
+process/simulation (see global_planning_input_production_factory.py,
+global_planning_refresh_production_factory.py):
+
+1. Road-network subgraph reuse (`_road_network_cache`): `_load_road_network`
+   caches its single most recent (bbox -> nodes/edges) result. GraphNodeDB/
+   GraphEdgeDB are intentionally never deleted mid-simulation (see
+   DemoStateResetService) and this codebase has no live external writer
+   that inserts into an ALREADY-explored bbox while a builder instance is
+   alive - so "same exact bbox as last time" is a safe, conservative
+   reuse key: any bbox change (a moved/added/removed active incident or
+   candidate resource station) is a cache miss and reloads from
+   PostgreSQL/OSM exactly as before. This is a documented assumption, not
+   a proven invariant enforced elsewhere - if a future caller starts
+   mutating already-cached graph regions out of band, this cache must be
+   revisited. Returned/stored node and edge objects are always copied
+   (`model_copy()`) in both directions so a consumer mutating a returned
+   list/object can never corrupt the cached copy or a later cache hit.
+
+2. Cheap pre-routing signature (`compute_pre_routing_bundle`): everything
+   `_compute_fingerprint` hashes EXCEPT route-matrix content, extracted
+   into a small reusable payload (`_pre_routing_payload`) shared by both
+   functions so the cheap signature can never omit something the real
+   fingerprint covers. GlobalPlanningRefreshCoordinator uses this to
+   decide, BEFORE calling build(), whether a cycle can skip road-network
+   loading/routing/GA entirely - see that module's docstring for the full
+   correctness argument (this builder itself does not decide NO_OP; it
+   only computes and returns the signature).
 """
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import json
@@ -51,6 +84,8 @@ from src.models.global_incident_demand import GlobalIncidentDemand
 from src.models.global_planning_input import GlobalPlanningInput
 from src.models.global_planning_resource import GlobalPlanningResource
 from src.models.global_planning_target import GlobalPlanningTarget
+from src.models.graph_edge import GraphEdge
+from src.models.graph_node import GraphNode
 from src.models.response_target_type import ResponseTargetType
 from src.repositories.global_planning_run_repository import GlobalPlanningRunRepository
 from src.repositories.response_target_repository import ResponseTargetRepository, StoredResponseTargetSet
@@ -73,6 +108,47 @@ _MAX_REBUILD_ATTEMPTS = 1
 
 _GLOBAL_INPUT_METHODOLOGY = "global_candidate_route_matrix"
 _GLOBAL_INPUT_METHODOLOGY_VERSION = "1.0"
+
+
+def _target_signature(target: GlobalPlanningTarget) -> tuple:
+    return (
+        target.target_type.value,
+        target.latitude,
+        target.longitude,
+        target.priority_score,
+        target.prediction_horizon_minutes,
+    )
+
+
+@dataclass(frozen=True)
+class _RoadNetworkCacheEntry:
+    """One cached (bbox -> subgraph) result, scoped to one builder instance."""
+
+    bbox: tuple[float, float, float, float]
+    nodes: tuple[GraphNode, ...]
+    edges: tuple[GraphEdge, ...]
+
+
+@dataclass(frozen=True)
+class GlobalPlanningPreRoutingBundle:
+    """Every pre-routing planning input, read once, plus its cheap signature.
+
+    Returned by `compute_pre_routing_bundle()` and optionally fed back into
+    `build()` via `precomputed=` so a cycle that turns out NOT to be a
+    cheap NO_OP never re-reads targets/demand/assignments/candidates a
+    second time.
+    """
+
+    active_fire_event_ids: tuple[int, ...]
+    targets: tuple[GlobalPlanningTarget, ...]
+    event_target_set_ids: dict[int, int]
+    anchors: tuple[tuple[int, float, float], ...]
+    incident_demands: tuple[GlobalIncidentDemand, ...]
+    desired_assignable_supply: int
+    current_assignments: tuple[CurrentGlobalAssignment, ...]
+    required_resource_ids: tuple[str, ...]
+    resources: tuple[GlobalPlanningResource, ...]
+    pre_routing_signature: str
 
 
 class GlobalPlanningInputBuilder:
@@ -99,8 +175,19 @@ class GlobalPlanningInputBuilder:
         self._road_network_repository = road_network_repository or RoadNetworkRepository()
         self._road_network_fetcher = road_network_fetcher or RoadNetworkFetcher()
         self._session_factory = session_factory or get_session_factory()
+        self._road_network_cache: _RoadNetworkCacheEntry | None = None
 
-    def build(self, *, global_planning_run_id: int, as_of: datetime) -> GlobalPlanningInput:
+    def compute_pre_routing_bundle(
+        self, *, global_planning_run_id: int, as_of: datetime
+    ) -> GlobalPlanningPreRoutingBundle:
+        """Read every pre-routing planning input once and return them plus
+        their cheap signature - never touches the road network, route
+        matrix, Dijkstra, or GA. Pure/stateless: this method does not
+        itself decide NO_OP or remember anything between calls (that
+        decision belongs to GlobalPlanningRefreshCoordinator, which knows
+        the run's actual terminal outcome). Pass the returned bundle into
+        `build()` via `precomputed=` to avoid re-reading these same inputs.
+        """
         self._validate_request(global_planning_run_id, as_of)
 
         members = self._global_planning_run_repository.get_members(global_planning_run_id)
@@ -118,6 +205,56 @@ class GlobalPlanningInputBuilder:
         required_resource_ids = tuple(assignment.resource_id for assignment in current_assignments)
 
         resources = self._candidate_collector.collect(anchors, desired_assignable_supply, required_resource_ids)
+
+        pre_routing_signature = self._compute_pre_routing_signature(
+            active_fire_event_ids, targets, resources, event_target_set_ids, incident_demands, current_assignments
+        )
+
+        return GlobalPlanningPreRoutingBundle(
+            active_fire_event_ids=active_fire_event_ids,
+            targets=targets,
+            event_target_set_ids=event_target_set_ids,
+            anchors=anchors,
+            incident_demands=incident_demands,
+            desired_assignable_supply=desired_assignable_supply,
+            current_assignments=current_assignments,
+            required_resource_ids=required_resource_ids,
+            resources=resources,
+            pre_routing_signature=pre_routing_signature,
+        )
+
+    def build(
+        self,
+        *,
+        global_planning_run_id: int,
+        as_of: datetime,
+        precomputed: GlobalPlanningPreRoutingBundle | None = None,
+    ) -> GlobalPlanningInput:
+        """Assemble one validated, fingerprinted GlobalPlanningInput.
+
+        `precomputed` (Optimization 3): when the caller already has a
+        GlobalPlanningPreRoutingBundle from `compute_pre_routing_bundle()`
+        (e.g. because it just used it for a NO_OP precheck that came back
+        "changed"), pass it here to skip re-reading targets/demand/
+        assignments/candidates - identical semantics either way, since
+        `build()` with no `precomputed` computes the exact same bundle
+        itself before proceeding.
+        """
+        self._validate_request(global_planning_run_id, as_of)
+
+        bundle = precomputed or self.compute_pre_routing_bundle(
+            global_planning_run_id=global_planning_run_id, as_of=as_of
+        )
+        active_fire_event_ids = bundle.active_fire_event_ids
+        targets = bundle.targets
+        event_target_set_ids = bundle.event_target_set_ids
+        anchors = bundle.anchors
+        incident_demands = bundle.incident_demands
+        desired_assignable_supply = bundle.desired_assignable_supply
+        current_assignments = bundle.current_assignments
+        required_resource_ids = bundle.required_resource_ids
+        resources = bundle.resources
+
         road_nodes, road_edges = self._load_road_network(anchors, resources)
         matrix_result = self._route_matrix_builder.build(resources, targets, road_nodes, road_edges)
 
@@ -214,6 +351,14 @@ class GlobalPlanningInputBuilder:
         return tuple(targets), event_target_set_ids, tuple(anchors)
 
     def _load_road_network(self, anchors, resources: tuple[GlobalPlanningResource, ...]):
+        """Return the road-network subgraph covering every anchor + candidate
+        station, reusing the single most-recently-loaded subgraph when the
+        exact same bbox is requested again (Optimization 2 - see this
+        module's docstring for the reuse-safety assumption). Every
+        node/edge returned - on both a cache miss (stored copy) and a hit
+        (served copy) - is `model_copy()`-d, so nothing a caller does to
+        the returned lists can ever corrupt the cached copy or a later hit.
+        """
         latitudes = [latitude for _fire_event_id, latitude, _longitude in anchors] + [
             resource.station_latitude for resource in resources
         ]
@@ -227,6 +372,14 @@ class GlobalPlanningInputBuilder:
         max_lat = min(90.0, max(latitudes) + BUFFER_DEGREES)
         min_lon = max(-180.0, min(longitudes) - BUFFER_DEGREES)
         max_lon = min(180.0, max(longitudes) + BUFFER_DEGREES)
+        bbox = (min_lat, max_lat, min_lon, max_lon)
+
+        cached = self._road_network_cache
+        if cached is not None and cached.bbox == bbox:
+            return (
+                [node.model_copy() for node in cached.nodes],
+                [edge.model_copy() for edge in cached.edges],
+            )
 
         session = self._session_factory()
         try:
@@ -239,6 +392,11 @@ class GlobalPlanningInputBuilder:
                 )
                 if road_nodes:
                     self._road_network_repository.save_network(session, road_nodes, road_edges)
+            self._road_network_cache = _RoadNetworkCacheEntry(
+                bbox=bbox,
+                nodes=tuple(node.model_copy() for node in road_nodes),
+                edges=tuple(edge.model_copy() for edge in road_edges),
+            )
             return road_nodes, road_edges
         finally:
             session.close()
@@ -300,48 +458,21 @@ class GlobalPlanningInputBuilder:
         return None
 
     @staticmethod
-    def _compute_fingerprint(
+    def _pre_routing_payload(
         active_fire_event_ids: tuple[int, ...],
         targets: tuple[GlobalPlanningTarget, ...],
         resources: tuple[GlobalPlanningResource, ...],
         event_target_set_ids: dict[int, int],
-        route_matrix,
         incident_demands: tuple[GlobalIncidentDemand, ...],
         current_assignments: tuple[CurrentGlobalAssignment, ...],
-    ) -> str:
-        """Deterministic fingerprint of the actual optimizer input (Task 18).
-
-        Includes: active FireEvent ids, target-set ids, target CONTENT
-        (not raw response_target_id - a DB surrogate with no semantic
-        meaning of its own, mirroring PlanningEffectiveState.fingerprint's
-        existing precedent), resource ids/station origins/statuses/
-        commitment ownership, per-route feasibility+ETA+distance,
-        (Stage 5, Task 6) per-event demand CONTENT - severity level/score
-        (or explicit fallback state), minimum/desired resource counts, and
-        the policy methodology/version that produced them, and (Stage 6,
-        Task 15) each resource's current_assignment CONTENT - fire_event_id,
-        response_target_id, and dispatch_state. A severity change, a
-        demand-policy version bump, OR a dispatch-state transition
-        (PLANNED -> DISPATCHED flips a resource from a soft preference to a
-        hard constraint - a materially different planning problem) therefore
-        changes the fingerprint even when targets/resources/routes are
-        unchanged. Deliberately excludes node_path (two routes with
-        identical ETA/distance/feasibility are operationally interchangeable
-        inputs to the future GA; only cost, not the exact path taken, should
-        force a re-optimization) and random seed (Stage 4's own
-        optimization config owns that separately). Order-independent.
+    ) -> tuple:
+        """Every deterministic, order-independent planning input that does
+        NOT require routing to know - shared verbatim by `_compute_fingerprint`
+        (which extends it with route content) and `_compute_pre_routing_signature`
+        (Optimization 3's cheap NO_OP precheck), so the cheap signature can
+        never omit something the real fingerprint covers: it is always
+        exactly this payload, hashed alone instead of hashed-plus-routes.
         """
-        target_by_id = {target.response_target_id: target for target in targets}
-
-        def _target_signature(target: GlobalPlanningTarget) -> tuple:
-            return (
-                target.target_type.value,
-                target.latitude,
-                target.longitude,
-                target.priority_score,
-                target.prediction_horizon_minutes,
-            )
-
         sorted_targets = tuple(
             sorted(
                 ((target.fire_event_id,) + _target_signature(target) for target in targets),
@@ -371,17 +502,6 @@ class GlobalPlanningInputBuilder:
                     for resource in resources
                 ),
                 key=lambda item: item[0],
-            )
-        )
-        sorted_routes = tuple(
-            sorted(
-                (
-                    (option.resource_id, option.fire_event_id)
-                    + _target_signature(target_by_id[option.response_target_id])
-                    + (option.eta_seconds, option.route_distance_meters)
-                    for option in route_matrix
-                ),
-                key=lambda item: item,
             )
         )
 
@@ -431,7 +551,7 @@ class GlobalPlanningInputBuilder:
             )
         )
 
-        payload = (
+        return (
             ("active_fire_event_ids", tuple(sorted(active_fire_event_ids))),
             # event_target_set_ids deliberately reduced to just its KEY set
             # (which events have a usable target set at all), not the raw
@@ -441,11 +561,99 @@ class GlobalPlanningInputBuilder:
             ("events_with_target_sets", tuple(sorted(event_target_set_ids.keys()))),
             ("targets", sorted_targets),
             ("resources", sorted_resources),
-            ("routes", sorted_routes),
             ("incident_demands", sorted_demands),
             ("current_assignments", sorted_current_assignments),
             ("methodology", _GLOBAL_INPUT_METHODOLOGY),
             ("methodology_version", _GLOBAL_INPUT_METHODOLOGY_VERSION),
+        )
+
+    @staticmethod
+    def _compute_pre_routing_signature(
+        active_fire_event_ids: tuple[int, ...],
+        targets: tuple[GlobalPlanningTarget, ...],
+        resources: tuple[GlobalPlanningResource, ...],
+        event_target_set_ids: dict[int, int],
+        incident_demands: tuple[GlobalIncidentDemand, ...],
+        current_assignments: tuple[CurrentGlobalAssignment, ...],
+    ) -> str:
+        """Cheap NO_OP precheck signature (Optimization 3).
+
+        Hashes `_pre_routing_payload` alone - every input `_compute_fingerprint`
+        hashes EXCEPT route-matrix content, which requires the expensive
+        road-network load + Dijkstra to produce. This is safe as a NO_OP
+        precheck specifically because target and resource-station
+        coordinates - which this payload DOES cover in full - are exactly
+        the values `_load_road_network` uses to compute its bbox: if they
+        are byte-identical to the last successfully-planned cycle's, the
+        requested bbox is byte-identical too, and (given this builder's
+        documented road-network reuse-safety assumption - see the module
+        docstring) the resulting graph, and therefore every route's ETA/
+        distance/feasibility, would also be unchanged. Because this payload
+        is always a strict subset of what `_compute_fingerprint` hashes,
+        two inputs that differ here are GUARANTEED to differ in the real
+        fingerprint too - this can only ever fail open to a full build,
+        never produce a false NO_OP.
+        """
+        payload = GlobalPlanningInputBuilder._pre_routing_payload(
+            active_fire_event_ids, targets, resources, event_target_set_ids, incident_demands, current_assignments
+        )
+        serialized = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _compute_fingerprint(
+        active_fire_event_ids: tuple[int, ...],
+        targets: tuple[GlobalPlanningTarget, ...],
+        resources: tuple[GlobalPlanningResource, ...],
+        event_target_set_ids: dict[int, int],
+        route_matrix,
+        incident_demands: tuple[GlobalIncidentDemand, ...],
+        current_assignments: tuple[CurrentGlobalAssignment, ...],
+    ) -> str:
+        """Deterministic fingerprint of the actual optimizer input (Task 18).
+
+        Includes: active FireEvent ids, target-set ids, target CONTENT
+        (not raw response_target_id - a DB surrogate with no semantic
+        meaning of its own, mirroring PlanningEffectiveState.fingerprint's
+        existing precedent), resource ids/station origins/statuses/
+        commitment ownership, per-route feasibility+ETA+distance,
+        (Stage 5, Task 6) per-event demand CONTENT - severity level/score
+        (or explicit fallback state), minimum/desired resource counts, and
+        the policy methodology/version that produced them, and (Stage 6,
+        Task 15) each resource's current_assignment CONTENT - fire_event_id,
+        response_target_id, and dispatch_state. A severity change, a
+        demand-policy version bump, OR a dispatch-state transition
+        (PLANNED -> DISPATCHED flips a resource from a soft preference to a
+        hard constraint - a materially different planning problem) therefore
+        changes the fingerprint even when targets/resources/routes are
+        unchanged. Deliberately excludes node_path (two routes with
+        identical ETA/distance/feasibility are operationally interchangeable
+        inputs to the future GA; only cost, not the exact path taken, should
+        force a re-optimization) and random seed (Stage 4's own
+        optimization config owns that separately). Order-independent.
+
+        Everything except `routes`/`routing_methodology*` is delegated to
+        `_pre_routing_payload`, shared with `_compute_pre_routing_signature` -
+        see that method for why this makes the cheap precheck safe.
+        """
+        target_by_id = {target.response_target_id: target for target in targets}
+
+        sorted_routes = tuple(
+            sorted(
+                (
+                    (option.resource_id, option.fire_event_id)
+                    + _target_signature(target_by_id[option.response_target_id])
+                    + (option.eta_seconds, option.route_distance_meters)
+                    for option in route_matrix
+                ),
+                key=lambda item: item,
+            )
+        )
+
+        payload = GlobalPlanningInputBuilder._pre_routing_payload(
+            active_fire_event_ids, targets, resources, event_target_set_ids, incident_demands, current_assignments
+        ) + (
+            ("routes", sorted_routes),
             ("routing_methodology", ROUTING_METHODOLOGY_NAME),
             ("routing_methodology_version", ROUTING_METHODOLOGY_VERSION),
         )

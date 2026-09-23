@@ -79,10 +79,17 @@ class FakeSatelliteRepository:
     def __init__(self, records: dict[int, StoredSatelliteHotspot]) -> None:
         self.records = records
         self.calls = []
+        self.batch_calls = []
 
     def get_by_id(self, hotspot_id: int):
         self.calls.append(hotspot_id)
         return self.records.get(hotspot_id)
+
+    def get_by_ids(self, hotspot_ids):
+        self.batch_calls.append(tuple(hotspot_ids))
+        return tuple(
+            self.records[hotspot_id] for hotspot_id in sorted(set(hotspot_ids)) if hotspot_id in self.records
+        )
 
 
 class FakeLandCoverProvider:
@@ -290,6 +297,32 @@ def test_several_hotspots_select_max_frp_and_preserve_selected_id():
 
     assert result.satellite_hotspot_ids == (1, 2, 3)
     assert result.selected_frp_hotspot_id == 2
+
+
+def test_satellite_hotspots_are_fetched_in_one_batched_call_not_one_per_evidence_id():
+    """Performance pass: multiple satellite evidence ids must resolve via a
+    single get_by_ids() call, not one get_by_id() round trip per id."""
+    event = make_event(
+        evidence_refs=(
+            FireEvidenceRef(FireEvidenceType.SATELLITE, 1),
+            FireEvidenceRef(FireEvidenceType.SATELLITE, 2),
+            FireEvidenceRef(FireEvidenceType.SATELLITE, 3),
+        )
+    )
+    service, *_, satellite_repo, _ = build_service(
+        stored_event=event,
+        satellite_records={
+            1: make_hotspot(1, frp=35),
+            2: make_hotspot(2, frp=72),
+            3: make_hotspot(3, frp=55),
+        },
+    )
+
+    result = service.prepare_input(10, AS_OF)
+
+    assert satellite_repo.calls == []  # the old per-id path is never used
+    assert len(satellite_repo.batch_calls) == 1
+    assert set(satellite_repo.batch_calls[0]) == {1, 2, 3}
     assert result.input_data.frp_mw == pytest.approx(72)
 
 
@@ -321,7 +354,7 @@ def test_unrelated_hotspot_not_attached_to_event_is_not_used():
 
     result = service.prepare_input(10, AS_OF)
 
-    assert satellite_repo.calls == [1]
+    assert satellite_repo.batch_calls == [(1,)]  # only the event's own evidence id is requested, hotspot 2 is not
     assert result.selected_frp_hotspot_id == 1
     assert result.input_data.frp_mw == pytest.approx(40)
 

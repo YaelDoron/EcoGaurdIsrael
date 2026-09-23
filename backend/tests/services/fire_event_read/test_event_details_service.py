@@ -14,7 +14,11 @@ from pathlib import Path
 
 import pytest
 
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
+from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
+from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event import FireEvent
+from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
@@ -56,13 +60,23 @@ AS_OF = DETECTED_AT + timedelta(hours=1)
 
 
 class FakeFireEventRepository:
-    def __init__(self, events_by_id: dict[int, StoredFireEvent] | None = None):
+    def __init__(
+        self,
+        events_by_id: dict[int, StoredFireEvent] | None = None,
+        ml_assessment_by_event_id: dict[int, FireEventMLAssessment] | None = None,
+    ):
         self.events_by_id = dict(events_by_id or {})
+        self.ml_assessment_by_event_id = dict(ml_assessment_by_event_id or {})
         self.calls: list[int] = []
+        self.ml_assessment_calls: list[int] = []
 
     def get_by_id(self, fire_event_id: int) -> StoredFireEvent | None:
         self.calls.append(fire_event_id)
         return self.events_by_id.get(fire_event_id)
+
+    def get_ml_assessment(self, fire_event_id: int) -> FireEventMLAssessment | None:
+        self.ml_assessment_calls.append(fire_event_id)
+        return self.ml_assessment_by_event_id.get(fire_event_id)
 
 
 class FakeFireSeverityAssessmentRepository:
@@ -384,6 +398,25 @@ def make_plan_details(fire_event_id: int, *, with_baseline: bool = False) -> Res
     )
 
 
+def make_ml_assessment(fire_event_id: int, **overrides) -> FireEventMLAssessment:
+    defaults = dict(
+        fire_event_id=fire_event_id,
+        decision_mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.8,
+        ml_available=True,
+        ml_probability=0.75,
+        ml_model_name="fire_detection_logistic_v3",
+        ml_model_version="3.0",
+        ml_feature_schema_version="v3",
+        ml_failure_reason=None,
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+        updated_at=UPDATED_AT,
+    )
+    defaults.update(overrides)
+    return FireEventMLAssessment(**defaults)
+
+
 def make_service(
     *,
     events_by_id: dict[int, StoredFireEvent] | None = None,
@@ -395,8 +428,9 @@ def make_service(
     hotspots_by_id: dict[int, StoredSatelliteHotspot] | None = None,
     reports_by_id: dict[int, StoredWildfireReport] | None = None,
     plan_by_event_id: dict[int, ResponsePlanDetails] | None = None,
+    ml_assessment_by_event_id: dict[int, FireEventMLAssessment] | None = None,
 ):
-    fire_event_repository = FakeFireEventRepository(events_by_id)
+    fire_event_repository = FakeFireEventRepository(events_by_id, ml_assessment_by_event_id)
     severity_repository = FakeFireSeverityAssessmentRepository(severity_by_event_id)
     spread_repository = FakeFireSpreadPredictionRepository(spread_by_key)
     target_repository = FakeResponseTargetRepository(targets_by_event_id)
@@ -612,6 +646,140 @@ def test_insufficient_data_severity_is_reported_honestly():
     assert result.severity.status is FireSeverityAssessmentStatus.INSUFFICIENT_DATA
     assert result.severity.score is None
     assert result.severity.level is None
+
+
+# ---------------------------------------------------------------------------
+# ML assessment (ML Task 6: API exposure only, read-only)
+# ---------------------------------------------------------------------------
+
+
+def test_ml_assessment_shadow_is_mapped_with_all_fields():
+    stored_event = make_stored_event(1)
+    assessment = make_ml_assessment(
+        1,
+        decision_mode=FireDetectionDecisionMode.SHADOW,
+        rule_status=FireDetectionStatus.CONFIRMED,
+        rule_confidence=0.80,
+        ml_available=True,
+        ml_probability=0.75,
+        ml_model_version="3.0",
+        ml_feature_schema_version="v3",
+        agreement=FireDetectionMLRuleAgreement.AGREE_FIRE,
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={1: assessment})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    ml = result.ml_assessment
+    assert ml is not None
+    assert ml.available is True
+    assert ml.mode is FireDetectionDecisionMode.SHADOW
+    assert ml.rule_status is FireDetectionStatus.CONFIRMED
+    assert ml.rule_confidence == pytest.approx(0.80)
+    assert ml.model_score == pytest.approx(0.75)
+    assert ml.agreement is FireDetectionMLRuleAgreement.AGREE_FIRE
+    assert ml.model_name == "fire_detection_logistic_v3"
+    assert ml.model_version == "3.0"
+    assert ml.feature_schema_version == "v3"
+    assert ml.failure_reason is None
+    assert ml.updated_at == UPDATED_AT
+
+
+def test_ml_assessment_rule_stronger_is_mapped():
+    stored_event = make_stored_event(1, status=FireEventStatus.SUSPECTED)
+    assessment = make_ml_assessment(
+        1,
+        rule_status=FireDetectionStatus.SUSPECTED,
+        rule_confidence=0.60,
+        ml_probability=0.18,
+        agreement=FireDetectionMLRuleAgreement.RULE_STRONGER,
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={1: assessment})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    ml = result.ml_assessment
+    assert ml.rule_confidence == pytest.approx(0.60)
+    assert ml.model_score == pytest.approx(0.18)
+    assert ml.agreement is FireDetectionMLRuleAgreement.RULE_STRONGER
+    # The FireEvent's own final status is independent of the ML assessment.
+    assert result.fire_event.status is FireEventStatus.SUSPECTED
+
+
+def test_ml_assessment_absent_is_none_for_legacy_or_rule_only_events():
+    stored_event = make_stored_event(1)
+    service, fakes = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.ml_assessment is None
+    assert fakes["fire_event"].ml_assessment_calls == [1]
+
+
+def test_ml_unavailable_assessment_does_not_substitute_zero():
+    stored_event = make_stored_event(1)
+    assessment = make_ml_assessment(
+        1,
+        ml_available=False,
+        ml_probability=None,
+        ml_model_name=None,
+        ml_model_version=None,
+        ml_feature_schema_version=None,
+        ml_failure_reason="ML model load failed: [Errno 2] No such file or directory: 'C:\\models\\v3.joblib'",
+        agreement=FireDetectionMLRuleAgreement.ML_UNAVAILABLE,
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={1: assessment})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    ml = result.ml_assessment
+    assert ml.available is False
+    assert ml.model_score is None
+    assert ml.model_name is None
+    assert ml.agreement is FireDetectionMLRuleAgreement.ML_UNAVAILABLE
+    # The raw failure text (with a filesystem path) must never reach the API.
+    assert ml.failure_reason == "ML model artifact could not be loaded."
+    assert "C:\\" not in ml.failure_reason
+    assert "models" not in ml.failure_reason
+
+
+def test_ml_failure_reason_unrecognized_text_falls_back_to_generic_message():
+    stored_event = make_stored_event(1)
+    assessment = make_ml_assessment(
+        1,
+        ml_available=False,
+        ml_probability=None,
+        ml_failure_reason="some future internal detail /etc/secret/path",
+        agreement=FireDetectionMLRuleAgreement.ML_UNAVAILABLE,
+    )
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={1: assessment})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.ml_assessment.failure_reason == "ML assessment unavailable."
+
+
+def test_ml_assessment_hybrid_mode_serializes_without_special_case_failure():
+    stored_event = make_stored_event(1)
+    assessment = make_ml_assessment(1, decision_mode=FireDetectionDecisionMode.HYBRID)
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={1: assessment})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.ml_assessment.mode is FireDetectionDecisionMode.HYBRID
+
+
+def test_ml_assessment_rule_only_event_with_no_row_is_still_valid():
+    """RULE_ONLY mode never writes a FireEventMLAssessment row - event
+    details must remain a valid, complete response, not an error."""
+    stored_event = make_stored_event(1)
+    service, _ = make_service(events_by_id={1: stored_event}, ml_assessment_by_event_id={})
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result is not None
+    assert result.ml_assessment is None
+    assert result.fire_event.fire_event_id == 1
 
 
 # ---------------------------------------------------------------------------

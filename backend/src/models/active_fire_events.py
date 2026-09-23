@@ -56,6 +56,35 @@ class ActiveFireEventSeveritySummary:
 
 
 @dataclass(frozen=True)
+class ActiveFireEventMLSummary:
+    """Lightweight presentation view of one FireEvent's ML assessment, for
+    the Active Fire dashboard cards (ML Task 7).
+
+    Deliberately trimmed to the two fields the dashboard card actually
+    displays - `available` and `model_score` - unlike Event Details'
+    FireEventMLAssessmentResponse, which exposes the full persisted trace.
+    `model_score` is a model-estimated score from the synthetic-trained
+    Logistic Regression V3 classifier, never a calibrated real-world
+    probability of wildfire occurrence.
+    """
+
+    available: bool
+    model_score: float | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.available, bool):
+            raise ValueError(f"available must be a bool, got {self.available!r}")
+        if self.available:
+            if self.model_score is None:
+                raise ValueError("model_score must not be None when available.")
+            _validate_finite_number("model_score", self.model_score)
+            if not 0 <= self.model_score <= 1:
+                raise ValueError(f"model_score must be within [0, 1], got {self.model_score!r}")
+        elif self.model_score is not None:
+            raise ValueError("model_score must be None when not available.")
+
+
+@dataclass(frozen=True)
 class ActiveFireEventSummary:
     """Presentation view of one currently-active FireEvent for the dashboard."""
 
@@ -69,6 +98,7 @@ class ActiveFireEventSummary:
     created_at: datetime
     severity: ActiveFireEventSeveritySummary | None
     location_name: str | None = None
+    ml_summary: ActiveFireEventMLSummary | None = None
 
     def __post_init__(self) -> None:
         validate_positive_int("fire_event_id", self.fire_event_id)
@@ -88,6 +118,8 @@ class ActiveFireEventSummary:
             )
         if self.location_name is not None and not isinstance(self.location_name, str):
             raise ValueError(f"location_name must be a string or None, got {self.location_name!r}")
+        if self.ml_summary is not None and not isinstance(self.ml_summary, ActiveFireEventMLSummary):
+            raise ValueError(f"ml_summary must be an ActiveFireEventMLSummary or None, got {self.ml_summary!r}")
 
 
 @dataclass(frozen=True)

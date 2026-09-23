@@ -661,6 +661,59 @@ def test_get_latest_for_event_and_horizon_as_of_returns_cell_ids(
     assert [cell.cell.spread_risk_score for cell in latest.cells] == [60.0, 60.0]
 
 
+def test_get_latest_for_event_and_horizons_as_of_batches_both_horizons_in_one_call(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    thirty = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, horizon_minutes=30, cells=(make_cell(),)),
+        weather_observation_id=observation_id,
+    )
+    sixty = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, horizon_minutes=60, cells=(make_cell(),)),
+        weather_observation_id=observation_id,
+    )
+
+    by_horizon = repository.get_latest_for_event_and_horizons_as_of(event_id, (30, 60), PREDICTED_AT)
+
+    assert set(by_horizon) == {30, 60}
+    assert by_horizon[30].id == thirty.id
+    assert by_horizon[60].id == sixty.id
+    assert len(by_horizon[30].cells) == 1
+    assert len(by_horizon[60].cells) == 1
+
+
+def test_get_latest_for_event_and_horizons_as_of_matches_per_horizon_method(
+    repository,
+    event_id,
+    severity_repository,
+    weather_repository,
+    satellite_repository,
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    observation_id = persist_weather(weather_repository)
+    repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id, horizon_minutes=30),
+        weather_observation_id=observation_id,
+    )
+    # No 60m prediction persisted - horizon should be absent from the result.
+
+    by_horizon = repository.get_latest_for_event_and_horizons_as_of(event_id, (30, 60), PREDICTED_AT)
+    individual_30 = repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT)
+
+    assert set(by_horizon) == {30}
+    assert by_horizon[30].id == individual_30.id
+
+
+def test_get_latest_for_event_and_horizons_as_of_empty_horizons_returns_empty_dict(repository, event_id):
+    assert repository.get_latest_for_event_and_horizons_as_of(event_id, (), PREDICTED_AT) == {}
+
+
 def test_get_latest_for_event_and_horizon_as_of_returns_none_when_no_past_prediction(repository, event_id):
     assert repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT) is None
 

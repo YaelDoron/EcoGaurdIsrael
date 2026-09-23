@@ -5,6 +5,7 @@ from src.database.models.fire_danger_assessment_weather_input_db import (
     FireDangerAssessmentWeatherInputDB,
 )
 from src.database.models.fire_event_db import FireEventDB
+from src.database.models.fire_event_ml_assessment_db import FireEventMLAssessmentDB
 from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenceDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
 from src.database.models.fire_station_db import FireStationDB
@@ -48,6 +49,7 @@ __all__ = [
     "FireDangerAssessmentDB",
     "FireDangerAssessmentWeatherInputDB",
     "FireEventDB",
+    "FireEventMLAssessmentDB",
     "FireEventSatelliteEvidenceDB",
     "FireEventNewsEvidenceDB",
     "FireStationDB",
