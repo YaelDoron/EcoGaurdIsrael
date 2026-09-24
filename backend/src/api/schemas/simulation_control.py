@@ -66,7 +66,10 @@ class StartSimulationRequest(BaseModel):
 
     preset: str
     seed: Optional[int] = None
-    reset_demo_state: bool = False
+    # Task 9A: the demo reset is MANDATORY. The field is kept for client compatibility (the dashboard sends true) and
+    # now DEFAULTS to true; an explicit false is rejected with 422 SIMULATION_RESET_REQUIRED - a run can no longer
+    # be started on top of a previous run's FireEvents/evidence/history.
+    reset_demo_state: bool = True
 
 
 class SimulationRunCurrentEventResponse(BaseModel):

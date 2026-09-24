@@ -19,6 +19,9 @@ class OperationalRefreshStatus(Enum):
     REFRESHED = "refreshed"
     NO_OP = "no_op"
     INACTIVE_EVENT = "inactive_event"
+    # Task 9A: the event is active for monitoring (SUSPECTED) but not response-eligible: no severity / spread /
+    # targets / planning work was done. A successful, intentional no-op - never an error.
+    NOT_RESPONSE_ELIGIBLE = "not_response_eligible"
     RESOURCE_UPDATED = "resource_updated"
     RESOURCE_NO_OP = "resource_no_op"
     RESOURCE_NOT_FOUND = "resource_not_found"

@@ -1,0 +1,1082 @@
+{
+ "calibration_bins": [
+  {
+   "count": 173,
+   "lower": 0.0,
+   "mean_predicted": 0.0684766815498152,
+   "observed_fire_fraction": 0.04046242774566474,
+   "upper": 0.1
+  },
+  {
+   "count": 432,
+   "lower": 0.1,
+   "mean_predicted": 0.15561427277359294,
+   "observed_fire_fraction": 0.1712962962962963,
+   "upper": 0.2
+  },
+  {
+   "count": 866,
+   "lower": 0.2,
+   "mean_predicted": 0.25161782286795215,
+   "observed_fire_fraction": 0.2632794457274827,
+   "upper": 0.30000000000000004
+  },
+  {
+   "count": 1891,
+   "lower": 0.30000000000000004,
+   "mean_predicted": 0.35563115951613716,
+   "observed_fire_fraction": 0.3331570597567425,
+   "upper": 0.4
+  },
+  {
+   "count": 2070,
+   "lower": 0.4,
+   "mean_predicted": 0.4443439171412264,
+   "observed_fire_fraction": 0.47004830917874396,
+   "upper": 0.5
+  },
+  {
+   "count": 1516,
+   "lower": 0.5,
+   "mean_predicted": 0.5535999393764942,
+   "observed_fire_fraction": 0.5587071240105541,
+   "upper": 0.6000000000000001
+  },
+  {
+   "count": 1627,
+   "lower": 0.6000000000000001,
+   "mean_predicted": 0.643925213255903,
+   "observed_fire_fraction": 0.6263060848186847,
+   "upper": 0.7000000000000001
+  },
+  {
+   "count": 570,
+   "lower": 0.7000000000000001,
+   "mean_predicted": 0.7448681563881747,
+   "observed_fire_fraction": 0.7578947368421053,
+   "upper": 0.8
+  },
+  {
+   "count": 371,
+   "lower": 0.8,
+   "mean_predicted": 0.8480683935728812,
+   "observed_fire_fraction": 0.8706199460916442,
+   "upper": 0.9
+  },
+  {
+   "count": 484,
+   "lower": 0.9,
+   "mean_predicted": 0.9560970877084294,
+   "observed_fire_fraction": 0.9648760330578512,
+   "upper": 1.0
+  }
+ ],
+ "confirmatory_dataset": {
+  "environments": 250,
+  "expected_rows": 10000,
+  "expected_sha256": "7c24405e83fdceb1c4f74801da97d80aae84ea46161654c282df30ea190d8ead",
+  "expected_training_sha256": "37e056793fb4dda72f517a20153b21094b284e1579a065140483b8a6e1d78035",
+  "overlap_with_training": {
+   "confirmatory_environments": 250,
+   "confirmatory_pairs": 2500,
+   "confirmatory_seeds": [
+    8202609
+   ],
+   "exact_feature_vector_overlap_fraction": 0.0811,
+   "exact_feature_vector_overlap_rows": 811,
+   "exact_overlap_by_regime": {
+    "news_led": 535,
+    "satellite_only_single_pass": 51,
+    "sparse_early_evidence": 225
+   },
+   "note": "exact-overlap is a diagnostic only (news-only rows duplicate by construction); no row is removed.",
+   "overlapping_rows_whose_vector_has_another_label_in_training": 764,
+   "shared_environment_ids": [],
+   "shared_pair_ids": [],
+   "shared_sample_ids": [],
+   "training_environments": 250,
+   "training_seeds": [
+    42
+   ]
+  },
+  "pairs": 2500,
+  "rows": 10000,
+  "seed": 8202609,
+  "sha256": "7c24405e83fdceb1c4f74801da97d80aae84ea46161654c282df30ea190d8ead",
+  "training_sha256": "37e056793fb4dda72f517a20153b21094b284e1579a065140483b8a6e1d78035"
+ },
+ "gate_metric_uncertainty": {
+  "metrics": {
+   "brier_score": {
+    "ci_95": [
+     0.2058099608362825,
+     0.21203303876183416
+    ],
+    "gate_limit": "< 0.25",
+    "whole_interval_clears_limit": true
+   },
+   "confirmed_precision": {
+    "ci_95": [
+     0.9178280158934156,
+     0.95285764558333
+    ],
+    "gate_limit": ">= 0.9",
+    "whole_interval_clears_limit": true
+   },
+   "confirmed_recall_non_sparse": {
+    "ci_95": [
+     0.14987018763534787,
+     0.17175130255098445
+    ],
+    "gate_limit": ">= 0.1",
+    "whole_interval_clears_limit": true
+   },
+   "expected_calibration_error": {
+    "ci_95": [
+     0.012376141648088005,
+     0.026961625272126265
+    ],
+    "gate_limit": "<= 0.1",
+    "whole_interval_clears_limit": true
+   },
+   "false_confirmation_rate": {
+    "ci_95": [
+     0.007224139037165671,
+     0.012910690756924307
+    ],
+    "gate_limit": "<= 0.1",
+    "whole_interval_clears_limit": true
+   },
+   "fire_retained_recall_non_sparse": {
+    "ci_95": [
+     0.8060830937670921,
+     0.8292653821196161
+    ],
+    "gate_limit": ">= 0.8",
+    "whole_interval_clears_limit": true
+   },
+   "non_sparse_no_fire_alert_rate_ratio_vs_rules": {
+    "ci_95": [
+     0.6105110497237569,
+     0.6525672166067833
+    ],
+    "gate_limit": "<= 0.75",
+    "whole_interval_clears_limit": true
+   },
+   "persistent_thermal_roc_auc": {
+    "ci_95": [
+     0.7638080811636198,
+     0.7942407717897397
+    ],
+    "gate_limit": ">= 0.7",
+    "whole_interval_clears_limit": true
+   },
+   "sparse_confirmed_rate": {
+    "ci_95": [
+     0.0,
+     0.0
+    ],
+    "gate_limit": "<= 0.05",
+    "whole_interval_clears_limit": true
+   }
+  },
+  "note": "Environment-clustered bootstrap (whole environments resampled). DESCRIPTIVE only: the verdict comes from the point estimates against the predefined gate; this shows how robust each margin is on one synthetic draw.",
+  "repeats": 500
+ },
+ "history_progression_by_pass_count": {
+  "0 (no satellite)": {
+   "alert_precision": 0.5513698630136986,
+   "alert_recall": 0.8496042216358839,
+   "confirmed_precision": null,
+   "confirmed_rate": 0.0,
+   "confirmed_recall": 0.0,
+   "fire_rows": 379,
+   "fire_rows_mean_p": 0.5341059638417228,
+   "fire_rows_median_p": 0.5483234615856394,
+   "mean_p_fire": 0.5072225099286918,
+   "median_p_fire": 0.4879752592844546,
+   "no_event_rate": 0.22133333333333333,
+   "rows": 750,
+   "suspected_rate": 0.7786666666666666
+  },
+  "1": {
+   "alert_precision": 0.6041382446566621,
+   "alert_recall": 0.8000602228244504,
+   "confirmed_precision": 0.9399585921325052,
+   "confirmed_rate": 0.07263157894736842,
+   "confirmed_recall": 0.13670581150255948,
+   "fire_rows": 3321,
+   "fire_rows_mean_p": 0.5721077149153051,
+   "fire_rows_median_p": 0.572793247528477,
+   "mean_p_fire": 0.4985789445634492,
+   "median_p_fire": 0.4520439695018423,
+   "no_event_rate": 0.33864661654135336,
+   "rows": 6650,
+   "suspected_rate": 0.5887218045112782
+  },
+  "2": {
+   "alert_precision": 0.6381766381766382,
+   "alert_recall": 0.8452830188679246,
+   "confirmed_precision": 0.9133333333333333,
+   "confirmed_rate": 0.09927200529450694,
+   "confirmed_recall": 0.17232704402515722,
+   "fire_rows": 795,
+   "fire_rows_mean_p": 0.599911030811281,
+   "fire_rows_median_p": 0.5888779861121827,
+   "mean_p_fire": 0.5111100290726879,
+   "median_p_fire": 0.5084766382312303,
+   "no_event_rate": 0.30311052283256124,
+   "rows": 1511,
+   "suspected_rate": 0.5976174718729318
+  },
+  ">=3": {
+   "alert_precision": 0.6799336650082919,
+   "alert_recall": 0.8118811881188119,
+   "confirmed_precision": 0.950354609929078,
+   "confirmed_rate": 0.12947658402203857,
+   "confirmed_recall": 0.26534653465346536,
+   "fire_rows": 505,
+   "fire_rows_mean_p": 0.632797862354685,
+   "fire_rows_median_p": 0.6404531659799947,
+   "mean_p_fire": 0.46822059084005574,
+   "median_p_fire": 0.4492464437109248,
+   "no_event_rate": 0.4462809917355372,
+   "rows": 1089,
+   "suspected_rate": 0.42424242424242425
+  }
+ },
+ "history_progression_note": "A STATIC dataset: each row is one independent observation, so this compares rows with different pass counts; it does NOT prove that one event's confidence evolves over time. Sequential runtime progression is a later test.",
+ "history_progression_persistent_regime": {
+  "2": {
+   "confirmed_rate_fire": 0.17232704402515722,
+   "confirmed_rate_no_fire": 0.018156424581005588,
+   "fire_rows_mean_p": 0.599911030811281,
+   "no_fire_rows_mean_p": 0.41251115144394257,
+   "roc_auc": 0.7387539088577352,
+   "rows": 1511
+  },
+  ">=3": {
+   "confirmed_rate_fire": 0.26534653465346536,
+   "confirmed_rate_no_fire": 0.011986301369863013,
+   "fire_rows_mean_p": 0.632797862354685,
+   "no_fire_rows_mean_p": 0.3259063406433302,
+   "roc_auc": 0.8234945069849451,
+   "rows": 1089
+  }
+ },
+ "locked_model": {
+  "confirmatory_rows_used_in_training": 0,
+  "family": "HistGradientBoostingClassifier",
+  "feature_names": [
+   "satellite_low_count",
+   "satellite_nominal_count",
+   "satellite_high_count",
+   "satellite_frp_available_ratio",
+   "satellite_frp_mean",
+   "satellite_frp_max",
+   "satellite_brightness_available_ratio",
+   "satellite_brightness_mean",
+   "satellite_brightness_max",
+   "news_none_count",
+   "news_weak_count",
+   "news_moderate_count",
+   "news_strong_count",
+   "news_unknown_count",
+   "satellite_frp_sum",
+   "satellite_frp_std",
+   "satellite_brightness_std",
+   "satellite_night_fraction",
+   "satellite_cluster_radius_km",
+   "news_satellite_lag_minutes",
+   "satellite_pass_count",
+   "satellite_history_span_minutes",
+   "satellite_centroid_stability_km",
+   "satellite_frp_trend_per_hour",
+   "satellite_brightness_trend_per_hour"
+  ],
+  "params": {
+   "learning_rate": 0.1,
+   "max_depth": 3
+  },
+  "preprocessing": {
+   "imputation": "none (HistGradientBoostingClassifier handles NaN natively)",
+   "missing_indicators": "none",
+   "nullable_features": [
+    "satellite_night_fraction",
+    "satellite_cluster_radius_km",
+    "news_satellite_lag_minutes",
+    "satellite_history_span_minutes",
+    "satellite_centroid_stability_km",
+    "satellite_frp_trend_per_hour",
+    "satellite_brightness_trend_per_hour"
+   ],
+   "scaling": "none"
+  },
+  "trained_once_on": "training_v5.csv",
+  "training_rows": 10000
+ },
+ "locked_policy": {
+  "confirm_threshold": 0.8,
+  "corroboration": "satellite_low_count + satellite_nominal_count + satellite_high_count >= 2 (hotspots of the current candidate)",
+  "rules": {
+   "CONFIRMED": "P(fire) >= 0.8 AND current satellite pixel count >= 2",
+   "NO_EVENT": "P(fire) < 0.4",
+   "SUSPECTED": "P(fire) >= 0.4 and the CONFIRMED condition is not satisfied"
+  },
+  "suspect_threshold": 0.4,
+  "version": "ai_hybrid_policy_v5.0"
+ },
+ "meta": {
+  "joblib_version": "1.5.3",
+  "numpy_version": "2.0.2",
+  "python_version": "3.9.6",
+  "sklearn_version": "1.6.1"
+ },
+ "metrics": {
+  "brier_score": 0.20884528615326153,
+  "confirmed_precision": 0.9366925064599483,
+  "confirmed_precision_non_sparse": 0.9366925064599483,
+  "confirmed_recall_all_positives": 0.145,
+  "confirmed_recall_non_sparse": 0.16111111111111112,
+  "confirmed_rows": 774,
+  "expected_calibration_error": 0.01738762798938668,
+  "false_confirmation_rate": 0.0098,
+  "false_confirmed_rows": 49,
+  "fire_retained_recall_non_sparse": 0.8175555555555556,
+  "non_sparse_no_fire_alert_rate": 0.5015555555555555,
+  "persistent_thermal_roc_auc": 0.7790665680473374,
+  "pr_auc": 0.7394429681330199,
+  "roc_auc": 0.72849198,
+  "rule_non_sparse_no_fire_alert_rate": 0.7944444444444444,
+  "sparse_confirmed_rate": 0.0
+ },
+ "outcome_matrix": {
+  "all_rows": {
+   "fire": {
+    "CONFIRMED": 725,
+    "NO_EVENT": 939,
+    "SUSPECTED": 3336,
+    "rates": {
+     "CONFIRMED": 0.145,
+     "NO_EVENT": 0.1878,
+     "SUSPECTED": 0.6672
+    },
+    "rows": 5000
+   },
+   "no_fire": {
+    "CONFIRMED": 49,
+    "NO_EVENT": 2423,
+    "SUSPECTED": 2528,
+    "rates": {
+     "CONFIRMED": 0.0098,
+     "NO_EVENT": 0.4846,
+     "SUSPECTED": 0.5056
+    },
+    "rows": 5000
+   }
+  },
+  "non_sparse_rows": {
+   "fire": {
+    "CONFIRMED": 725,
+    "NO_EVENT": 821,
+    "SUSPECTED": 2954,
+    "rates": {
+     "CONFIRMED": 0.16111111111111112,
+     "NO_EVENT": 0.18244444444444444,
+     "SUSPECTED": 0.6564444444444445
+    },
+    "rows": 4500
+   },
+   "no_fire": {
+    "CONFIRMED": 49,
+    "NO_EVENT": 2243,
+    "SUSPECTED": 2208,
+    "rates": {
+     "CONFIRMED": 0.010888888888888889,
+     "NO_EVENT": 0.49844444444444447,
+     "SUSPECTED": 0.49066666666666664
+    },
+    "rows": 4500
+   }
+  }
+ },
+ "per_latent_subtype": {
+  "controlled_or_agricultural_burn": {
+   "alert_rate": 0.6852941176470588,
+   "confirmed_rate": 0.020588235294117647,
+   "label": 0,
+   "mean_p_fire": 0.4909195915518023,
+   "rows": 1020,
+   "statuses": {
+    "CONFIRMED": 21,
+    "NO_EVENT": 321,
+    "SUSPECTED": 678,
+    "rates": {
+     "CONFIRMED": 0.020588235294117647,
+     "NO_EVENT": 0.31470588235294117,
+     "SUSPECTED": 0.6647058823529411
+    },
+    "rows": 1020
+   }
+  },
+  "early_wildfire": {
+   "alert_rate": 0.7430610626486915,
+   "confirmed_rate": 0.01070578905630452,
+   "label": 1,
+   "mean_p_fire": 0.49861554197066843,
+   "rows": 2522,
+   "statuses": {
+    "CONFIRMED": 27,
+    "NO_EVENT": 648,
+    "SUSPECTED": 1847,
+    "rates": {
+     "CONFIRMED": 0.01070578905630452,
+     "NO_EVENT": 0.25693893735130846,
+     "SUSPECTED": 0.732355273592387
+    },
+    "rows": 2522
+   }
+  },
+  "established_wildfire": {
+   "alert_rate": 0.8457214241099313,
+   "confirmed_rate": 0.12242348532167395,
+   "label": 1,
+   "mean_p_fire": 0.591361807771792,
+   "rows": 1601,
+   "statuses": {
+    "CONFIRMED": 196,
+    "NO_EVENT": 247,
+    "SUSPECTED": 1158,
+    "rates": {
+     "CONFIRMED": 0.12242348532167395,
+     "NO_EVENT": 0.15427857589006871,
+     "SUSPECTED": 0.7232979387882573
+    },
+    "rows": 1601
+   }
+  },
+  "false_or_rumour_report": {
+   "alert_rate": 0.4950859950859951,
+   "confirmed_rate": 0.004914004914004914,
+   "label": 0,
+   "mean_p_fire": 0.40642317598724004,
+   "rows": 814,
+   "statuses": {
+    "CONFIRMED": 4,
+    "NO_EVENT": 411,
+    "SUSPECTED": 399,
+    "rates": {
+     "CONFIRMED": 0.004914004914004914,
+     "NO_EVENT": 0.504914004914005,
+     "SUSPECTED": 0.49017199017199015
+    },
+    "rows": 814
+   }
+  },
+  "industrial_heat_source": {
+   "alert_rate": 0.44307540660423855,
+   "confirmed_rate": 0.009364218827008379,
+   "label": 0,
+   "mean_p_fire": 0.38150684208747493,
+   "rows": 2029,
+   "statuses": {
+    "CONFIRMED": 19,
+    "NO_EVENT": 1130,
+    "SUSPECTED": 880,
+    "rates": {
+     "CONFIRMED": 0.009364218827008379,
+     "NO_EVENT": 0.5569245933957615,
+     "SUSPECTED": 0.43371118777723017
+    },
+    "rows": 2029
+   }
+  },
+  "large_wildfire": {
+   "alert_rate": 0.9498289623717218,
+   "confirmed_rate": 0.572405929304447,
+   "label": 1,
+   "mean_p_fire": 0.7920289856569679,
+   "rows": 877,
+   "statuses": {
+    "CONFIRMED": 502,
+    "NO_EVENT": 44,
+    "SUSPECTED": 331,
+    "rates": {
+     "CONFIRMED": 0.572405929304447,
+     "NO_EVENT": 0.05017103762827822,
+     "SUSPECTED": 0.3774230330672748
+    },
+    "rows": 877
+   }
+  },
+  "sensor_noise": {
+   "alert_rate": 0.5065963060686016,
+   "confirmed_rate": 0.0043975373790677225,
+   "label": 0,
+   "mean_p_fire": 0.41654743922721593,
+   "rows": 1137,
+   "statuses": {
+    "CONFIRMED": 5,
+    "NO_EVENT": 561,
+    "SUSPECTED": 571,
+    "rates": {
+     "CONFIRMED": 0.0043975373790677225,
+     "NO_EVENT": 0.49340369393139843,
+     "SUSPECTED": 0.5021987686895338
+    },
+    "rows": 1137
+   }
+  }
+ },
+ "per_regime": {
+  "multi_pixel_single_pass": {
+   "fire": {
+    "CONFIRMED": 207,
+    "NO_EVENT": 162,
+    "SUSPECTED": 431,
+    "rates": {
+     "CONFIRMED": 0.25875,
+     "NO_EVENT": 0.2025,
+     "SUSPECTED": 0.53875
+    },
+    "rows": 800
+   },
+   "no_fire": {
+    "CONFIRMED": 12,
+    "NO_EVENT": 406,
+    "SUSPECTED": 382,
+    "rates": {
+     "CONFIRMED": 0.015,
+     "NO_EVENT": 0.5075,
+     "SUSPECTED": 0.4775
+    },
+    "rows": 800
+   },
+   "rows": 1600
+  },
+  "news_led": {
+   "fire": {
+    "CONFIRMED": 61,
+    "NO_EVENT": 140,
+    "SUSPECTED": 499,
+    "rates": {
+     "CONFIRMED": 0.08714285714285715,
+     "NO_EVENT": 0.2,
+     "SUSPECTED": 0.7128571428571429
+    },
+    "rows": 700
+   },
+   "no_fire": {
+    "CONFIRMED": 2,
+    "NO_EVENT": 352,
+    "SUSPECTED": 346,
+    "rates": {
+     "CONFIRMED": 0.002857142857142857,
+     "NO_EVENT": 0.5028571428571429,
+     "SUSPECTED": 0.4942857142857143
+    },
+    "rows": 700
+   },
+   "rows": 1400
+  },
+  "persistent_thermal": {
+   "fire": {
+    "CONFIRMED": 271,
+    "NO_EVENT": 218,
+    "SUSPECTED": 811,
+    "rates": {
+     "CONFIRMED": 0.20846153846153845,
+     "NO_EVENT": 0.1676923076923077,
+     "SUSPECTED": 0.6238461538461538
+    },
+    "rows": 1300
+   },
+   "no_fire": {
+    "CONFIRMED": 20,
+    "NO_EVENT": 726,
+    "SUSPECTED": 554,
+    "rates": {
+     "CONFIRMED": 0.015384615384615385,
+     "NO_EVENT": 0.5584615384615385,
+     "SUSPECTED": 0.42615384615384616
+    },
+    "rows": 1300
+   },
+   "rows": 2600
+  },
+  "satellite_news": {
+   "fire": {
+    "CONFIRMED": 186,
+    "NO_EVENT": 159,
+    "SUSPECTED": 555,
+    "rates": {
+     "CONFIRMED": 0.20666666666666667,
+     "NO_EVENT": 0.17666666666666667,
+     "SUSPECTED": 0.6166666666666667
+    },
+    "rows": 900
+   },
+   "no_fire": {
+    "CONFIRMED": 15,
+    "NO_EVENT": 465,
+    "SUSPECTED": 420,
+    "rates": {
+     "CONFIRMED": 0.016666666666666666,
+     "NO_EVENT": 0.5166666666666667,
+     "SUSPECTED": 0.4666666666666667
+    },
+    "rows": 900
+   },
+   "rows": 1800
+  },
+  "satellite_only_single_pass": {
+   "fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 142,
+    "SUSPECTED": 658,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.1775,
+     "SUSPECTED": 0.8225
+    },
+    "rows": 800
+   },
+   "no_fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 294,
+    "SUSPECTED": 506,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.3675,
+     "SUSPECTED": 0.6325
+    },
+    "rows": 800
+   },
+   "rows": 1600
+  },
+  "sparse_early_evidence": {
+   "fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 118,
+    "SUSPECTED": 382,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.236,
+     "SUSPECTED": 0.764
+    },
+    "rows": 500
+   },
+   "no_fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 180,
+    "SUSPECTED": 320,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.36,
+     "SUSPECTED": 0.64
+    },
+    "rows": 500
+   },
+   "rows": 1000
+  }
+ },
+ "policy_gate": {
+  "criteria": {
+   "brier_score": {
+    "passed": true,
+    "requirement": "< 0.25",
+    "value": 0.20884528615326153
+   },
+   "confirmed_precision": {
+    "passed": true,
+    "requirement": ">= 0.9",
+    "value": 0.9366925064599483
+   },
+   "confirmed_recall_non_sparse": {
+    "passed": true,
+    "requirement": ">= 0.1",
+    "value": 0.16111111111111112
+   },
+   "expected_calibration_error": {
+    "passed": true,
+    "requirement": "<= 0.1",
+    "value": 0.01738762798938668
+   },
+   "false_confirmation_rate": {
+    "passed": true,
+    "requirement": "<= 0.1",
+    "value": 0.0098
+   },
+   "fire_retained_recall_non_sparse": {
+    "passed": true,
+    "requirement": ">= 0.8",
+    "value": 0.8175555555555556
+   },
+   "non_sparse_no_fire_alert_rate_vs_rules": {
+    "passed": true,
+    "requirement": "<= 0.75 x the rule detector's 0.794 = 0.596",
+    "value": 0.5015555555555555
+   },
+   "persistent_thermal_roc_auc": {
+    "passed": true,
+    "requirement": ">= 0.7",
+    "value": 0.7790665680473374
+   },
+   "sparse_confirmed_rate": {
+    "passed": true,
+    "requirement": "<= 0.05",
+    "value": 0.0
+   }
+  },
+  "failed_criteria": [],
+  "passed": true
+ },
+ "policy_gate_definition": {
+  "brier_score_max_exclusive": 0.25,
+  "confirmed_precision_min": 0.9,
+  "confirmed_recall_min_non_sparse": 0.1,
+  "expected_calibration_error_max": 0.1,
+  "false_confirmation_rate_max": 0.1,
+  "fire_retained_recall_min_non_sparse": 0.8,
+  "non_sparse_no_fire_alert_rate_max_ratio_vs_rules": 0.75,
+  "persistent_thermal_roc_auc_min": 0.7,
+  "sparse_confirmed_rate_max": 0.05
+ },
+ "probability_histogram_10_bins": {
+  "fire": [
+   7,
+   74,
+   228,
+   630,
+   973,
+   847,
+   1019,
+   432,
+   323,
+   467
+  ],
+  "no_fire": [
+   166,
+   358,
+   638,
+   1261,
+   1097,
+   669,
+   608,
+   138,
+   48,
+   17
+  ]
+ },
+ "rule_comparison": {
+  "confirmed_precision": {
+   "ai_hybrid_policy": 0.9366925064599483,
+   "rule_detector": 0.587746170678337
+  },
+  "definitions": "rule detector: SUSPECTED or CONFIRMED = fire (alert), CONFIRMED-only reported separately; AI Hybrid policy: status != NO_EVENT = alert. Same confirmatory rows; non-sparse rows for the slices.",
+  "false_confirmed_rows": {
+   "ai_hybrid_policy": 49,
+   "ai_hybrid_policy_rate": 0.0098,
+   "rule_detector": 942,
+   "rule_detector_rate": 0.1884
+  },
+  "hard_negative_rows_non_sparse": 3091,
+  "non_sparse_alert": {
+   "ai_hybrid_policy": {
+    "f1": 0.7050594097355309,
+    "false_negatives": 821,
+    "false_positive_rate": 0.5015555555555555,
+    "false_positives": 2257,
+    "hard_negative_fpr": 0.5816887738595924,
+    "precision": 0.619777628032345,
+    "recall": 0.8175555555555556,
+    "rows": 9000
+   },
+   "rule_detector": {
+    "f1": 0.6521448839926556,
+    "false_negatives": 593,
+    "false_positive_rate": 0.7944444444444444,
+    "false_positives": 3575,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5221865811280406,
+    "recall": 0.8682222222222222,
+    "rows": 9000
+   }
+  },
+  "non_sparse_confirmed_only": {
+   "ai_hybrid_policy": {
+    "f1": 0.2749336367083807,
+    "false_negatives": 3775,
+    "false_positive_rate": 0.010888888888888889,
+    "false_positives": 49,
+    "hard_negative_fpr": 0.015852474927208024,
+    "precision": 0.9366925064599483,
+    "recall": 0.16111111111111112,
+    "rows": 9000
+   },
+   "rule_detector": {
+    "f1": 0.3958732498157701,
+    "false_negatives": 3157,
+    "false_positive_rate": 0.20933333333333334,
+    "false_positives": 942,
+    "hard_negative_fpr": 0.3047557424781624,
+    "precision": 0.587746170678337,
+    "recall": 0.29844444444444446,
+    "rows": 9000
+   }
+  },
+  "policy_per_regime_alert": {
+   "multi_pixel_single_pass": {
+    "f1": 0.6965065502183405,
+    "false_negatives": 162,
+    "false_positive_rate": 0.4925,
+    "false_positives": 394,
+    "hard_negative_fpr": 0.5580985915492958,
+    "precision": 0.6182170542635659,
+    "recall": 0.7975,
+    "rows": 1600
+   },
+   "news_led": {
+    "f1": 0.6965174129353234,
+    "false_negatives": 140,
+    "false_positive_rate": 0.49714285714285716,
+    "false_positives": 348,
+    "hard_negative_fpr": 0.6297872340425532,
+    "precision": 0.6167400881057269,
+    "recall": 0.8,
+    "rows": 1400
+   },
+   "persistent_thermal": {
+    "f1": 0.7320703653585927,
+    "false_negatives": 218,
+    "false_positive_rate": 0.44153846153846155,
+    "false_positives": 574,
+    "hard_negative_fpr": 0.43417085427135677,
+    "precision": 0.6533816425120773,
+    "recall": 0.8323076923076923,
+    "rows": 2600
+   },
+   "satellite_news": {
+    "f1": 0.713872832369942,
+    "false_negatives": 159,
+    "false_positive_rate": 0.48333333333333334,
+    "false_positives": 435,
+    "hard_negative_fpr": 0.5763195435092725,
+    "precision": 0.6301020408163265,
+    "recall": 0.8233333333333334,
+    "rows": 1800
+   },
+   "satellite_only_single_pass": {
+    "f1": 0.670061099796334,
+    "false_negatives": 142,
+    "false_positive_rate": 0.6325,
+    "false_positives": 506,
+    "hard_negative_fpr": 0.9775910364145658,
+    "precision": 0.5652920962199313,
+    "recall": 0.8225,
+    "rows": 1600
+   },
+   "sparse_early_evidence": {
+    "f1": 0.6356073211314476,
+    "false_negatives": 118,
+    "false_positive_rate": 0.64,
+    "false_positives": 320,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5441595441595442,
+    "recall": 0.764,
+    "rows": 1000
+   }
+  },
+  "relative_reduction_in_non_sparse_no_fire_alert_rate": 0.3686713286713287,
+  "rule_per_regime_alert": {
+   "multi_pixel_single_pass": {
+    "f1": 0.6535433070866141,
+    "false_negatives": 136,
+    "false_positive_rate": 0.71,
+    "false_positives": 568,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.538961038961039,
+    "recall": 0.83,
+    "rows": 1600
+   },
+   "news_led": {
+    "f1": 0.6666666666666666,
+    "false_negatives": 0,
+    "false_positive_rate": 1.0,
+    "false_positives": 700,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5,
+    "recall": 1.0,
+    "rows": 1400
+   },
+   "persistent_thermal": {
+    "f1": 0.6388647552852592,
+    "false_negatives": 197,
+    "false_positive_rate": 0.8076923076923077,
+    "false_positives": 1050,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5123084068741292,
+    "recall": 0.8484615384615385,
+    "rows": 2600
+   },
+   "satellite_news": {
+    "f1": 0.6666666666666666,
+    "false_negatives": 0,
+    "false_positive_rate": 1.0,
+    "false_positives": 900,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5,
+    "recall": 1.0,
+    "rows": 1800
+   },
+   "satellite_only_single_pass": {
+    "f1": 0.6364172068355923,
+    "false_negatives": 260,
+    "false_positive_rate": 0.44625,
+    "false_positives": 357,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.6020066889632107,
+    "recall": 0.675,
+    "rows": 1600
+   },
+   "sparse_early_evidence": {
+    "f1": 0.5424083769633508,
+    "false_negatives": 241,
+    "false_positive_rate": 0.392,
+    "false_positives": 196,
+    "hard_negative_fpr": 1.0,
+    "precision": 0.5692307692307692,
+    "recall": 0.518,
+    "rows": 1000
+   }
+  }
+ },
+ "sparse_early_evidence": {
+  "brier_score": 0.24650033902732765,
+  "brier_score_of_constant_0_5": 0.25,
+  "confirmed_rate": 0.0,
+  "expected_calibration_error": 0.055774397831830164,
+  "fire_share": 0.5,
+  "fraction_p_above_0_90": 0.0,
+  "fraction_p_below_0_10": 0.0,
+  "fraction_uncertain_0_35_to_0_65": 0.831,
+  "mean_predicted_p": 0.45876193353659234,
+  "no_event_rate": 0.298,
+  "observed_fire_fraction_when_p_above_0_90": null,
+  "observed_fire_fraction_when_p_below_0_10": null,
+  "probability_histogram_10_bins": [
+   0,
+   3,
+   53,
+   242,
+   408,
+   86,
+   208,
+   0,
+   0,
+   0
+  ],
+  "reliability_bins": [
+   {
+    "count": 0,
+    "lower": 0.0,
+    "mean_predicted": null,
+    "observed_fire_fraction": null,
+    "upper": 0.1
+   },
+   {
+    "count": 3,
+    "lower": 0.1,
+    "mean_predicted": 0.18863775589955248,
+    "observed_fire_fraction": 0.0,
+    "upper": 0.2
+   },
+   {
+    "count": 53,
+    "lower": 0.2,
+    "mean_predicted": 0.2467663878971534,
+    "observed_fire_fraction": 0.39622641509433965,
+    "upper": 0.30000000000000004
+   },
+   {
+    "count": 242,
+    "lower": 0.30000000000000004,
+    "mean_predicted": 0.35580299549228744,
+    "observed_fire_fraction": 0.40082644628099173,
+    "upper": 0.4
+   },
+   {
+    "count": 408,
+    "lower": 0.4,
+    "mean_predicted": 0.44075618803274114,
+    "observed_fire_fraction": 0.49754901960784315,
+    "upper": 0.5
+   },
+   {
+    "count": 86,
+    "lower": 0.5,
+    "mean_predicted": 0.5637476705504652,
+    "observed_fire_fraction": 0.6395348837209303,
+    "upper": 0.6000000000000001
+   },
+   {
+    "count": 208,
+    "lower": 0.6000000000000001,
+    "mean_predicted": 0.6283762135409259,
+    "observed_fire_fraction": 0.5961538461538461,
+    "upper": 0.7000000000000001
+   },
+   {
+    "count": 0,
+    "lower": 0.7000000000000001,
+    "mean_predicted": null,
+    "observed_fire_fraction": null,
+    "upper": 0.8
+   },
+   {
+    "count": 0,
+    "lower": 0.8,
+    "mean_predicted": null,
+    "observed_fire_fraction": null,
+    "upper": 0.9
+   },
+   {
+    "count": 0,
+    "lower": 0.9,
+    "mean_predicted": null,
+    "observed_fire_fraction": null,
+    "upper": 1.0
+   }
+  ],
+  "roc_auc": 0.589708,
+  "rows": 1000,
+  "status_by_truth": {
+   "fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 118,
+    "SUSPECTED": 382,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.236,
+     "SUSPECTED": 0.764
+    },
+    "rows": 500
+   },
+   "no_fire": {
+    "CONFIRMED": 0,
+    "NO_EVENT": 180,
+    "SUSPECTED": 320,
+    "rates": {
+     "CONFIRMED": 0.0,
+     "NO_EVENT": 0.36,
+     "SUSPECTED": 0.64
+    },
+    "rows": 500
+   }
+  },
+  "suspected_rate": 0.702
+ },
+ "synthetic_data_notice": "All training and confirmatory evaluation data is SYNTHETIC. These results describe the AI Hybrid policy on the V5 benchmark generator and are NOT real-world wildfire detection accuracy.",
+ "task_7_binary_primary_gate": "FAILED",
+ "verdict": "AI HYBRID POLICY PASSED"
+}

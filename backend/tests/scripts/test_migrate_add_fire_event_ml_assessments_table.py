@@ -81,6 +81,12 @@ def test_migrate_creates_expected_columns_and_unique_fk(monkeypatch, pre_migrati
         "ml_failure_reason",
         "agreement",
         "updated_at",
+        # Task 9B: a freshly created table already has the (nullable) AI Hybrid V5 audit columns.
+        "policy_version",
+        "policy_status",
+        "history_available",
+        "satellite_pass_count",
+        "current_satellite_pixel_count",
     }
     fk_pairs = {(tuple(fk["constrained_columns"]), fk["referred_table"]) for fk in foreign_keys}
     assert (("fire_event_id",), "fire_events") in fk_pairs

@@ -43,6 +43,7 @@ from src.simulation.demo_simulation_runner import (
     DemoSimulationRunResult,
     DemoSimulationStatus,
 )
+from src.simulation.demo_run_preparation import DemoResetRequiredError, prepare_clean_demo_state, require_demo_reset_enabled
 from src.simulation.demo_state_reset_service import DemoStateResetService
 from src.simulation.simulation_presets import SimulationPreset, get_simulation_preset
 from src.simulation.simulation_scenario_service import SimulationMode
@@ -75,7 +76,11 @@ class SimulationPresetNotFoundError(ValueError):
 
 
 class SimulationResetDisabledError(RuntimeError):
-    """Raised by start_run() when reset_demo_state=True but ENABLE_DEMO_DATA_RESET is not."""
+    """Raised by start_run() when the MANDATORY demo reset cannot run because ENABLE_DEMO_DATA_RESET is not enabled."""
+
+
+class SimulationResetRequiredError(ValueError):
+    """Raised by start_run() when a caller asks to start a run WITHOUT the demo reset (no longer supported)."""
 
 
 class SimulationRunState(Enum):
@@ -210,8 +215,15 @@ class SimulationRunManager:
         with self._lock:
             return self._snapshot
 
-    def start_run(self, *, preset_id: str, seed: int | None = None, reset_demo_state: bool) -> SimulationRunSnapshot:
+    def start_run(self, *, preset_id: str, seed: int | None = None, reset_demo_state: bool = True) -> SimulationRunSnapshot:
         """Validate and reserve a new run, then start it in the background.
+
+        Task 9A - the demo reset is MANDATORY: every run first resets all runtime/demo state (FireEvents, evidence,
+        event history, ML assessments, derived response data) so a new run can never inherit the previous one's Fire
+        Detection history. `reset_demo_state` is kept ONLY for API/call-site compatibility and must be True; passing
+        False raises SimulationResetRequiredError - there is no way to start a run without the reset. If
+        ENABLE_DEMO_DATA_RESET is not enabled the start is refused (SimulationResetDisabledError) BEFORE a run is
+        reserved and before any event is generated (fail-closed).
 
         `seed` is OPTIONAL: when the caller supplies one, it is used
         exactly as given (this is what the CLI script and reproducibility
@@ -225,8 +237,8 @@ class SimulationRunManager:
         Returns immediately (before the runner executes anything) with a
         PREPARING snapshot. Raises without reserving anything if:
         - the preset id is not registered (SimulationPresetNotFoundError),
-        - reset_demo_state=True but the reset safety flag is off
-          (SimulationResetDisabledError),
+        - the reset was declined (SimulationResetRequiredError),
+        - the reset safety flag is off (SimulationResetDisabledError),
         - a run is already PREPARING/RUNNING (SimulationAlreadyRunningError).
 
         The PREPARING state is committed atomically under the same lock as
@@ -238,16 +250,14 @@ class SimulationRunManager:
         if preset is None:
             raise SimulationPresetNotFoundError(preset_id)
 
-        if reset_demo_state:
-            # Imported lazily to avoid a hard import-time dependency on
-            # settings for callers that never request a reset; also keeps
-            # this check trivially monkeypatchable in tests.
-            from src.config.settings import settings
-
-            if not settings.ENABLE_DEMO_DATA_RESET:
-                raise SimulationResetDisabledError(
-                    "reset_demo_state was requested but ENABLE_DEMO_DATA_RESET is not enabled."
-                )
+        if reset_demo_state is not True:
+            raise SimulationResetRequiredError(
+                "A demo simulation cannot start without the runtime reset; reset_demo_state must be true."
+            )
+        try:
+            require_demo_reset_enabled()
+        except DemoResetRequiredError as exc:
+            raise SimulationResetDisabledError(str(exc)) from exc
 
         with self._lock:
             if self._snapshot.state in _ACTIVE_STATES:
@@ -276,7 +286,7 @@ class SimulationRunManager:
             )
             snapshot_to_return = self._snapshot
 
-        self._executor.submit(self._execute, run_id, preset, resolved_seed, reset_demo_state)
+        self._executor.submit(self._execute, run_id, preset, resolved_seed)
         return snapshot_to_return
 
     def _generate_seed(self) -> int:
@@ -296,11 +306,11 @@ class SimulationRunManager:
 
     # -- background worker (never runs on the calling/request thread) ------
 
-    def _execute(self, run_id: str, preset: SimulationPreset, seed: int, reset_demo_state: bool) -> None:
+    def _execute(self, run_id: str, preset: SimulationPreset, seed: int) -> None:
         try:
-            if reset_demo_state:
-                self._replace_if_current(run_id, last_message="Resetting demo state.")
-                self._reset_service_factory().reset_demo_state()
+            # Mandatory (Task 9A): nothing is generated or run until the reset has succeeded; a failed reset fails the run.
+            self._replace_if_current(run_id, last_message="Resetting demo state.")
+            prepare_clean_demo_state(self._reset_service_factory)
 
             scenario = preset.build(seed)
             started_at = self._clock_fn()

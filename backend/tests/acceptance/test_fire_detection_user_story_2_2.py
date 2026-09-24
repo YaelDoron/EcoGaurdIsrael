@@ -9,6 +9,8 @@ from sqlalchemy import select
 from src.agents.analysis import FireDangerAssessmentAgent, FireDetectionAgent
 from src.calculators.fire_danger.ffwi_calculator import FFWICalculator
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
+from src.calculators.fire_detection.fire_detection_decision_policy import FireDetectionHybridPolicy
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
 from src.database.models.fire_event_db import FireEventDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
 from src.models import (
@@ -59,6 +61,8 @@ def make_detection_agent(sqlite_session_factory) -> FireDetectionAgent:
         fire_event_repository=FireEventRepository(session_factory=sqlite_session_factory),
         satellite_repository=satellite_repository,
         news_repository=news_repository,
+        # Pinned (Task 9C): these rule-behaviour tests must not depend on FIRE_DETECTION_DECISION_MODE in the environment.
+        decision_policy=FireDetectionHybridPolicy(mode=FireDetectionDecisionMode.SHADOW),
     )
 
 

@@ -1459,44 +1459,49 @@ def test_planning_refresh_output_is_enriched_from_the_us_5_5_read_service_withou
 # ---------------------------------------------------------------------------
 
 
-def test_reset_demo_state_flag_invokes_service_before_running(monkeypatch):
+def test_the_reset_is_mandatory_and_runs_before_the_simulation_without_any_flag(monkeypatch):
+    """Task 9A: there is no opt-in flag any more - every CLI run resets first."""
     order = []
 
-    class _FakeResetService:
-        def reset_demo_state(self):
-            order.append("reset")
-            return DemoStateResetResult(deleted_counts={"fire_events": 1}, resources_restored=5)
+    def fake_prepare():
+        order.append("reset")
+        return DemoStateResetResult(deleted_counts={"fire_events": 1}, resources_restored=5)
 
     def fake_run_manual(scenario):
         order.append("run")
 
     monkeypatch.setattr("scripts.run_demo_simulation.initialize_database", lambda: None)
-    monkeypatch.setattr("scripts.run_demo_simulation.DemoStateResetService", lambda: _FakeResetService())
+    monkeypatch.setattr("scripts.run_demo_simulation.prepare_clean_demo_state", fake_prepare)
     monkeypatch.setattr("scripts.run_demo_simulation.run_manual", fake_run_manual)
 
-    exit_code = main(["--preset", "operations_demo", "--reset-demo-state"])
+    exit_code = main(["--preset", "operations_demo"])
 
     assert exit_code == 0
     assert order == ["reset", "run"]
 
 
-def test_reset_demo_state_flag_refusal_stops_before_running(monkeypatch, capsys):
-    from src.simulation.demo_state_reset_service import DemoStateResetDisabledError
+def test_the_old_opt_in_flag_no_longer_exists():
+    with pytest.raises(SystemExit) as raised:
+        parse_args(["--preset", "operations_demo", "--reset-demo-state"])
+    assert raised.value.code == 2
+    assert not hasattr(parse_args(["--preset", "operations_demo"]), "reset_demo_state")
+
+
+@pytest.mark.parametrize("mode", ["manual", "automatic"])
+def test_a_disabled_reset_refuses_fail_closed_before_any_event_in_both_modes(monkeypatch, capsys, mode):
+    from src.simulation.demo_run_preparation import DemoResetRequiredError
 
     order = []
 
-    class _DisabledResetService:
-        def reset_demo_state(self):
-            raise DemoStateResetDisabledError("ENABLE_DEMO_DATA_RESET is not enabled.")
-
-    def fake_run_manual(scenario):
-        order.append("run")
+    def refuse():
+        raise DemoResetRequiredError("ENABLE_DEMO_DATA_RESET is not enabled.")
 
     monkeypatch.setattr("scripts.run_demo_simulation.initialize_database", lambda: None)
-    monkeypatch.setattr("scripts.run_demo_simulation.DemoStateResetService", lambda: _DisabledResetService())
-    monkeypatch.setattr("scripts.run_demo_simulation.run_manual", fake_run_manual)
+    monkeypatch.setattr("scripts.run_demo_simulation.prepare_clean_demo_state", refuse)
+    monkeypatch.setattr("scripts.run_demo_simulation.run_manual", lambda scenario: order.append("manual"))
+    monkeypatch.setattr("scripts.run_demo_simulation.run_automatic", lambda scenario, poll_interval_seconds: order.append("automatic"))
 
-    exit_code = main(["--preset", "operations_demo", "--reset-demo-state"])
+    exit_code = main(["--preset", "operations_demo", "--mode", mode])
 
     assert exit_code == 2
     assert order == []

@@ -46,6 +46,7 @@ from src.database.models.fire_event_db import FireEventDB
 from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.resource_commitment_db import ResourceCommitmentDB
 from src.database.models.response_plan_planning_state_db import ResponsePlanPlanningStateDB
+from src.models.fire_event_response_eligibility import RESPONSE_ELIGIBLE_STATUSES
 from src.models.fire_event_status import FireEventStatus
 from src.models.resource_status import ResourceStatus
 from src.repositories.response_plan_planning_state_repository import StoredResponsePlanPlanningState
@@ -53,7 +54,8 @@ from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.resource_commitment_repository import ResourceCommitmentRepository
 from src.services.resource_reservation.resource_commitment_conflict import ResourceCommitmentConflict
 
-_ACTIVE_STATUSES = frozenset({FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED})
+# Task 9A: a plan may only be activated (resources committed) for a response-eligible (CONFIRMED) event.
+_RESPONSE_ELIGIBLE_STATUSES = RESPONSE_ELIGIBLE_STATUSES
 
 
 class ResponsePlanActivationService:
@@ -99,8 +101,8 @@ class ResponsePlanActivationService:
             ).scalar_one_or_none()
             if db_event is None:
                 raise ValueError(f"FireEvent {fire_event_id!r} was not found.")
-            if FireEventStatus(db_event.status) not in _ACTIVE_STATUSES:
-                raise ValueError(f"FireEvent {fire_event_id!r} is no longer active; cannot activate a plan for it.")
+            if FireEventStatus(db_event.status) not in _RESPONSE_ELIGIBLE_STATUSES:
+                raise ValueError(f"FireEvent {fire_event_id!r} is no longer active/response-eligible; cannot activate a plan for it.")
 
             # 2. Lock every selected resource row, in deterministic sorted order (Task 8).
             db_resources = ()

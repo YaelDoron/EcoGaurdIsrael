@@ -35,10 +35,13 @@ export interface FireEventSummary {
  * for the full backend shape (also includes model_name/model_version/
  * feature_schema_version/failure_reason/rule_status/updated_at).
  *
- * `model_score` is a model-estimated score from the synthetic-trained
- * Logistic Regression V3 classifier - NOT a calibrated real-world
- * probability of wildfire occurrence. Never label it "confidence" or
- * "probability of fire" in the UI.
+ * `model_score` is a model-estimated score from a synthetic-trained model
+ * - NOT a calibrated real-world probability of wildfire occurrence. In the
+ * AI Hybrid mode the UI calls it "fire likelihood" / "AI confidence"; never
+ * "certainty" or "probability of fire".
+ *
+ * The optional fields below are filled only for `mode === "ai_hybrid_v5"`
+ * (null otherwise). The 25-feature vector is never sent.
  */
 export interface FireEventMLAssessment {
   available: boolean;
@@ -46,6 +49,13 @@ export interface FireEventMLAssessment {
   rule_confidence: number;
   model_score: number | null;
   agreement: string;
+  model_name?: string | null;
+  model_version?: string | null;
+  policy_version?: string | null;
+  policy_status?: string | null;
+  history_available?: boolean | null;
+  satellite_pass_count?: number | null;
+  current_satellite_pixel_count?: number | null;
 }
 
 export interface SeverityAssessment {

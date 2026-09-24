@@ -31,6 +31,20 @@ from src.models.hybrid_fire_detection_decision import HybridFireDetectionDecisio
 DEFAULT_ML_CLASSIFICATION_THRESHOLD = 0.50
 
 
+def estimate_candidate_location(evidence_items: tuple[FireDetectionEvidence, ...]) -> tuple[float, float]:
+    """Same satellite-priority centroid FireDetectionCalculator uses for SUSPECTED/CONFIRMED.
+
+    Public so the AI Hybrid V5 path (which must locate a candidate even when the rule calculator says NO_EVENT) matches
+    events with exactly the same coordinates the rule path would use.
+    """
+    satellite_items = tuple(item for item in evidence_items if item.evidence_type is FireEvidenceType.SATELLITE)
+    items = satellite_items or tuple(item for item in evidence_items if item.evidence_type is FireEvidenceType.NEWS)
+    return (
+        sum(item.latitude for item in items) / len(items),
+        sum(item.longitude for item in items) / len(items),
+    )
+
+
 class FireDetectionHybridPolicy:
     """Decide the final Fire Detection outcome for one runtime decision_mode.
 
@@ -48,6 +62,13 @@ class FireDetectionHybridPolicy:
     ) -> None:
         if not isinstance(mode, FireDetectionDecisionMode):
             raise ValueError(f"mode must be a FireDetectionDecisionMode, got {mode!r}")
+        if mode is FireDetectionDecisionMode.AI_HYBRID_V5:
+            # This policy only knows the rule-driven modes; silently treating AI_HYBRID_V5 like SHADOW would label
+            # rule decisions as AI decisions. The V5 path lives in FireDetectionAIHybridClassifierV5.
+            raise ValueError(
+                "FireDetectionHybridPolicy does not implement ai_hybrid_v5; "
+                "the AI Hybrid V5 status comes from FireDetectionAIHybridClassifierV5."
+            )
         self._mode = mode
         self._ml_classification_threshold = ml_classification_threshold
         self._ml_suspect_threshold = ml_suspect_threshold
@@ -142,10 +163,4 @@ class FireDetectionHybridPolicy:
     def _estimate_escalation_location(
         evidence_items: tuple[FireDetectionEvidence, ...],
     ) -> tuple[float, float]:
-        """Same satellite-priority centroid FireDetectionCalculator uses for SUSPECTED/CONFIRMED."""
-        satellite_items = tuple(item for item in evidence_items if item.evidence_type is FireEvidenceType.SATELLITE)
-        items = satellite_items or tuple(item for item in evidence_items if item.evidence_type is FireEvidenceType.NEWS)
-        return (
-            sum(item.latitude for item in items) / len(items),
-            sum(item.longitude for item in items) / len(items),
-        )
+        return estimate_candidate_location(evidence_items)

@@ -44,6 +44,11 @@ class FireDetectionEvidence:
     satellite_brightness: float | None = None
     satellite_day_night: str | None = None
     news_wildfire_signal_strength: NewsWildfireSignalStrength | None = None
+    # Task 5B: the persisted `satellite` / `instrument` of the hotspot (SatelliteHotspot fields that
+    # already exist). Used ONLY to keep observation waves of different platforms apart when grouping
+    # satellite passes for event history; never by confidence, correlation or the ML features.
+    satellite_name: str | None = None
+    satellite_instrument: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.evidence_id, bool) or not isinstance(self.evidence_id, int) or self.evidence_id <= 0:
@@ -67,6 +72,10 @@ class FireDetectionEvidence:
             self._validate_non_negative_optional_number("satellite_brightness", self.satellite_brightness)
             if self.satellite_day_night is not None and not isinstance(self.satellite_day_night, str):
                 raise ValueError(f"satellite_day_night must be a string or None, got {self.satellite_day_night!r}")
+            for field_name in ("satellite_name", "satellite_instrument"):
+                value = getattr(self, field_name)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{field_name} must be a string or None, got {value!r}")
         else:
             if self.satellite_confidence is not None:
                 raise ValueError("NEWS evidence must not include satellite_confidence.")
@@ -76,6 +85,10 @@ class FireDetectionEvidence:
                 raise ValueError("NEWS evidence must not include satellite_brightness.")
             if self.satellite_day_night is not None:
                 raise ValueError("NEWS evidence must not include satellite_day_night.")
+            if self.satellite_name is not None:
+                raise ValueError("NEWS evidence must not include satellite_name.")
+            if self.satellite_instrument is not None:
+                raise ValueError("NEWS evidence must not include satellite_instrument.")
             if self.news_wildfire_signal_strength is not None and not isinstance(
                 self.news_wildfire_signal_strength, NewsWildfireSignalStrength
             ):

@@ -37,6 +37,14 @@ class FireEventMLAssessment:
     ml_failure_reason: str | None
     agreement: FireDetectionMLRuleAgreement
     updated_at: datetime
+    # Task 9B (AI_HYBRID_V5 only; None for every other mode). This row is the LATEST assessment - distinct from the
+    # FireEvent's monotonic PEAK detection_confidence. `ml_probability` above is the latest P(fire); these say which
+    # policy turned it into `policy_status`, whether event history was used, and on how much satellite evidence.
+    policy_version: str | None = None
+    policy_status: FireDetectionStatus | None = None
+    history_available: bool | None = None
+    satellite_pass_count: int | None = None
+    current_satellite_pixel_count: int | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.fire_event_id, bool) or not isinstance(self.fire_event_id, int) or self.fire_event_id <= 0:
@@ -65,3 +73,9 @@ class FireEventMLAssessment:
                 raise ValueError(f"ml_probability must be within [0, 1] when ml_available, got {self.ml_probability!r}")
         elif self.ml_probability is not None:
             raise ValueError("ml_probability must be None when not ml_available.")
+        if self.policy_status is not None and not isinstance(self.policy_status, FireDetectionStatus):
+            raise ValueError(f"policy_status must be a FireDetectionStatus or None, got {self.policy_status!r}")
+        for field_name in ("satellite_pass_count", "current_satellite_pixel_count"):
+            value = getattr(self, field_name)
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+                raise ValueError(f"{field_name} must be a non-negative integer or None, got {value!r}")

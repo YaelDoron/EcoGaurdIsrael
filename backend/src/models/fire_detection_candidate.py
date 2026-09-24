@@ -108,6 +108,12 @@ class FireDetectionCandidate:
         return len(seen) == len(evidence)
 
     @classmethod
+    def are_correlated(cls, first: FireDetectionEvidence, second: FireDetectionEvidence) -> bool:
+        """Whether two evidence items directly correlate (<= 5 km and <= 60 min): the same rule
+        `is_connected` chains. Public so event-history code can reuse the ONE correlation definition."""
+        return cls._is_correlated(first, second)
+
+    @classmethod
     def _is_correlated(cls, first: FireDetectionEvidence, second: FireDetectionEvidence) -> bool:
         time_difference_minutes = abs(
             (first.observed_at.astimezone(timezone.utc) - second.observed_at.astimezone(timezone.utc))

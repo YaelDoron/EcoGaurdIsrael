@@ -958,6 +958,200 @@ describe("EventDetailsPage", () => {
     expect(screen.queryByRole("link", { name: "View Current Response Plan" })).not.toBeInTheDocument();
   });
 
+  // -------------------------------------------------------------------------
+  // Final Fire Detection semantics (Task 9C): SUSPECTED = monitoring, CONFIRMED = response eligible
+  // -------------------------------------------------------------------------
+
+  const AI_ASSESSMENT = {
+    available: true,
+    mode: "ai_hybrid_v5",
+    rule_confidence: 0.875,
+    model_score: 0.53,
+    agreement: "agree_fire",
+    model_name: "fire_detection_hgb_v5",
+    model_version: "5.0",
+    policy_version: "ai_hybrid_policy_v5.0",
+    policy_status: "suspected",
+    history_available: true,
+    satellite_pass_count: 2,
+    current_satellite_pixel_count: 3,
+  };
+
+  it("shows a monitoring state - not 'Response Plan pending' - for a SUSPECTED event with no plan", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({ fire_event: { ...makeResult().fire_event, status: "suspected" }, current_response_plan: null }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.getByTestId("monitoring-state")).toHaveTextContent("Monitoring - awaiting additional evidence");
+    expect(screen.queryByText(/Response Plan/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pending/i)).not.toBeInTheDocument();
+    expect(screen.getByTestId("status-help")).toHaveTextContent(
+      "SUSPECTED means the system detected evidence consistent with a possible wildfire but does not yet have enough corroborating evidence to confirm it.",
+    );
+  });
+
+  it("explains CONFIRMED as high AI likelihood plus corroborating current satellite evidence - not certainty (AI mode)", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: { ...makeResult().fire_event, status: "confirmed" },
+        ml_assessment: { ...AI_ASSESSMENT, policy_status: "confirmed" },
+        current_response_plan: null,
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const help = screen.getByTestId("status-help");
+    expect(help).toHaveTextContent(/high AI likelihood together with corroborating current satellite evidence/);
+    expect(help).toHaveTextContent(/not certainty/);
+    expect(screen.getByText("Response Plan pending…")).toBeInTheDocument(); // CONFIRMED keeps the existing experience
+    expect(screen.queryByTestId("monitoring-state")).not.toBeInTheDocument();
+  });
+
+  it("shows the AI explainability fields for an ai_hybrid_v5 event, labelled as likelihood (never certainty)", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: {
+          ...makeResult().fire_event,
+          status: "suspected",
+          detection_confidence: 0.64,
+          methodology: "ECOGUARD_AI_HYBRID_DETECTION",
+        },
+        ml_assessment: AI_ASSESSMENT,
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    const scoped = within(fireEventSection);
+    expect(scoped.getByText("Latest AI likelihood").nextSibling).toHaveTextContent("53%");
+    expect(scoped.getByText("Peak AI likelihood").nextSibling).toHaveTextContent("64%");
+    expect(scoped.queryByText("Rule Score")).not.toBeInTheDocument(); // the rule result is diagnostics only in this mode
+
+    const aiSection = screen.getByRole("heading", { name: "AI Assessment" }).closest("section") as HTMLElement;
+    const ai = within(aiSection);
+    expect(ai.getByText("AI Hybrid V5")).toBeInTheDocument();
+    expect(ai.getByText("Suspected")).toBeInTheDocument();
+    expect(ai.getByText("Satellite passes").nextSibling).toHaveTextContent("2");
+    expect(ai.getByText("Current satellite pixels").nextSibling).toHaveTextContent("3");
+    expect(ai.getByText("Detection mode").nextSibling).toHaveTextContent("AI Hybrid V5");
+    expect(ai.getByText("Latest AI verdict").nextSibling).toHaveTextContent("Suspected");
+    // Implementation details are not part of the operator view (the API still returns them).
+    expect(ai.queryByText(/Event history used/i)).not.toBeInTheDocument();
+    expect(ai.queryByText("Model")).not.toBeInTheDocument();
+    expect(ai.queryByText("Policy")).not.toBeInTheDocument();
+    expect(document.body.textContent ?? "").not.toMatch(/HGB V5|AI Hybrid Policy v5\.0|ai_hybrid_v5|Event history used/);
+
+    const pageText = document.body.textContent ?? "";
+    expect(pageText).not.toMatch(/certain/i); // "certainty" never appears
+    expect(pageText).not.toMatch(/joblib|\.json|C:\|\/models\/|satellite_frp_trend|feature_names/); // no paths, no ML feature names
+  });
+
+  it.each(["suspected", "confirmed"] as const)(
+    "shows Latest 79% and Peak 87% AI likelihood as distinct values for a %s ai_hybrid_v5 event",
+    async (status) => {
+      getEventDetailsMock.mockResolvedValue(
+        makeResult({
+          fire_event: {
+            ...makeResult().fire_event,
+            status,
+            detection_confidence: 0.87,
+            methodology: "ECOGUARD_AI_HYBRID_DETECTION",
+          },
+          ml_assessment: { ...AI_ASSESSMENT, model_score: 0.79, policy_status: status },
+        }),
+      );
+
+      renderPage();
+      await screen.findByText("Data as of:", { exact: false });
+
+      const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+      const scoped = within(fireEventSection);
+      expect(scoped.getByText("Latest AI likelihood").nextSibling).toHaveTextContent("79%");
+      expect(scoped.getByText("Peak AI likelihood").nextSibling).toHaveTextContent("87%");
+      expect(scoped.queryByText("Rule Score")).not.toBeInTheDocument();
+      expect(scoped.queryByText("AI Model Score")).not.toBeInTheDocument();
+      expect(scoped.queryByText("0.79")).not.toBeInTheDocument();
+    },
+  );
+
+  it("does not present a rule-created confidence as 'Peak AI likelihood' even when the persisted mode is AI", async () => {
+    // e.g. an event first decided by the rule path and later re-assessed by the AI path: detection_confidence is a RULE score.
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: {
+          ...makeResult().fire_event,
+          status: "confirmed",
+          detection_confidence: 0.875,
+          methodology: "ECOGUARD_MULTI_SOURCE_DETECTION",
+        },
+        ml_assessment: { ...AI_ASSESSMENT, model_score: 0.68 },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.getByText("Latest AI likelihood").nextSibling).toHaveTextContent("68%");
+    expect(screen.queryByText("Peak AI likelihood")).not.toBeInTheDocument();
+    expect(screen.queryByText("88%")).not.toBeInTheDocument();
+  });
+
+  it("CONFIRMED AI event: likelihoods stay in the Fire Event card (not repeated), the AI Assessment block is trimmed", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({
+        fire_event: {
+          ...makeResult().fire_event,
+          status: "confirmed",
+          detection_confidence: 0.87,
+          methodology: "ECOGUARD_AI_HYBRID_DETECTION",
+        },
+        ml_assessment: {
+          ...AI_ASSESSMENT,
+          model_score: 0.83,
+          policy_status: "confirmed",
+          satellite_pass_count: 4,
+          current_satellite_pixel_count: 3,
+        },
+      }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    const fireEventSection = screen.getByRole("heading", { name: "Fire Event" }).closest("section") as HTMLElement;
+    expect(within(fireEventSection).getByText("Latest AI likelihood").nextSibling).toHaveTextContent("83%");
+    expect(within(fireEventSection).getByText("Peak AI likelihood").nextSibling).toHaveTextContent("87%");
+
+    const aiSection = screen.getByRole("heading", { name: "AI Assessment" }).closest("section") as HTMLElement;
+    const ai = within(aiSection);
+    expect(ai.getByText("Detection mode").nextSibling).toHaveTextContent("AI Hybrid V5");
+    expect(ai.getByText("Latest AI verdict").nextSibling).toHaveTextContent("Confirmed");
+    expect(ai.getByText("Satellite passes").nextSibling).toHaveTextContent("4");
+    expect(ai.getByText("Current satellite pixels").nextSibling).toHaveTextContent("3");
+    expect(ai.queryByText(/AI likelihood/)).not.toBeInTheDocument(); // one source of truth for the numbers
+    expect(aiSection.textContent ?? "").not.toMatch(/HGB|Policy|history used|%|ai_hybrid_v5/i);
+    expect(screen.getByTestId("status-help")).toHaveTextContent(/not certainty/);
+  });
+
+  it("does not render an AI Assessment section for a non-AI mode", async () => {
+    getEventDetailsMock.mockResolvedValue(
+      makeResult({ ml_assessment: { available: true, mode: "shadow", rule_confidence: 0.8, model_score: 0.9, agreement: "agree_fire" } }),
+    );
+
+    renderPage();
+    await screen.findByText("Data as of:", { exact: false });
+
+    expect(screen.queryByRole("heading", { name: "AI Assessment" })).not.toBeInTheDocument();
+    expect(screen.getByText("Rule Score")).toBeInTheDocument();
+  });
+
   it("renders no Response Plan action at all for a resolved event with no plan - none will ever be generated", async () => {
     getEventDetailsMock.mockResolvedValue(
       makeResult({ fire_event: { ...makeResult().fire_event, status: "resolved" }, current_response_plan: null }),

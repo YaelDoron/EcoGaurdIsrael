@@ -130,6 +130,7 @@ class ActiveFireEventsService:
         return ActiveFireEventMLSummary(
             available=ml_assessment.ml_available,
             model_score=ml_assessment.ml_probability,
+            mode=ml_assessment.decision_mode.value,
         )
 
     @staticmethod

@@ -58,6 +58,7 @@ class ActiveFireEventMLSummaryResponse(BaseModel):
 
     available: bool
     model_score: Optional[float]
+    mode: Optional[str] = None
 
 
 class ActiveFireEventResponse(BaseModel):
@@ -108,7 +109,9 @@ def _to_event_response(item: ActiveFireEventSummary) -> ActiveFireEventResponse:
 
 
 def _to_ml_summary_response(ml_summary: ActiveFireEventMLSummary) -> ActiveFireEventMLSummaryResponse:
-    return ActiveFireEventMLSummaryResponse(available=ml_summary.available, model_score=ml_summary.model_score)
+    return ActiveFireEventMLSummaryResponse(
+        available=ml_summary.available, model_score=ml_summary.model_score, mode=ml_summary.mode
+    )
 
 
 def _to_severity_response(severity: ActiveFireEventSeveritySummary) -> ActiveFireEventSeverityResponse:

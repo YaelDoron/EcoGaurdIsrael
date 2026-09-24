@@ -6,6 +6,7 @@ import logging
 
 from src.agents.analysis.fire_detection_result import FireDetectionResult
 from src.agents.analysis.fire_severity_assessment_agent import FireSeverityAssessmentAgent
+from src.models.fire_event_response_eligibility import is_response_eligible
 from src.repositories.fire_event_repository import FireEventRepository
 from src.services.fire_severity.fire_severity_input_config import SEVERITY_WEATHER_RADIUS_KM
 from src.simulation.analysis.simulation_fire_severity_result import SimulationFireSeverityResult
@@ -22,6 +23,7 @@ NO_DETECTION_RESULT_REASON = "no_detection_result"
 DETECTION_FAILED_REASON = "detection_failed"
 NO_AFFECTED_FIRE_EVENTS_REASON = "no_affected_fire_events"
 NO_ACTIVE_FIRE_EVENTS_NEAR_WEATHER_REASON = "no_active_fire_events_near_weather"
+NO_RESPONSE_ELIGIBLE_FIRE_EVENTS_REASON = "no_response_eligible_fire_events"
 
 
 class SimulationFireSeverityCoordinator:
@@ -62,7 +64,8 @@ class SimulationFireSeverityCoordinator:
             return SimulationFireSeverityResult(triggered=False, reason=reason)
 
         incident = scenario.get_incident(event.incident_id)
-        active_events = self._fire_event_repository.get_active_events_near(
+        # Task 9A: severity is response-pipeline work: only response-eligible (CONFIRMED) fires are assessed.
+        active_events = self._fire_event_repository.get_response_eligible_events_near(
             latitude=incident.location.latitude,
             longitude=incident.location.longitude,
             radius_km=SEVERITY_WEATHER_RADIUS_KM,
@@ -93,7 +96,19 @@ class SimulationFireSeverityCoordinator:
         fire_event_ids = tuple(sorted(set(detection_result.event_ids)))
         if not fire_event_ids:
             return SimulationFireSeverityResult(triggered=False, reason=NO_AFFECTED_FIRE_EVENTS_REASON)
-        return self._assess_fire_events(fire_event_ids, event_timestamp)
+        # Task 9A: SUSPECTED events (active for monitoring only) are not assessed; only response-eligible ones are.
+        eligible_ids = self._response_eligible_ids(fire_event_ids)
+        if not eligible_ids:
+            return SimulationFireSeverityResult(triggered=False, reason=NO_RESPONSE_ELIGIBLE_FIRE_EVENTS_REASON)
+        return self._assess_fire_events(eligible_ids, event_timestamp)
+
+    def _response_eligible_ids(self, fire_event_ids: tuple[int, ...]) -> tuple[int, ...]:
+        eligible = []
+        for fire_event_id in fire_event_ids:
+            stored_event = self._fire_event_repository.get_by_id(fire_event_id)
+            if stored_event is not None and is_response_eligible(stored_event.event.status):
+                eligible.append(fire_event_id)
+        return tuple(eligible)
 
     def _assess_fire_events(
         self,
