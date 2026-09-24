@@ -39,6 +39,7 @@ from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event_status import FireEventStatus
 from src.models.fire_severity_assessment_status import FireSeverityAssessmentStatus
 from src.models.fire_severity_level import FireSeverityLevel
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.resource_status import ResourceStatus
 from src.models.response_target_type import ResponseTargetType
@@ -136,12 +137,17 @@ class SpreadPredictionResponse(BaseModel):
     `cells` is `[]` whenever `status` is not `valid` (insufficient_data or
     inactive_event) - this is never a fallback to an older valid run, it is
     always this horizon's true latest persisted state.
+
+    `insufficient_data_reason` is set only for insufficient_data predictions;
+    null for valid/inactive_event, and for historical insufficient_data rows
+    stored before the reason existed (reason unknown).
     """
 
     horizon_minutes: int
     status: FireSpreadPredictionStatus
     predicted_at: datetime
     cells: list[SpreadPredictionCellResponse]
+    insufficient_data_reason: Optional[FireSpreadInsufficientDataReason] = None
 
 
 class ResponseTargetResponse(BaseModel):

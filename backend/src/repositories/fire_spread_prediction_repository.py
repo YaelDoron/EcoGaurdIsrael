@@ -17,6 +17,7 @@ from src.database.models.fire_spread_prediction_db import FireSpreadPredictionDB
 from src.database.models.fire_spread_prediction_weather_input_db import (
     FireSpreadPredictionWeatherInputDB,
 )
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPredictionCell
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.repositories.exceptions import FireSpreadPredictionRepositoryError
@@ -251,7 +252,14 @@ class FireSpreadPredictionRepository:
             methodology=prediction.methodology,
             methodology_version=prediction.methodology_version,
             effective_state_fingerprint=prediction.effective_state_fingerprint,
+            insufficient_data_reason=(
+                prediction.insufficient_data_reason.value if prediction.insufficient_data_reason is not None else None
+            ),
         )
+
+    @staticmethod
+    def _to_domain_reason(raw_reason: str | None) -> FireSpreadInsufficientDataReason | None:
+        return FireSpreadInsufficientDataReason(raw_reason) if raw_reason is not None else None
 
     @staticmethod
     def _to_db_cell(prediction_id: int, cell: FireSpreadPredictionCell) -> FireSpreadPredictionCellDB:
@@ -311,6 +319,7 @@ class FireSpreadPredictionRepository:
                 methodology_version=db_prediction.methodology_version,
                 cells=cells,
                 effective_state_fingerprint=db_prediction.effective_state_fingerprint,
+                insufficient_data_reason=cls._to_domain_reason(db_prediction.insufficient_data_reason),
             ),
             weather_observation_id=weather_ids[0] if weather_ids else None,
         )
@@ -357,6 +366,7 @@ class FireSpreadPredictionRepository:
                 methodology_version=db_prediction.methodology_version,
                 cells=tuple(stored_cell.cell for stored_cell in stored_cells),
                 effective_state_fingerprint=db_prediction.effective_state_fingerprint,
+                insufficient_data_reason=cls._to_domain_reason(db_prediction.insufficient_data_reason),
             ),
             cells=stored_cells,
             weather_observation_id=weather_ids[0] if weather_ids else None,

@@ -86,7 +86,7 @@ export function Marker({ position, icon, children }: MarkerProps) {
 export interface CircleMarkerProps extends ChildrenProps {
   center: [number, number];
   radius?: number;
-  pathOptions?: { color?: string; fillColor?: string; fillOpacity?: number; weight?: number };
+  pathOptions?: { color?: string; fillColor?: string; fillOpacity?: number; weight?: number; dashArray?: string };
 }
 
 export function CircleMarker({ center, pathOptions, children }: CircleMarkerProps) {
@@ -97,6 +97,7 @@ export function CircleMarker({ center, pathOptions, children }: CircleMarkerProp
       data-lng={center[1]}
       data-fill-color={pathOptions?.fillColor}
       data-fill-opacity={pathOptions?.fillOpacity}
+      data-dash-array={pathOptions?.dashArray}
     >
       {children}
     </div>

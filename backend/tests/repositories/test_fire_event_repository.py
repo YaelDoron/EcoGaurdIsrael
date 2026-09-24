@@ -896,3 +896,112 @@ def test_get_ml_assessments_for_events_does_not_create_or_modify_any_row(
     count = len(session.execute(select(FireEventMLAssessmentDB)).scalars().all())
     session.close()
     assert count == 0
+
+
+# ---------------------------------------------------------------------------
+# get_active_event_ids_with_only_marked_evidence_updated_before
+# ---------------------------------------------------------------------------
+
+MARKED_SATELLITE = "MARKED-SAT"
+MARKED_FEED = "Marked Feed"
+CUTOFF = UPDATED_AT + timedelta(minutes=1)
+_marked_evidence_counter = iter(range(1, 1_000_000))
+
+
+def _persist_marked_event(repository, sqlite_session_factory, *, satellites, news_feeds, updated_at=UPDATED_AT):
+    from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
+    from src.database.models.wildfire_report_db import WildfireReportDB
+
+    refs = []
+    with sqlite_session_factory() as session:
+        for satellite in satellites:
+            hotspot = SatelliteHotspotDB(
+                detection_key=f"marked-hotspot-{next(_marked_evidence_counter)}",
+                latitude=32.731,
+                longitude=35.046,
+                detected_at=DETECTED_AT,
+                satellite=satellite,
+            )
+            session.add(hotspot)
+            session.flush()
+            refs.append(satellite_ref(hotspot.id))
+        for feed in news_feeds:
+            report = WildfireReportDB(
+                source_url=f"https://example.test/marked/{next(_marked_evidence_counter)}",
+                source_feed=feed,
+                title="Wildfire reported",
+                fetched_at=DETECTED_AT,
+            )
+            session.add(report)
+            session.flush()
+            refs.append(news_ref(report.id))
+        session.commit()
+    return repository.create_event(make_event(updated_at=updated_at), tuple(refs)).id
+
+
+def _marked_ids(repository, updated_before=CUTOFF):
+    return repository.get_active_event_ids_with_only_marked_evidence_updated_before(
+        updated_before=updated_before, satellite_name=MARKED_SATELLITE, news_source_feed=MARKED_FEED
+    )
+
+
+def test_marked_evidence_query_returns_only_fully_marked_active_events(repository, sqlite_session_factory):
+    only_marked = _persist_marked_event(
+        repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=(MARKED_FEED,)
+    )
+    satellite_only = _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=())
+    _persist_marked_event(repository, sqlite_session_factory, satellites=("N20",), news_feeds=())
+    _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE, "N20"), news_feeds=())
+    _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=("Ynet",))
+    _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE, None), news_feeds=())
+    _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=(None,))
+
+    assert _marked_ids(repository) == tuple(sorted((only_marked, satellite_only)))
+
+
+def test_marked_evidence_query_cutoff_is_strict(repository, sqlite_session_factory):
+    _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=())
+
+    assert _marked_ids(repository, updated_before=UPDATED_AT) == ()
+
+
+@pytest.mark.parametrize("inactive_status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_marked_evidence_query_excludes_inactive_events(repository, sqlite_session_factory, inactive_status):
+    event_id = _persist_marked_event(repository, sqlite_session_factory, satellites=(MARKED_SATELLITE,), news_feeds=())
+    with sqlite_session_factory() as session:
+        session.get(FireEventDB, event_id).status = inactive_status.value
+        session.commit()
+
+    assert _marked_ids(repository) == ()
+
+
+def test_marked_evidence_query_excludes_events_without_evidence(repository, sqlite_session_factory):
+    with sqlite_session_factory() as session:
+        session.add(
+            FireEventDB(
+                latitude=32.731,
+                longitude=35.046,
+                detected_at=DETECTED_AT,
+                updated_at=UPDATED_AT,
+                status=FireEventStatus.CONFIRMED.value,
+                detection_confidence=0.8,
+                methodology=FIRE_DETECTION_METHODOLOGY_NAME,
+                methodology_version=FIRE_DETECTION_METHODOLOGY_VERSION,
+            )
+        )
+        session.commit()
+
+    assert _marked_ids(repository) == ()
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        dict(updated_before=datetime(2026, 9, 14, 12, 0), satellite_name=MARKED_SATELLITE, news_source_feed=MARKED_FEED),
+        dict(updated_before=CUTOFF, satellite_name=" ", news_source_feed=MARKED_FEED),
+        dict(updated_before=CUTOFF, satellite_name=MARKED_SATELLITE, news_source_feed=""),
+    ],
+)
+def test_marked_evidence_query_rejects_invalid_arguments(repository, kwargs):
+    with pytest.raises(FireEventRepositoryError):
+        repository.get_active_event_ids_with_only_marked_evidence_updated_before(**kwargs)

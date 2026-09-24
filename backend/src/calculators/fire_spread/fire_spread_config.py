@@ -172,4 +172,5 @@ NOMINAL_SPREAD_PROBABILITY: dict[FireSpreadFuelClass, dict[FireSpreadFuelClass, 
 
 # --- Methodology identity [C] -------------------------------------------
 METHODOLOGY_NAME = "ECOGUARD_PROPAGATOR_CA"
-METHODOLOGY_VERSION = "1.0"
+# 1.1: sub-threshold neighbours are emitted as risk-only cells (§8).
+METHODOLOGY_VERSION = "1.1"

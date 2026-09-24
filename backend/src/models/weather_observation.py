@@ -17,6 +17,10 @@ class WeatherObservation:
     observation cannot be considered valid. Every meteorological measurement
     may be `None` because not every station measures every channel, some
     measurements may temporarily be invalid, and IMS may return nulls.
+
+    Units (canonical, regardless of source): `wind_speed` and `wind_gust` are
+    km/h. Sources reporting another unit are converted at ingestion (IMS
+    WS/WSmax m/s -> km/h in WeatherMapper); consumers never convert them.
     """
 
     station_external_id: int

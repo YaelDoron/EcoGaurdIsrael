@@ -1424,16 +1424,16 @@ def test_node_path_is_absent():
     assert "101" not in raw_text  # a raw graph-node id from the fixture's node_path
 
 
-def test_raw_spread_cells_are_absent_but_cell_count_is_present():
+def test_raw_spread_cells_are_absent_but_cell_counts_are_present():
     snapshot, raw_text = _ask_with_fully_populated_event()
     spread = snapshot["active_fire_events"][0]["spread_predictions"]
-    assert '"cells"' not in raw_text  # not the bare substring - "has_cells" legitimately contains "cells"
+    assert '"cells"' not in raw_text  # raw cell arrays are never forwarded
     thirty_min = next(s for s in spread if s["horizon_minutes"] == 30)
     sixty_min = next(s for s in spread if s["horizon_minutes"] == 60)
-    assert thirty_min["cell_count"] == 2
-    assert thirty_min["has_cells"] is True
-    assert sixty_min["cell_count"] == 0
-    assert sixty_min["has_cells"] is False
+    assert thirty_min["total_cell_count"] == 2
+    assert thirty_min["spreading_cell_count"] == 2  # fixture cells have p=0.6
+    assert sixty_min["total_cell_count"] == 0
+    assert "cell_count" not in thirty_min and "has_cells" not in thirty_min
 
 
 def test_internal_database_ids_are_absent_as_keys():
@@ -1565,3 +1565,197 @@ def test_snapshot_json_is_compact_not_pretty_printed():
     assert ": " not in raw_text  # compact separators=(",", ":") - no space after ":"
     # Still valid, parseable JSON.
     json.loads(raw_text)
+
+
+# ---------------------------------------------------------------------------
+# Fire-spread representation (US 4.2 methodology 1.1 + insufficient_data_reason)
+# ---------------------------------------------------------------------------
+
+from src.agents.response.chatbot_agent import _SPREAD_PROPAGATION_THRESHOLD  # noqa: E402
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason  # noqa: E402
+
+_RISK_ONLY_P = 0.38
+_SPREADING_P = 0.72
+
+
+def _spread_cells(*probabilities):
+    return [
+        make_spread_cell(spread_probability=p, spread_risk_score=p * 100, latitude=32.81 + i * 0.001)
+        for i, p in enumerate(probabilities)
+    ]
+
+
+def _compact_spread_for(*predictions):
+    event = make_active_event(fire_event_id=1, location_name="Carmel Demo Area")
+    details = make_event_details(spread_predictions=list(predictions))
+    agent, _, _, gemini = make_agent(active_result=make_active_result(event), details_by_id={1: details})
+    agent.ask("What is the fire spread prediction for Carmel?")
+    spread = sent_snapshot(gemini)["active_fire_events"][0]["spread_predictions"]
+    return {item["horizon_minutes"]: item for item in spread}
+
+
+def test_spread_threshold_mirror_matches_the_methodology_constant():
+    from src.calculators.fire_spread.fire_spread_config import PROPAGATION_THRESHOLD
+
+    assert _SPREAD_PROPAGATION_THRESHOLD == PROPAGATION_THRESHOLD
+
+
+def test_valid_risk_only_ring_is_not_reported_as_spreading():
+    compact = _compact_spread_for(make_spread_prediction(horizon_minutes=30, cells=_spread_cells(*[_RISK_ONLY_P] * 8)))[30]
+
+    assert compact["status"] == "valid"
+    assert compact["total_cell_count"] == 8
+    assert compact["risk_only_cell_count"] == 8
+    assert compact["spreading_cell_count"] == 0
+    assert compact["max_spread_probability"] == pytest.approx(_RISK_ONLY_P)
+    assert compact["max_spread_risk_score"] == pytest.approx(_RISK_ONLY_P * 100)
+    assert compact["insufficient_data_reason"] is None
+    assert compact["insufficient_data_reason_description"] is None
+
+
+def test_valid_mixed_spreading_and_risk_only_counts_and_maxima():
+    compact = _compact_spread_for(
+        make_spread_prediction(horizon_minutes=30, cells=_spread_cells(_SPREADING_P, 0.55, _RISK_ONLY_P, 0.2))
+    )[30]
+
+    assert compact["total_cell_count"] == 4
+    assert compact["spreading_cell_count"] == 2
+    assert compact["risk_only_cell_count"] == 2
+    assert compact["max_spread_probability"] == pytest.approx(_SPREADING_P)
+    assert compact["max_spread_risk_score"] == pytest.approx(_SPREADING_P * 100)
+
+
+def test_valid_spreading_only_prediction():
+    compact = _compact_spread_for(make_spread_prediction(horizon_minutes=30, cells=_spread_cells(0.6, 0.7)))[30]
+
+    assert (compact["spreading_cell_count"], compact["risk_only_cell_count"]) == (2, 0)
+
+
+def test_legacy_valid_prediction_with_zero_cells():
+    compact = _compact_spread_for(make_spread_prediction(horizon_minutes=30, cells=[]))[30]
+
+    assert compact["total_cell_count"] == 0
+    assert compact["spreading_cell_count"] == 0
+    assert compact["risk_only_cell_count"] == 0
+    assert compact["max_spread_probability"] is None
+    assert compact["max_spread_risk_score"] is None
+
+
+def test_probability_exactly_at_threshold_counts_as_spreading():
+    compact = _compact_spread_for(
+        make_spread_prediction(horizon_minutes=30, cells=_spread_cells(_SPREAD_PROPAGATION_THRESHOLD))
+    )[30]
+
+    assert (compact["spreading_cell_count"], compact["risk_only_cell_count"]) == (1, 0)
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected_fragment"),
+    [
+        (FireSpreadInsufficientDataReason.MISSING_VEGETATION, "vegetation data required by the spread model was unavailable"),
+        (FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION, "not supported by the current spread model"),
+        (FireSpreadInsufficientDataReason.STALE_WEATHER, "too old for spread prediction"),
+        (FireSpreadInsufficientDataReason.MISSING_WEATHER, "required weather data was unavailable"),
+    ],
+)
+def test_insufficient_data_reason_and_description_are_included(reason, expected_fragment):
+    compact = _compact_spread_for(
+        make_spread_prediction(
+            horizon_minutes=30,
+            status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+            cells=[],
+            insufficient_data_reason=reason,
+        )
+    )[30]
+
+    assert compact["status"] == "insufficient_data"
+    assert compact["insufficient_data_reason"] == reason.value
+    assert expected_fragment in compact["insufficient_data_reason_description"].lower()
+
+
+def test_unsupported_vegetation_is_distinct_from_missing_vegetation_and_never_blames_copernicus():
+    descriptions = {
+        reason: _compact_spread_for(
+            make_spread_prediction(
+                horizon_minutes=30,
+                status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+                cells=[],
+                insufficient_data_reason=reason,
+            )
+        )[30]["insufficient_data_reason_description"]
+        for reason in (
+            FireSpreadInsufficientDataReason.MISSING_VEGETATION,
+            FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION,
+        )
+    }
+
+    assert len(set(descriptions.values())) == 2
+    for description in descriptions.values():
+        assert "copernicus" not in description.lower()
+        assert "fail" not in description.lower()
+    assert "unavailable" not in descriptions[FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION].lower()
+
+
+def test_every_reason_value_has_a_description():
+    from src.agents.response.chatbot_agent import _INSUFFICIENT_DATA_REASON_DESCRIPTIONS
+
+    assert set(_INSUFFICIENT_DATA_REASON_DESCRIPTIONS) == set(FireSpreadInsufficientDataReason)
+
+
+def test_historical_insufficient_data_without_reason_falls_back_safely():
+    compact = _compact_spread_for(
+        make_spread_prediction(horizon_minutes=30, status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, cells=[])
+    )[30]
+
+    assert compact["insufficient_data_reason"] is None
+    assert compact["insufficient_data_reason_description"] is None
+
+
+def test_inactive_event_prediction_is_compacted_without_reason():
+    compact = _compact_spread_for(
+        make_spread_prediction(horizon_minutes=30, status=FireSpreadPredictionStatus.INACTIVE_EVENT, cells=[])
+    )[30]
+
+    assert compact["status"] == "inactive_event"
+    assert compact["total_cell_count"] == 0
+    assert compact["insufficient_data_reason"] is None
+
+
+def test_30_and_60_minute_horizons_are_compacted_independently():
+    by_horizon = _compact_spread_for(
+        make_spread_prediction(horizon_minutes=30, cells=_spread_cells(*[_RISK_ONLY_P] * 8)),
+        make_spread_prediction(horizon_minutes=60, cells=_spread_cells(_SPREADING_P, _SPREADING_P, *[_RISK_ONLY_P] * 10)),
+    )
+
+    assert (by_horizon[30]["spreading_cell_count"], by_horizon[30]["risk_only_cell_count"]) == (0, 8)
+    assert (by_horizon[60]["spreading_cell_count"], by_horizon[60]["risk_only_cell_count"]) == (2, 10)
+
+
+def test_system_instruction_distinguishes_risk_only_from_propagation_capable_cells():
+    lowered = _SYSTEM_INSTRUCTION.lower()
+    for phrase in (
+        "spreading_cell_count",
+        "risk_only_cell_count",
+        "propagation threshold",
+        "none reached the model's propagation threshold",
+        "never describe risk-only areas as places the fire is predicted to spread to",
+        "the fire will reach",
+        "same risk footprint for 30 and 60 minutes",
+    ):
+        assert phrase in lowered, f"missing required system-instruction phrase: {phrase!r}"
+
+
+def test_system_instruction_uses_area_wording_and_hides_internal_field_names():
+    lowered = _SYSTEM_INSTRUCTION.lower()
+    assert '8 nearby areas show predicted spread risk, but none reached the model\'s propagation threshold.' in lowered
+    assert "the 60-minute forecast shows the same risk footprint." in lowered
+    assert 'never say "cell" or "cells"' in lowered
+    assert "never mention internal field names such as spreading_cell_count, risk_only_cell_count" in lowered
+
+
+def test_system_instruction_explains_reasons_without_inventing_causes():
+    lowered = _SYSTEM_INSTRUCTION.lower()
+    assert "insufficient_data_reason_description" in lowered
+    assert "does not mean an external service failed" in lowered
+    assert "not supported by the current spread model, not that vegetation data is missing" in lowered
+    assert "when insufficient_data_reason is null" in lowered

@@ -21,7 +21,13 @@ import { SeverityBadge } from "../components/status/SeverityBadge";
 import { StatusBadge } from "../components/status/StatusBadge";
 import { useEventDetails } from "../hooks/useEventDetails";
 import { useTargetLocationNames, type GeocodeTarget } from "../hooks/useTargetLocationNames";
-import type { DangerAssessment, EventDetailsResult, SpreadPrediction } from "../types/eventDetails";
+import {
+  isSpreadingCell,
+  type DangerAssessment,
+  type EventDetailsResult,
+  type SpreadInsufficientDataReason,
+  type SpreadPrediction,
+} from "../types/eventDetails";
 import "./EventDetailsPage.css";
 
 // Shown while loading so the header never flashes the raw "Event #id" before the
@@ -51,21 +57,61 @@ const SPREAD_STATUS_LABEL: Record<SpreadPrediction["status"], string> = {
   inactive_event: "Inactive event",
 };
 
+/** User-facing meaning of each stored insufficient_data reason - factual, never a guessed cause. */
+const SPREAD_INSUFFICIENT_DATA_REASON_TEXT: Record<SpreadInsufficientDataReason, string> = {
+  event_unavailable: "The fire event is unavailable for spread prediction.",
+  missing_severity: "No usable fire-severity assessment is available.",
+  severity_not_valid: "The current fire-severity assessment is not valid for spread prediction.",
+  missing_weather: "Required weather data is unavailable.",
+  incomplete_weather: "Available weather data is missing fields required for spread prediction.",
+  stale_weather: "Available weather observations are too old for spread prediction.",
+  future_weather: "Available weather observations are timestamped in the future.",
+  missing_vegetation: "Vegetation data required by the spread model is unavailable.",
+  unsupported_vegetation: "The vegetation category here is not supported by the current spread model.",
+};
+
+const SPREAD_UNKNOWN_REASON_TEXT = "The stored prediction does not specify why.";
+
+function plural(count: number, singular: string, pluralForm: string): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
+}
+
 /**
  * Operational wording for one horizon's spread prediction. A "valid" run with
  * no predicted cells means the model predicts no spread - shown as such
- * rather than as a raw "Valid (0 predicted cells)". Other statuses keep
- * their own (already readable) label.
+ * rather than as a raw "Valid (0 predicted cells)". Methodology 1.1 cells
+ * are split into spreading (reached the propagation threshold) and
+ * risk-only cells, which are never presented as actual spread. An
+ * insufficient_data run shows its stored reason when available.
  */
 function describeSpread(prediction: SpreadPrediction): { value: string; helperText?: string } {
+  if (prediction.status === "insufficient_data") {
+    const reason = prediction.insufficient_data_reason;
+    return {
+      value: SPREAD_STATUS_LABEL.insufficient_data,
+      helperText: reason ? SPREAD_INSUFFICIENT_DATA_REASON_TEXT[reason] : SPREAD_UNKNOWN_REASON_TEXT,
+    };
+  }
   if (prediction.status !== "valid") {
     return { value: SPREAD_STATUS_LABEL[prediction.status] };
   }
-  const cells = prediction.cells.length;
-  if (cells === 0) {
+  if (prediction.cells.length === 0) {
     return { value: "No spread predicted" };
   }
-  return { value: "Spread predicted", helperText: `${cells} predicted cell${cells === 1 ? "" : "s"}` };
+  const spreading = prediction.cells.filter(isSpreadingCell).length;
+  const riskOnly = prediction.cells.filter((cell) => !isSpreadingCell(cell) && cell.spread_probability > 0).length;
+  if (spreading === 0) {
+    return {
+      value: "Spread risk only",
+      helperText: `${plural(riskOnly, "nearby area", "nearby areas")} with predicted spread risk; none reached the propagation threshold`,
+    };
+  }
+  const reachedText = `${plural(spreading, "nearby area", "nearby areas")} reached the propagation threshold`;
+  const riskOnlyText = `${plural(riskOnly, "additional area shows", "additional areas show")} spread risk`;
+  return {
+    value: "Spread predicted",
+    helperText: riskOnly > 0 ? `${reachedText} · ${riskOnlyText}` : reachedText,
+  };
 }
 
 /** A valid run that predicts no spread: a negative/fallback state shown quietly. */
@@ -107,7 +153,13 @@ function parseFireEventId(raw: string | undefined): number {
 }
 
 function buildLayerToggles(data: EventDetailsResult): LayerToggle[] {
-  const spreadCellCount = data.spread_predictions.reduce((sum, prediction) => sum + prediction.cells.length, 0);
+  // Distinct cell locations: the 30- and 60-minute horizons usually repeat
+  // the same cells, which must count once, not once per horizon.
+  const spreadCellCount = new Set(
+    data.spread_predictions.flatMap((prediction) =>
+      prediction.cells.map((cell) => `${cell.latitude},${cell.longitude}`),
+    ),
+  ).size;
   return [
     { id: "spread", label: "Predicted spread", count: spreadCellCount },
     { id: "targets", label: "Response targets", count: data.targets.length },

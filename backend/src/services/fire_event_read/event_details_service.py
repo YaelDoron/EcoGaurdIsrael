@@ -282,6 +282,7 @@ class EventDetailsService:
                 )
                 for cell in prediction.cells
             ],
+            insufficient_data_reason=prediction.insufficient_data_reason,
         )
 
     def _load_targets(self, fire_event_id: int, as_of: datetime) -> list[ResponseTargetResponse]:

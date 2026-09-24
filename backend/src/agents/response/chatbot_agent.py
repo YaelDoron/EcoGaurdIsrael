@@ -34,6 +34,7 @@ from src.models.active_fire_events import (
     ActiveFireEventsResult,
     ActiveFireEventSummary,
 )
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.fire_event_read.event_details_service import EventDetailsService
 
@@ -48,6 +49,42 @@ _VALID_CHAT_ROLES = ("user", "assistant")
 # but it stays here (not in GeminiClient) because GeminiClient never
 # interprets `contents`, only forwards it - see gemini_client.py's docstring.
 _GEMINI_ROLE_BY_CHAT_ROLE = {"user": "user", "assistant": "model"}
+
+# US 4.2 methodology 1.1: a stored spread cell with spread_probability >= this
+# threshold is propagation-capable ("spreading"); below it (but > 0) it is a
+# risk-only cell. Mirrors fire_spread_config.PROPAGATION_THRESHOLD - this
+# module may not import src.calculators (architecture guard), so the value is
+# pinned to the real constant by a test instead.
+_SPREAD_PROPAGATION_THRESHOLD = 0.5
+
+# User-facing meaning of each stored FireSpreadInsufficientDataReason. Worded
+# to claim no more than the reason itself proves.
+_INSUFFICIENT_DATA_REASON_DESCRIPTIONS: dict[FireSpreadInsufficientDataReason, str] = {
+    FireSpreadInsufficientDataReason.EVENT_UNAVAILABLE: (
+        "The fire event was not available in a usable state for spread prediction."
+    ),
+    FireSpreadInsufficientDataReason.MISSING_SEVERITY: "No fire severity assessment was available for this event.",
+    FireSpreadInsufficientDataReason.SEVERITY_NOT_VALID: (
+        "The latest fire severity assessment was not valid, so spread could not be predicted."
+    ),
+    FireSpreadInsufficientDataReason.MISSING_WEATHER: "Required weather data was unavailable.",
+    FireSpreadInsufficientDataReason.INCOMPLETE_WEATHER: (
+        "Available weather observations were missing values the spread model requires "
+        "(temperature, humidity, wind speed or wind direction)."
+    ),
+    FireSpreadInsufficientDataReason.STALE_WEATHER: (
+        "Available weather observations were too old for spread prediction."
+    ),
+    FireSpreadInsufficientDataReason.FUTURE_WEATHER: (
+        "Available weather observations were timestamped after the prediction time, so they could not be used."
+    ),
+    FireSpreadInsufficientDataReason.MISSING_VEGETATION: (
+        "Vegetation data required by the spread model was unavailable for this location."
+    ),
+    FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION: (
+        "The vegetation category at this location is not supported by the current spread model."
+    ),
+}
 
 _SNAPSHOT_LABEL = "Current EcoGuard data snapshot (authoritative JSON):"
 _QUESTION_LABEL = "User's current question:"
@@ -102,6 +139,17 @@ ONLY if the supplied EcoGuard data itself states that reason. Never infer or \
 guess a cause from related fields (e.g. a zero count, an empty array, another \
 status field, or missing evidence) - if the data does not state why, say the \
 current data does not specify a reason.
+
+Fire-spread predictions (spread_predictions) are model outputs, given per horizon (30 and 60 minutes); describe each horizon from its own values. Each counted unit is a nearby area around the fire. In a horizon, spreading_cell_count is the number of nearby areas whose predicted spread probability reached the model's propagation threshold, and risk_only_cell_count is the number of nearby areas with predicted spread risk below that threshold, which the model does not treat as spreading further. When talking to the user, call these "areas", "nearby areas" or "areas with predicted spread risk" - never say "cell" or "cells", and never mention internal field names such as spreading_cell_count, risk_only_cell_count or total_cell_count. Never describe risk-only areas as places the fire is predicted to spread to or will reach: for example, with risk_only_cell_count 8 and spreading_cell_count 0, say "8 nearby areas show predicted spread risk, but none reached the model's propagation threshold." Only when spreading_cell_count is greater than 0 may you say that some nearby areas reached the propagation threshold (predicted spread according to the model). Never state certainty such as "the fire will reach" or "the fire will definitely spread". A valid prediction with total_cell_count 0 means the model predicts no spread. If both horizons show the same counts, say the model predicts the same risk footprint for 30 and 60 minutes, concisely - for example: "At 30 minutes, 8 nearby areas show predicted spread risk, but none reached the model's propagation threshold. The 60-minute forecast shows the same risk footprint." Describe a difference between horizons only when their values actually differ.
+
+For a spread prediction whose status is "insufficient_data", when \
+insufficient_data_reason_description is provided, use it to explain why the \
+prediction is unavailable, without adding causes it does not state - a \
+missing-vegetation reason does not mean an external service failed, and an \
+unsupported vegetation category means the vegetation type is not supported \
+by the current spread model, not that vegetation data is missing. When \
+insufficient_data_reason is null, say the current data does not specify why \
+the spread prediction is unavailable.
 
 Do not perform any new wildfire calculations, and do not replace or override \
 EcoGuard's existing algorithms or already-stored decisions - you only explain \
@@ -390,17 +438,31 @@ def _compact_detection_evidence(details: EventDetailsResult) -> dict[str, Any]:
 
 def _compact_spread_predictions(details: EventDetailsResult) -> list[dict[str, Any]]:
     # Never the raw `cells` array (can be large and is not needed for
-    # conversational Q&A) - only whether/how many cells exist.
-    return [
-        {
-            "horizon_minutes": prediction.horizon_minutes,
-            "status": prediction.status.value,
-            "predicted_at": prediction.predicted_at.isoformat(),
-            "cell_count": len(prediction.cells),
-            "has_cells": len(prediction.cells) > 0,
-        }
-        for prediction in details.spread_predictions
-    ]
+    # conversational Q&A) - only per-horizon counts and maxima, with cells
+    # classified (not recalculated) as spreading vs risk-only.
+    return [_compact_spread_prediction(prediction) for prediction in details.spread_predictions]
+
+
+def _compact_spread_prediction(prediction) -> dict[str, Any]:  # noqa: ANN001 - SpreadPredictionResponse
+    probabilities = [cell.spread_probability for cell in prediction.cells]
+    risk_scores = [cell.spread_risk_score for cell in prediction.cells]
+    reason = getattr(prediction, "insufficient_data_reason", None)
+    return {
+        "horizon_minutes": prediction.horizon_minutes,
+        "status": prediction.status.value,
+        "predicted_at": prediction.predicted_at.isoformat(),
+        "total_cell_count": len(probabilities),
+        "spreading_cell_count": sum(1 for p in probabilities if p >= _SPREAD_PROPAGATION_THRESHOLD),
+        "risk_only_cell_count": sum(1 for p in probabilities if 0 < p < _SPREAD_PROPAGATION_THRESHOLD),
+        "max_spread_probability": max(probabilities) if probabilities else None,
+        "max_spread_risk_score": max(risk_scores) if risk_scores else None,
+        # Null for valid/inactive_event predictions, and for historical
+        # insufficient_data rows stored before the reason existed.
+        "insufficient_data_reason": reason.value if reason is not None else None,
+        "insufficient_data_reason_description": (
+            _INSUFFICIENT_DATA_REASON_DESCRIPTIONS.get(reason) if reason is not None else None
+        ),
+    }
 
 
 def _compact_targets(details: EventDetailsResult) -> list[dict[str, Any]]:

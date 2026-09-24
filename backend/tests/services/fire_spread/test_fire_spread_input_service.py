@@ -232,8 +232,9 @@ def test_ready_input_uses_event_origin():
     assert result.input_data.origin_longitude == EVENT_LON
 
 
-def test_wind_speed_converted_from_ms_to_kmh_exactly_once():
-    service, *_ = build_service(weather_records=[make_weather(wind_speed=10.0)])
+def test_stored_km_h_wind_speed_is_passed_through_without_conversion():
+    # WeatherObservation.wind_speed is canonically km/h: 36 stays 36, never 129.6.
+    service, *_ = build_service(weather_records=[make_weather(wind_speed=36.0)])
 
     result = service.prepare_input(10, AS_OF, horizon_minutes=30)
 
@@ -278,7 +279,7 @@ def test_nearest_of_multiple_eligible_stations_is_selected():
     result = service.prepare_input(10, AS_OF, horizon_minutes=30)
 
     assert result.weather_observation_id == 101
-    assert result.input_data.wind_speed_kmh == pytest.approx(5.0 * 3.6)
+    assert result.input_data.wind_speed_kmh == pytest.approx(5.0)
 
 
 def test_deterministic_tiebreak_distance_then_newest_then_id():
@@ -428,6 +429,162 @@ def test_unknown_vegetation_label_is_insufficient():
     service, *_ = build_service(stored_assessment=make_assessment(dominant_land_cover="Some New Category"))
 
     assert service.prepare_input(10, AS_OF, horizon_minutes=30).status is FireSpreadInputStatus.INSUFFICIENT_DATA
+
+
+# ---------------------------------------------------------------------------
+# insufficient_data_reason
+# ---------------------------------------------------------------------------
+
+from src.models import FireSpreadInsufficientDataReason as Reason  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    ("service_kwargs", "expected_reason"),
+    [
+        pytest.param(dict(stored_event=None), Reason.EVENT_UNAVAILABLE, id="missing-event"),
+        pytest.param(dict(stored_assessment=None), Reason.MISSING_SEVERITY, id="missing-severity"),
+        pytest.param(
+            dict(stored_assessment=make_assessment(assessed_at=AS_OF + timedelta(minutes=1))),
+            Reason.MISSING_SEVERITY,
+            id="only-future-severity",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(fire_event_id=99)),
+            Reason.MISSING_SEVERITY,
+            id="severity-of-other-event",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(status=FireSeverityAssessmentStatus.INSUFFICIENT_DATA)),
+            Reason.SEVERITY_NOT_VALID,
+            id="severity-insufficient",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(status=FireSeverityAssessmentStatus.INACTIVE_EVENT)),
+            Reason.SEVERITY_NOT_VALID,
+            id="severity-inactive",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(weather_observation_ids=())),
+            Reason.MISSING_WEATHER,
+            id="no-linked-weather",
+        ),
+        pytest.param(dict(weather_records=[]), Reason.MISSING_WEATHER, id="linked-weather-not-retrievable"),
+        pytest.param(
+            dict(weather_records=[make_weather(wind_direction=None)]),
+            Reason.INCOMPLETE_WEATHER,
+            id="incomplete-weather",
+        ),
+        pytest.param(
+            dict(weather_records=[make_weather(minutes_old=MAX_SEVERITY_WEATHER_AGE_MINUTES + 0.1)]),
+            Reason.STALE_WEATHER,
+            id="stale-weather",
+        ),
+        pytest.param(dict(weather_records=[make_weather(minutes_old=-1)]), Reason.FUTURE_WEATHER, id="future-weather"),
+        pytest.param(
+            dict(stored_assessment=make_assessment(dominant_land_cover=None)),
+            Reason.MISSING_VEGETATION,
+            id="missing-vegetation",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(dominant_land_cover="Tree cover")),
+            Reason.UNSUPPORTED_VEGETATION,
+            id="tree-cover",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(dominant_land_cover="Moss and lichen cover")),
+            Reason.UNSUPPORTED_VEGETATION,
+            id="moss-and-lichen",
+        ),
+        pytest.param(
+            dict(stored_assessment=make_assessment(dominant_land_cover="Some New Category")),
+            Reason.UNSUPPORTED_VEGETATION,
+            id="unknown-vegetation",
+        ),
+    ],
+)
+def test_insufficient_data_carries_the_exact_reason(service_kwargs, expected_reason):
+    service, *_ = build_service(**service_kwargs)
+
+    result = service.prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.INSUFFICIENT_DATA
+    assert result.insufficient_data_reason is expected_reason
+
+
+def _weather_precedence_service(*records):
+    return build_service(
+        stored_assessment=make_assessment(weather_observation_ids=tuple(r.observation_id for r in records)),
+        weather_records=list(records),
+    )[0]
+
+
+@pytest.mark.parametrize(
+    ("records", "expected_reason"),
+    [
+        pytest.param(
+            (
+                make_weather(observation_id=101, temperature=None),
+                make_weather(observation_id=102, station_id=2, minutes_old=MAX_SEVERITY_WEATHER_AGE_MINUTES + 5),
+            ),
+            Reason.STALE_WEATHER,
+            id="incomplete-plus-stale-is-stale",
+        ),
+        pytest.param(
+            (
+                make_weather(observation_id=101, temperature=None),
+                make_weather(observation_id=102, station_id=2, minutes_old=-5),
+            ),
+            Reason.FUTURE_WEATHER,
+            id="incomplete-plus-future-is-future",
+        ),
+        pytest.param(
+            (
+                make_weather(observation_id=101, minutes_old=-5),
+                make_weather(observation_id=102, station_id=2, minutes_old=MAX_SEVERITY_WEATHER_AGE_MINUTES + 5),
+            ),
+            Reason.STALE_WEATHER,
+            id="future-plus-stale-is-stale",
+        ),
+        pytest.param(
+            (
+                make_weather(observation_id=101, temperature=None),
+                make_weather(observation_id=102, station_id=2, wind_speed=None),
+            ),
+            Reason.INCOMPLETE_WEATHER,
+            id="all-incomplete-is-incomplete",
+        ),
+    ],
+)
+def test_weather_reason_precedence(records, expected_reason):
+    result = _weather_precedence_service(*records).prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.INSUFFICIENT_DATA
+    assert result.insufficient_data_reason is expected_reason
+
+
+def test_one_usable_observation_still_selected_despite_other_invalid_ones():
+    service = _weather_precedence_service(
+        make_weather(observation_id=101, temperature=None),
+        make_weather(observation_id=102, station_id=2, minutes_old=MAX_SEVERITY_WEATHER_AGE_MINUTES + 5),
+        make_weather(observation_id=103, station_id=3, minutes_old=5),
+    )
+
+    result = service.prepare_input(10, AS_OF, horizon_minutes=30)
+
+    assert result.status is FireSpreadInputStatus.READY
+    assert result.weather_observation_id == 103
+    assert result.insufficient_data_reason is None
+
+
+@pytest.mark.parametrize("status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])
+def test_ready_and_inactive_results_have_no_reason(status):
+    ready_service, *_ = build_service()
+    inactive_service, *_ = build_service(stored_event=make_event(status=status))
+
+    assert ready_service.prepare_input(10, AS_OF, horizon_minutes=30).insufficient_data_reason is None
+    inactive = inactive_service.prepare_input(10, AS_OF, horizon_minutes=30)
+    assert inactive.status is FireSpreadInputStatus.INACTIVE_EVENT
+    assert inactive.insufficient_data_reason is None
 
 
 # ---------------------------------------------------------------------------

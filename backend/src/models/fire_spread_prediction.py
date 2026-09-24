@@ -13,6 +13,7 @@ import math
 from numbers import Real
 
 from src.models.fire_spread_effective_state_fingerprint import validate_effective_state_fingerprint
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 
 CA_TIME_STEP_MINUTES = 5
@@ -68,7 +69,12 @@ class FireSpreadPredictionCell:
 
 @dataclass(frozen=True)
 class FireSpreadPrediction:
-    """One deterministic wildfire-spread prediction run for an active FireEvent."""
+    """One deterministic wildfire-spread prediction run for an active FireEvent.
+
+    `insufficient_data_reason` may only be set for INSUFFICIENT_DATA. It is
+    None for VALID/INACTIVE_EVENT, and may also be None for INSUFFICIENT_DATA
+    rows persisted before the reason existed (unknown historical reason).
+    """
 
     fire_event_id: int
     severity_assessment_id: int | None
@@ -79,6 +85,7 @@ class FireSpreadPrediction:
     methodology_version: str
     cells: tuple[FireSpreadPredictionCell, ...] = ()
     effective_state_fingerprint: str | None = None
+    insufficient_data_reason: FireSpreadInsufficientDataReason | None = None
 
     def __post_init__(self) -> None:
         self._validate_positive_int("fire_event_id", self.fire_event_id)
@@ -110,6 +117,15 @@ class FireSpreadPrediction:
 
         if self.status is FireSpreadPredictionStatus.VALID and self.severity_assessment_id is None:
             raise ValueError("VALID spread predictions must include severity_assessment_id.")
+
+        if self.insufficient_data_reason is not None:
+            if not isinstance(self.insufficient_data_reason, FireSpreadInsufficientDataReason):
+                raise ValueError(
+                    "insufficient_data_reason must be a FireSpreadInsufficientDataReason or None, "
+                    f"got {self.insufficient_data_reason!r}"
+                )
+            if self.status is not FireSpreadPredictionStatus.INSUFFICIENT_DATA:
+                raise ValueError(f"{self.status.value} spread predictions must not include insufficient_data_reason.")
 
     @staticmethod
     def _validate_positive_int(field_name: str, value: object) -> None:

@@ -27,7 +27,7 @@ Severity/Spread/routing/global-replanning work against a real database.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 import logging
 import time
@@ -48,6 +48,7 @@ from src.calculators.response_target import ResponseTargetCalculator
 from src.config.config import load_config
 from src.external.news.news_client import TextProcessor
 from src.repositories.fire_danger_assessment_repository import FireDangerAssessmentRepository
+from src.repositories.fire_event_config import ACTIVE_EVENT_MATCH_WINDOW_HOURS
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
 from src.repositories.fire_spread_prediction_repository import FireSpreadPredictionRepository
@@ -59,6 +60,7 @@ from src.repositories.satellite_hotspot_repository import SatelliteHotspotReposi
 from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger import FireDangerInputService
 from src.services.fire_detection import FireDetectionEvidenceService
+from src.services.fire_event_lifecycle.fire_event_lifecycle_service import FireEventLifecycleService
 from src.services.fire_severity import FireSeverityInputService
 from src.services.fire_spread import FireSpreadInputService
 from src.services.operational import OperationalContextService
@@ -81,6 +83,8 @@ from src.simulation.analysis import (
     SimulationResponseTargetCoordinator,
     SimulationResponseTargetResult,
 )
+from src.simulation.generators.news_data_generator import SIMULATED_NEWS_SOURCE_FEED
+from src.simulation.generators.satellite_data_generator import SIMULATED_SATELLITE
 from src.simulation.simulated_incident import SimulatedIncident
 from src.simulation.simulation_event import SimulationEvent, SimulationEventType
 from src.simulation.simulation_event_executor import (
@@ -568,6 +572,40 @@ def _scramble_resources_for_new_fire_events(
     return len(depleted_resources)
 
 
+def resolve_stale_simulation_events(
+    as_of: datetime,
+    *,
+    fire_event_repository: FireEventRepository | None = None,
+    lifecycle_service: FireEventLifecycleService | None = None,
+) -> tuple[int, ...]:
+    """Resolve active simulation-only FireEvents that can no longer be matched.
+
+    An event is eligible only if it was last updated before
+    `as_of - ACTIVE_EVENT_MATCH_WINDOW_HOURS` (so FireEventRepository's
+    matching can never reuse it again for evidence observed at/after `as_of`)
+    AND every piece of its supporting evidence carries the simulation markers
+    (SIMULATED_SATELLITE / SIMULATED_NEWS_SOURCE_FEED). Events with any real,
+    mixed, or unmarked evidence, and events still inside the matching
+    window, are left untouched. Each stale event is resolved through
+    FireEventLifecycleService.resolve_event, which preserves its history and
+    releases its resource commitments. Returns the resolved event ids.
+    """
+    fire_event_repository = fire_event_repository or FireEventRepository()
+    stale_event_ids = fire_event_repository.get_active_event_ids_with_only_marked_evidence_updated_before(
+        updated_before=as_of - timedelta(hours=ACTIVE_EVENT_MATCH_WINDOW_HOURS),
+        satellite_name=SIMULATED_SATELLITE,
+        news_source_feed=SIMULATED_NEWS_SOURCE_FEED,
+    )
+    if not stale_event_ids:
+        return ()
+
+    lifecycle_service = lifecycle_service or FireEventLifecycleService(fire_event_repository=fire_event_repository)
+    for fire_event_id in stale_event_ids:
+        lifecycle_service.resolve_event(fire_event_id, as_of=as_of)
+    logger.info("Resolved %d stale simulation-only FireEvent(s): %s", len(stale_event_ids), stale_event_ids)
+    return stale_event_ids
+
+
 # ---------------------------------------------------------------------------
 # The reusable runner
 # ---------------------------------------------------------------------------
@@ -602,6 +640,7 @@ class DemoSimulationRunner:
         service: SimulationScenarioService | None = None,
         clock_fn: Callable[[], float] = time.monotonic,
         wall_clock_now_fn: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        stale_simulation_event_resolver: Callable[[datetime], tuple[int, ...]] | None = None,
     ) -> None:
         self._executor = executor or SimulationEventExecutor(text_processor=_build_simulation_text_processor())
         self._fire_danger_coordinator = fire_danger_coordinator or build_fire_danger_coordinator()
@@ -642,6 +681,9 @@ class DemoSimulationRunner:
         self._service = service
         self._clock_fn = clock_fn
         self._wall_clock_now_fn = wall_clock_now_fn
+        # None -> the module-level resolve_stale_simulation_events, looked up
+        # at call time (real repositories, built only when run() executes).
+        self._stale_simulation_event_resolver = stale_simulation_event_resolver
 
     def _get_fire_spread_coordinator(self) -> SimulationFireSpreadCoordinator:
         if self._fire_spread_coordinator_factory is not None:
@@ -674,6 +716,17 @@ class DemoSimulationRunner:
         service = self._service or SimulationScenarioService()
         scenario_started_at = scenario_started_at or self._wall_clock_now_fn()
         wall_clock_start = self._clock_fn()
+
+        # Before any new evidence is generated: resolve earlier runs'
+        # simulation-only FireEvents that the 6-hour matching window can no
+        # longer reuse, so they do not stay active forever when no reset is
+        # requested. A failure here only leaves them active (the previous
+        # behavior) and must not abort the run.
+        resolver = self._stale_simulation_event_resolver or resolve_stale_simulation_events
+        try:
+            resolver(scenario_started_at)
+        except Exception:  # noqa: BLE001 - cleanup failure isolation, see comment above.
+            logger.exception("Resolving stale simulation FireEvents failed; continuing the simulation run.")
 
         service.start(scenario, mode=config.mode)
 

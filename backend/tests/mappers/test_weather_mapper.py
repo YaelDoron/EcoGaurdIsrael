@@ -134,10 +134,42 @@ def test_map_observation_valid_raw_observation_maps_all_six_channels():
     assert observation.station_external_id == 17
     assert observation.temperature == 31.4
     assert observation.relative_humidity == 42
-    assert observation.wind_speed == 5.8
+    # IMS WS/WSmax are m/s; WeatherObservation stores canonical km/h.
+    assert observation.wind_speed == pytest.approx(5.8 * 3.6)  # 20.88 km/h
     assert observation.wind_direction == 240
-    assert observation.wind_gust == 8.2
+    assert observation.wind_gust == pytest.approx(8.2 * 3.6)  # 29.52 km/h
     assert observation.rainfall == 0
+
+
+@pytest.mark.parametrize(
+    ("channel", "field", "value_ms", "expected_kmh"),
+    [("WS", "wind_speed", 10, 36.0), ("WSmax", "wind_gust", 15, 54.0), ("WS", "wind_speed", "10", 36.0)],
+)
+def test_map_observation_converts_ims_wind_channels_from_ms_to_kmh(channel, field, value_ms, expected_kmh):
+    observation = WeatherMapper.map_observation(_channels({"name": channel, "value": value_ms, "valid": True}))
+
+    assert getattr(observation, field) == pytest.approx(expected_kmh)
+
+
+def test_map_observation_non_wind_channels_are_not_unit_converted():
+    observation = WeatherMapper.map_observation(RAW_OBSERVATION)
+
+    assert (observation.temperature, observation.relative_humidity, observation.wind_direction, observation.rainfall) == (
+        31.4,
+        42,
+        240,
+        0,
+    )
+
+
+def test_map_observation_missing_or_invalid_ws_stays_none():
+    missing = WeatherMapper.map_observation(_channels({"name": "TD", "value": 31.4, "valid": True}))
+    invalid = WeatherMapper.map_observation(_channels({"name": "WS", "value": 5.8, "valid": False}))
+    unparseable = WeatherMapper.map_observation(_channels({"name": "WS", "value": "calm", "valid": True}))
+
+    assert missing.wind_speed is None
+    assert invalid.wind_speed is None
+    assert unparseable.wind_speed is None
 
 
 def test_map_observation_missing_wsmax_channel_becomes_none():
@@ -285,3 +317,211 @@ def test_map_observation_returns_weather_observation_instance():
     observation = WeatherMapper.map_observation(RAW_OBSERVATION)
 
     assert isinstance(observation, WeatherObservation)
+
+
+# ---------------------------------------------------------------------------
+# Cross-source wind-unit consistency: IMS (m/s) and simulation (km/h) must
+# reach every downstream consumer as the same canonical km/h value.
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta, timezone  # noqa: E402
+
+from src.calculators.fire_detection.fire_detection_config import (  # noqa: E402
+    FIRE_DETECTION_METHODOLOGY_NAME,
+    FIRE_DETECTION_METHODOLOGY_VERSION,
+)
+from src.calculators.fire_severity.fire_severity_config import (  # noqa: E402
+    FIRE_SEVERITY_METHODOLOGY_NAME,
+    FIRE_SEVERITY_METHODOLOGY_VERSION,
+)
+from src.models import (  # noqa: E402
+    FireEvent,
+    FireEventStatus,
+    FireEvidenceRef,
+    FireEvidenceType,
+    FireSeverityAssessment,
+    FireSeverityAssessmentStatus,
+    FireSeverityLevel,
+    SatelliteHotspot,
+)
+from src.models.assessment_area import AssessmentArea  # noqa: E402
+from src.repositories.fire_event_repository import StoredFireEvent  # noqa: E402
+from src.repositories.fire_severity_assessment_repository import StoredFireSeverityAssessment  # noqa: E402
+from src.repositories.satellite_hotspot_repository import StoredSatelliteHotspot  # noqa: E402
+from src.repositories.weather_repository import StoredWeatherObservation  # noqa: E402
+from src.services.fire_danger.fire_danger_input_service import FireDangerInputService  # noqa: E402
+from src.services.fire_severity.fire_severity_input_service import FireSeverityInputService  # noqa: E402
+from src.services.fire_spread.fire_spread_input_service import FireSpreadInputService  # noqa: E402
+from src.simulation.generators.weather_data_generator import WeatherDataGenerator  # noqa: E402
+from src.simulation.scenario_type import ScenarioType  # noqa: E402
+
+CROSS_SOURCE_AS_OF = datetime(2026, 9, 2, 12, 30, tzinfo=timezone.utc)
+CROSS_SOURCE_LAT = 32.79
+CROSS_SOURCE_LON = 34.99
+
+
+class _FakeWeatherRepository:
+    def __init__(self, record: StoredWeatherObservation) -> None:
+        self._record = record
+
+    def get_recent_observations_for_area_candidates(self, **kwargs):
+        return (self._record,)
+
+    def get_observations_by_ids(self, observation_ids):
+        return tuple(record for record in (self._record,) if record.observation_id in observation_ids)
+
+
+class _FakeSatelliteRepository:
+    def get_by_ids(self, hotspot_ids):
+        return (
+            StoredSatelliteHotspot(
+                id=1,
+                hotspot=SatelliteHotspot(
+                    latitude=CROSS_SOURCE_LAT,
+                    longitude=CROSS_SOURCE_LON,
+                    detected_at=CROSS_SOURCE_AS_OF - timedelta(hours=1),
+                    confidence="h",
+                    frp=50.0,
+                ),
+            ),
+        )
+
+
+class _NoLandCover:
+    def get_land_cover_statistics(self, latitude, longitude, radius_km):
+        return None
+
+
+def _stored(observation: WeatherObservation) -> StoredWeatherObservation:
+    observation.timestamp = CROSS_SOURCE_AS_OF - timedelta(minutes=5)
+    return StoredWeatherObservation(
+        observation_id=101,
+        station_id=1,
+        station=WeatherStation(
+            external_station_id=observation.station_external_id,
+            name="Station",
+            latitude=CROSS_SOURCE_LAT,
+            longitude=CROSS_SOURCE_LON,
+        ),
+        observation=observation,
+    )
+
+
+def _downstream_wind_kmh(observation: WeatherObservation) -> dict[str, float]:
+    """What Fire Danger, Fire Severity and Fire Spread each receive as wind_speed_kmh."""
+    record = _stored(observation)
+    weather_repository = _FakeWeatherRepository(record)
+    event = StoredFireEvent(
+        id=10,
+        event=FireEvent(
+            latitude=CROSS_SOURCE_LAT,
+            longitude=CROSS_SOURCE_LON,
+            detected_at=CROSS_SOURCE_AS_OF - timedelta(minutes=20),
+            updated_at=CROSS_SOURCE_AS_OF - timedelta(minutes=5),
+            status=FireEventStatus.CONFIRMED,
+            detection_confidence=0.85,
+            methodology=FIRE_DETECTION_METHODOLOGY_NAME,
+            methodology_version=FIRE_DETECTION_METHODOLOGY_VERSION,
+        ),
+        supporting_evidence=(FireEvidenceRef(FireEvidenceType.SATELLITE, 1),),
+    )
+    severity = StoredFireSeverityAssessment(
+        assessment_id=500,
+        assessment=FireSeverityAssessment(
+            fire_event_id=10,
+            assessed_at=CROSS_SOURCE_AS_OF - timedelta(minutes=1),
+            status=FireSeverityAssessmentStatus.VALID,
+            score=55.0,
+            level=FireSeverityLevel.HIGH,
+            methodology=FIRE_SEVERITY_METHODOLOGY_NAME,
+            methodology_version=FIRE_SEVERITY_METHODOLOGY_VERSION,
+            vegetation_source="COPERNICUS_GLOBAL_LAND_COVER_100M_API",
+            vegetation_dataset_year=2019,
+            vegetation_radius_km=1.0,
+            vegetation_dominant_land_cover="Shrub cover",
+            vegetation_fuel_score=0.8,
+        ),
+        weather_observation_ids=(101,),
+        satellite_hotspot_ids=(1,),
+        selected_frp_hotspot_id=1,
+    )
+
+    danger = FireDangerInputService(weather_repository=weather_repository).build_input(
+        AssessmentArea(id="area", name="Area", latitude=CROSS_SOURCE_LAT, longitude=CROSS_SOURCE_LON, radius_km=5),
+        CROSS_SOURCE_AS_OF,
+    )
+    severity_input = FireSeverityInputService(
+        fire_event_repository=object(),
+        weather_repository=weather_repository,
+        satellite_hotspot_repository=_FakeSatelliteRepository(),
+        land_cover_client=_NoLandCover(),
+    ).prepare_input_for_event(event, CROSS_SOURCE_AS_OF)
+    spread_context = FireSpreadInputService(
+        fire_event_repository=object(),
+        fire_severity_assessment_repository=object(),
+        weather_repository=weather_repository,
+    ).prepare_shared_context_for_event(event, CROSS_SOURCE_AS_OF, resolved_severity=severity)
+
+    return {
+        "danger": danger.input_data.wind_speed_kmh,
+        "severity": severity_input.input_data.wind_speed_kmh,
+        "spread": spread_context.wind_speed_kmh,
+    }
+
+
+def _ims_observation(wind_speed_ms: float, wind_gust_ms: float) -> WeatherObservation:
+    return WeatherMapper.map_observation(
+        {
+            "stationId": 17,
+            "datetime": "2026-09-02T12:25:00+00:00",
+            "channels": [
+                {"name": "TD", "value": 31.4, "valid": True},
+                {"name": "RH", "value": 30, "valid": True},
+                {"name": "WS", "value": wind_speed_ms, "valid": True},
+                {"name": "WD", "value": 240, "valid": True},
+                {"name": "WSmax", "value": wind_gust_ms, "valid": True},
+            ],
+        }
+    )
+
+
+def test_ims_10_ms_and_simulation_36_kmh_reach_every_consumer_as_the_same_36_kmh():
+    ims = _ims_observation(wind_speed_ms=10, wind_gust_ms=15)
+    simulation = WeatherObservation(
+        station_external_id=901508,
+        timestamp=CROSS_SOURCE_AS_OF,
+        temperature=31.4,
+        relative_humidity=30,
+        wind_speed=36.0,
+        wind_direction=240,
+        wind_gust=54.0,
+    )
+
+    assert ims.wind_speed == pytest.approx(simulation.wind_speed) == pytest.approx(36.0)
+    assert ims.wind_gust == pytest.approx(simulation.wind_gust) == pytest.approx(54.0)
+
+    ims_downstream = _downstream_wind_kmh(ims)
+    simulation_downstream = _downstream_wind_kmh(simulation)
+    for consumer in ("danger", "severity", "spread"):
+        assert ims_downstream[consumer] == pytest.approx(36.0), consumer
+        assert simulation_downstream[consumer] == pytest.approx(36.0), consumer
+
+
+def test_simulation_generator_km_h_matches_equivalent_ims_m_s_after_mapping():
+    generated = WeatherDataGenerator(seed=7).generate(ScenarioType.ACTIVE_FIRE, timestamp=CROSS_SOURCE_AS_OF)
+    for measurement in generated.measurements:
+        simulated = measurement.observation
+        ims = _ims_observation(wind_speed_ms=simulated.wind_speed / 3.6, wind_gust_ms=simulated.wind_gust / 3.6)
+
+        assert ims.wind_speed == pytest.approx(simulated.wind_speed)
+        assert ims.wind_gust == pytest.approx(simulated.wind_gust)
+
+
+def test_simulation_generator_stores_profile_km_h_unconverted():
+    from src.simulation.generators.weather_data_generator import WEATHER_SCENARIO_PROFILES
+
+    profile = WEATHER_SCENARIO_PROFILES[ScenarioType.ACTIVE_FIRE]
+    generated = WeatherDataGenerator(seed=7).generate(ScenarioType.ACTIVE_FIRE, timestamp=CROSS_SOURCE_AS_OF)
+    for measurement in generated.measurements:
+        low, high = profile.wind_speed_kmh
+        assert low <= measurement.observation.wind_speed <= high

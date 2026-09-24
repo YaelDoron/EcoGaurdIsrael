@@ -358,3 +358,24 @@ def test_malformed_statistics_shape_is_handled(monkeypatch):
 
     with pytest.raises(CopernicusInvalidResponseError):
         make_client().get_land_cover_statistics(32.731, 35.046, 1.0)
+
+
+@pytest.mark.parametrize("token_response", [["access_token", "token-1"], "token-1", 42])
+def test_non_dict_token_payload_raises_invalid_response_error(monkeypatch, token_response):
+    monkeypatch.setattr(requests, "post", lambda *args, **kwargs: FakeResponse(payload=token_response))
+
+    with pytest.raises(CopernicusInvalidResponseError):
+        make_client().get_land_cover_statistics(32.731, 35.046, 1.0)
+
+
+@pytest.mark.parametrize("bands", [["B0", "B1"], "bands", 7])
+def test_non_dict_vegetation_bands_raise_invalid_response_error(monkeypatch, bands):
+    def fake_post(url, **kwargs):
+        if "token" in url:
+            return FakeResponse(payload=token_payload())
+        return FakeResponse(payload={"data": [{"outputs": {"vegetation": {"bands": bands}}}]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+
+    with pytest.raises(CopernicusInvalidResponseError):
+        make_client().get_land_cover_statistics(32.731, 35.046, 1.0)

@@ -562,6 +562,29 @@ def test_non_valid_spread_prediction_serializes_with_empty_cells():
     prediction = body["spread_predictions"][0]
     assert prediction["status"] == "insufficient_data"
     assert prediction["cells"] == []
+    assert prediction["insufficient_data_reason"] is None  # historical row: unknown reason
+
+
+def test_insufficient_data_reason_serializes_as_its_lowercase_value():
+    from src.models import FireSpreadInsufficientDataReason
+
+    result = make_result(
+        spread_predictions=[
+            make_spread_prediction(
+                status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+                cells=[],
+                insufficient_data_reason=FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION,
+            ),
+            make_spread_prediction(horizon_minutes=60),
+        ]
+    )
+    client = client_for(FakeEventDetailsService(result))
+
+    body = client.get(endpoint_for(12)).json()
+
+    insufficient, valid = body["spread_predictions"]
+    assert insufficient["insufficient_data_reason"] == "unsupported_vegetation"
+    assert valid["insufficient_data_reason"] is None
 
 
 # ---------------------------------------------------------------------------

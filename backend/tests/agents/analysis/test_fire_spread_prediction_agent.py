@@ -15,6 +15,7 @@ from src.models import (
     FireSpreadInput,
     FireSpreadInputResult,
     FireSpreadInputStatus,
+    FireSpreadInsufficientDataReason,
     FireSpreadPredictionCell,
     FireSpreadPredictionStatus,
 )
@@ -116,6 +117,7 @@ def non_ready_input_result(
     *,
     severity_assessment_id=None,
     weather_observation_id=None,
+    insufficient_data_reason=FireSpreadInsufficientDataReason.MISSING_VEGETATION,
 ) -> FireSpreadInputResult:
     return FireSpreadInputResult(
         status=status,
@@ -123,6 +125,9 @@ def non_ready_input_result(
         fire_event_id=FIRE_EVENT_ID,
         severity_assessment_id=severity_assessment_id,
         weather_observation_id=weather_observation_id,
+        insufficient_data_reason=(
+            insufficient_data_reason if status is FireSpreadInputStatus.INSUFFICIENT_DATA else None
+        ),
     )
 
 
@@ -264,6 +269,33 @@ def test_insufficient_data_preserves_known_severity_id_when_available():
     )
 
     assert result.prediction.severity_assessment_id == 500
+
+
+@pytest.mark.parametrize(
+    "reason", [FireSpreadInsufficientDataReason.STALE_WEATHER, FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION]
+)
+def test_insufficient_data_reason_is_passed_through_to_the_persisted_prediction(reason):
+    repository = FakeRepository()
+    input_result = non_ready_input_result(FireSpreadInputStatus.INSUFFICIENT_DATA, insufficient_data_reason=reason)
+
+    result = make_agent(FakeInputService(input_result), repository=repository).predict(
+        fire_event_id=FIRE_EVENT_ID, as_of=AS_OF, horizon_minutes=30
+    )
+
+    assert result.prediction.insufficient_data_reason is reason
+    assert repository.calls[0]["prediction"].insufficient_data_reason is reason
+
+
+def test_valid_and_inactive_predictions_have_no_reason():
+    valid = make_agent(FakeInputService(ready_input_result())).predict(
+        fire_event_id=FIRE_EVENT_ID, as_of=AS_OF, horizon_minutes=30
+    )
+    inactive = make_agent(FakeInputService(non_ready_input_result(FireSpreadInputStatus.INACTIVE_EVENT))).predict(
+        fire_event_id=FIRE_EVENT_ID, as_of=AS_OF, horizon_minutes=30
+    )
+
+    assert valid.prediction.insufficient_data_reason is None
+    assert inactive.prediction.insufficient_data_reason is None
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,9 @@ from src.models.fire_spread_fuel_class import FireSpreadFuelClass
 from src.models.fire_spread_input import FireSpreadInput
 from src.models.fire_spread_input_result import FireSpreadInputResult
 from src.models.fire_spread_input_status import FireSpreadInputStatus
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
+
+_REASON = FireSpreadInsufficientDataReason.MISSING_VEGETATION
 
 
 def make_input(**overrides) -> FireSpreadInput:
@@ -41,17 +44,52 @@ def test_valid_ready_result():
     assert result.input_data is not None
 
 
-@pytest.mark.parametrize("status", [FireSpreadInputStatus.INSUFFICIENT_DATA, FireSpreadInputStatus.INACTIVE_EVENT])
-def test_valid_non_ready_result_without_input_data(status):
-    result = make_result(status=status, input_data=None, severity_assessment_id=None, weather_observation_id=None)
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [(FireSpreadInputStatus.INSUFFICIENT_DATA, _REASON), (FireSpreadInputStatus.INACTIVE_EVENT, None)],
+)
+def test_valid_non_ready_result_without_input_data(status, reason):
+    result = make_result(
+        status=status,
+        input_data=None,
+        severity_assessment_id=None,
+        weather_observation_id=None,
+        insufficient_data_reason=reason,
+    )
     assert result.status is status
     assert result.input_data is None
+    assert result.insufficient_data_reason is reason
 
 
 def test_non_ready_result_may_still_carry_partial_traceability():
-    result = make_result(status=FireSpreadInputStatus.INSUFFICIENT_DATA, input_data=None, weather_observation_id=None)
+    result = make_result(
+        status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+        input_data=None,
+        weather_observation_id=None,
+        insufficient_data_reason=_REASON,
+    )
     assert result.severity_assessment_id == 500
     assert result.weather_observation_id is None
+
+
+def test_ready_result_has_no_reason_by_default():
+    assert make_result().insufficient_data_reason is None
+
+
+def test_ready_result_with_reason_rejected():
+    with pytest.raises(ValueError):
+        make_result(insufficient_data_reason=_REASON)
+
+
+def test_inactive_event_result_with_reason_rejected():
+    with pytest.raises(ValueError):
+        make_result(status=FireSpreadInputStatus.INACTIVE_EVENT, input_data=None, insufficient_data_reason=_REASON)
+
+
+@pytest.mark.parametrize("reason", [None, "missing_vegetation"])
+def test_insufficient_data_result_requires_a_reason_enum(reason):
+    with pytest.raises(ValueError):
+        make_result(status=FireSpreadInputStatus.INSUFFICIENT_DATA, input_data=None, insufficient_data_reason=reason)
 
 
 def test_ready_without_input_data_rejected():
@@ -71,7 +109,7 @@ def test_ready_without_weather_observation_id_rejected():
 
 def test_non_ready_with_input_data_rejected():
     with pytest.raises(ValueError):
-        make_result(status=FireSpreadInputStatus.INSUFFICIENT_DATA)
+        make_result(status=FireSpreadInputStatus.INSUFFICIENT_DATA, insufficient_data_reason=_REASON)
 
 
 @pytest.mark.parametrize("fire_event_id", [0, -1, True, "10"])

@@ -456,9 +456,11 @@ describe("EventDetailsPage", () => {
     const scoped = within(spreadSection);
     expect(scoped.getByText("30 min horizon")).toBeInTheDocument();
     expect(scoped.getByText("Spread predicted")).toBeInTheDocument();
-    expect(scoped.getByText("1 predicted cell")).toBeInTheDocument();
+    expect(scoped.getByText("1 nearby area reached the propagation threshold")).toBeInTheDocument();
     expect(scoped.getByText("60 min horizon")).toBeInTheDocument();
     expect(scoped.getByText("Insufficient data")).toBeInTheDocument();
+    // Historical insufficient_data row without a stored reason.
+    expect(scoped.getByText("The stored prediction does not specify why.")).toBeInTheDocument();
     expect(scoped.queryByText(/predicted cells/)).not.toBeInTheDocument();
   });
 
@@ -1039,5 +1041,128 @@ describe("EventDetailsPage", () => {
       expect(badge).toHaveClass("badge");
       expect(badge.closest(".event-details-page")).not.toBeNull();
     }
+  });
+
+  describe("fire-spread methodology 1.1 wording", () => {
+    const PREDICTED_AT = "2026-09-17T13:25:00Z";
+
+    function cell(spread_probability: number, latitude: number) {
+      return {
+        latitude,
+        longitude: 35.05,
+        spread_probability,
+        spread_risk_score: spread_probability * 100,
+        reached_step: 1,
+        reached_minutes: 5,
+      };
+    }
+
+    function ring(probability: number, count: number) {
+      return Array.from({ length: count }, (_, index) => cell(probability, 32.7 + index * 0.001));
+    }
+
+    async function renderSpreadSection(spread_predictions: EventDetailsResult["spread_predictions"]) {
+      getEventDetailsMock.mockResolvedValue(makeResult({ spread_predictions }));
+      renderPage();
+      await screen.findByText("Data as of:", { exact: false });
+      const section = screen.getByRole("heading", { name: "Spread Prediction" }).closest("section") as HTMLElement;
+      return within(section);
+    }
+
+    it("presents a valid risk-only ring as spread risk only, never as predicted spread", async () => {
+      const scoped = await renderSpreadSection([
+        { horizon_minutes: 30, status: "valid", predicted_at: PREDICTED_AT, cells: ring(0.38, 8) },
+      ]);
+
+      expect(scoped.getByText("Spread risk only")).toBeInTheDocument();
+      expect(
+        scoped.getByText("8 nearby areas with predicted spread risk; none reached the propagation threshold"),
+      ).toBeInTheDocument();
+      expect(scoped.queryByText("Spread predicted")).not.toBeInTheDocument();
+      expect(scoped.queryByText(/predicted cells/)).not.toBeInTheDocument();
+      expect(scoped.queryByText(/\bcells?\b/)).not.toBeInTheDocument();
+    });
+
+    it("counts spreading and risk-only cells separately for a mixed prediction", async () => {
+      const scoped = await renderSpreadSection([
+        {
+          horizon_minutes: 30,
+          status: "valid",
+          predicted_at: PREDICTED_AT,
+          cells: [...ring(0.62, 3), ...ring(0.3, 5).map((c, i) => ({ ...c, latitude: 32.8 + i * 0.001 }))],
+        },
+      ]);
+
+      expect(scoped.getByText("Spread predicted")).toBeInTheDocument();
+      expect(scoped.getByText("3 nearby areas reached the propagation threshold · 5 additional areas show spread risk")).toBeInTheDocument();
+    });
+
+    it("treats a probability exactly at the propagation threshold as spreading", async () => {
+      const scoped = await renderSpreadSection([
+        { horizon_minutes: 30, status: "valid", predicted_at: PREDICTED_AT, cells: [cell(0.5, 32.7)] },
+      ]);
+
+      expect(scoped.getByText("Spread predicted")).toBeInTheDocument();
+      expect(scoped.getByText("1 nearby area reached the propagation threshold")).toBeInTheDocument();
+    });
+
+    it("shows the stored reason for missing vegetation", async () => {
+      const scoped = await renderSpreadSection([
+        {
+          horizon_minutes: 30,
+          status: "insufficient_data",
+          predicted_at: PREDICTED_AT,
+          cells: [],
+          insufficient_data_reason: "missing_vegetation",
+        },
+      ]);
+
+      expect(scoped.getByText("Insufficient data")).toBeInTheDocument();
+      expect(scoped.getByText("Vegetation data required by the spread model is unavailable.")).toBeInTheDocument();
+    });
+
+    it("words unsupported vegetation differently from missing vegetation and never mentions Copernicus", async () => {
+      const scoped = await renderSpreadSection([
+        {
+          horizon_minutes: 30,
+          status: "insufficient_data",
+          predicted_at: PREDICTED_AT,
+          cells: [],
+          insufficient_data_reason: "unsupported_vegetation",
+        },
+      ]);
+
+      expect(
+        scoped.getByText("The vegetation category here is not supported by the current spread model."),
+      ).toBeInTheDocument();
+      expect(scoped.queryByText(/unavailable/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/copernicus/i)).not.toBeInTheDocument();
+    });
+
+    it("falls back to an explicit unknown-reason note for a historical row without a reason", async () => {
+      const scoped = await renderSpreadSection([
+        {
+          horizon_minutes: 60,
+          status: "insufficient_data",
+          predicted_at: PREDICTED_AT,
+          cells: [],
+          insufficient_data_reason: null,
+        },
+      ]);
+
+      expect(scoped.getByText("Insufficient data")).toBeInTheDocument();
+      expect(scoped.getByText("The stored prediction does not specify why.")).toBeInTheDocument();
+    });
+
+    it("counts identical 30/60-minute cell locations once in the spread layer total", async () => {
+      await renderSpreadSection([
+        { horizon_minutes: 30, status: "valid", predicted_at: PREDICTED_AT, cells: ring(0.38, 8) },
+        { horizon_minutes: 60, status: "valid", predicted_at: PREDICTED_AT, cells: ring(0.38, 8) },
+      ]);
+
+      const spreadToggle = screen.getByRole("checkbox", { name: /predicted spread/i });
+      const count = spreadToggle.closest("label")?.querySelector(".layer-controls__count");
+      expect(count?.textContent).toBe("8");
+    });
   });
 });

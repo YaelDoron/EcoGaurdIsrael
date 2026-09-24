@@ -1,7 +1,7 @@
 """Result of a pure wildfire-spread cellular-automata calculation.
 
-This is the calculator's own pure output: a set of predicted cells (possibly
-empty -- a valid "no predicted spread" result) plus the horizon and
+This is the calculator's own pure output: a set of predicted cells
+(spreading and risk-only; possibly empty) plus the horizon and
 methodology identity. It intentionally does not know about FireEvent,
 FireSeverityAssessment, persistence status, or any database id -- combining
 this with those belongs to a later agent task, which builds the persisted
@@ -22,9 +22,11 @@ from src.models.fire_spread_prediction import (
 class FireSpreadCalculation:
     """Deterministic spread-prediction cells and methodology identity.
 
-    `cells` may legitimately be empty: a scientifically valid calculation can
-    conclude that no neighboring cell crosses the deterministic propagation
-    threshold within the selected horizon.
+    `cells` holds spreading cells (spread_probability >= the propagation
+    threshold) and risk-only cells (below it; they never propagate). It is
+    empty only when every neighbouring transition probability is 0 (e.g.
+    fuel moisture at/above extinction) -- a valid "no predicted spread"
+    result.
     """
 
     cells: tuple[FireSpreadPredictionCell, ...]

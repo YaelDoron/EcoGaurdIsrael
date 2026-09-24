@@ -38,7 +38,11 @@ from src.calculators.fire_severity.fire_severity_config import (
     FIRE_SEVERITY_METHODOLOGY_VERSION,
 )
 from src.calculators.fire_spread import FireSpreadCalculator
-from src.calculators.fire_spread.fire_spread_config import METHODOLOGY_NAME, METHODOLOGY_VERSION
+from src.calculators.fire_spread.fire_spread_config import (
+    METHODOLOGY_NAME,
+    METHODOLOGY_VERSION,
+    PROPAGATION_THRESHOLD,
+)
 from src.config.settings import settings
 from src.database.connection import get_engine, init_db
 from src.models import (
@@ -75,7 +79,7 @@ STATION_EXTERNAL_ID = 924924
 # see the module-level derivation notes in the completion report for why
 # these particular values were chosen (verified by hand against the exact
 # verified formulas, not guessed).
-FAVORABLE_WIND_SPEED_MPS = 27.78  # -> 100.0 km/h after the service's exact x3.6 conversion
+FAVORABLE_WIND_SPEED_KMH = 100.0  # WeatherObservation.wind_speed is canonical km/h
 FAVORABLE_WIND_DIRECTION_DEG = 0.0  # wind FROM north -> blows toward south
 FAVORABLE_TEMPERATURE_C = 42.0
 FAVORABLE_HUMIDITY_PCT = 5.0
@@ -84,7 +88,7 @@ FAVORABLE_LAND_COVER = "Grass cover"
 # Deliberately unfavorable, but entirely valid, conditions expected to
 # produce zero cells above the deterministic threshold (a valid "no
 # predicted spread" result).
-NO_SPREAD_WIND_SPEED_MPS = 4.167  # -> 15.0 km/h
+NO_SPREAD_WIND_SPEED_KMH = 15.0
 NO_SPREAD_WIND_DIRECTION_DEG = 0.0
 NO_SPREAD_TEMPERATURE_C = 20.0
 NO_SPREAD_HUMIDITY_PCT = 45.0
@@ -240,7 +244,7 @@ def _persist_event_with_evidence(
 def _persist_weather(
     weather_repository: WeatherRepository,
     *,
-    wind_speed_mps: float,
+    wind_speed_kmh: float,
     wind_direction_deg: float,
     temperature_c: float,
     relative_humidity_pct: float,
@@ -260,7 +264,7 @@ def _persist_weather(
             timestamp=timestamp,
             temperature=temperature_c,
             relative_humidity=relative_humidity_pct,
-            wind_speed=wind_speed_mps,
+            wind_speed=wind_speed_kmh,
             wind_direction=wind_direction_deg,
         )
     )
@@ -289,7 +293,7 @@ def _setup_ready_scenario(
     severity_repository: FireSeverityAssessmentRepository,
     weather_repository: WeatherRepository,
     *,
-    wind_speed_mps: float,
+    wind_speed_kmh: float,
     wind_direction_deg: float,
     temperature_c: float,
     relative_humidity_pct: float,
@@ -303,7 +307,7 @@ def _setup_ready_scenario(
     )
     observation_id = _persist_weather(
         weather_repository,
-        wind_speed_mps=wind_speed_mps,
+        wind_speed_kmh=wind_speed_kmh,
         wind_direction_deg=wind_direction_deg,
         temperature_c=temperature_c,
         relative_humidity_pct=relative_humidity_pct,
@@ -365,7 +369,7 @@ def test_happy_path_valid_prediction_persisted_with_full_traceability(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=FAVORABLE_WIND_SPEED_MPS,
+        wind_speed_kmh=FAVORABLE_WIND_SPEED_KMH,
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
@@ -405,7 +409,7 @@ def test_horizons_30_and_60_are_consistent_and_persisted_separately(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=FAVORABLE_WIND_SPEED_MPS,
+        wind_speed_kmh=FAVORABLE_WIND_SPEED_KMH,
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
@@ -453,7 +457,7 @@ def test_determinism_full_chain_same_inputs_produce_equivalent_output(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=FAVORABLE_WIND_SPEED_MPS,
+        wind_speed_kmh=FAVORABLE_WIND_SPEED_KMH,
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
@@ -483,7 +487,7 @@ def test_history_is_append_only_across_multiple_runs(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=FAVORABLE_WIND_SPEED_MPS,
+        wind_speed_kmh=FAVORABLE_WIND_SPEED_KMH,
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
@@ -531,7 +535,7 @@ def test_ambiguous_vegetation_produces_insufficient_data(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=FAVORABLE_WIND_SPEED_MPS,
+        wind_speed_kmh=FAVORABLE_WIND_SPEED_KMH,
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
@@ -589,7 +593,7 @@ def test_valid_no_spread_prediction_remains_valid(
         satellite_repository,
         severity_repository,
         weather_repository,
-        wind_speed_mps=NO_SPREAD_WIND_SPEED_MPS,
+        wind_speed_kmh=NO_SPREAD_WIND_SPEED_KMH,
         wind_direction_deg=NO_SPREAD_WIND_DIRECTION_DEG,
         temperature_c=NO_SPREAD_TEMPERATURE_C,
         relative_humidity_pct=NO_SPREAD_HUMIDITY_PCT,
@@ -599,7 +603,11 @@ def test_valid_no_spread_prediction_remains_valid(
     stored = agent.predict(fire_event_id=event_id, as_of=AS_OF, horizon_minutes=30)
 
     assert stored.prediction.status is FireSpreadPredictionStatus.VALID
-    assert stored.prediction.cells == ()
+    # Methodology 1.1: no cell propagates, so only the origin's first ring
+    # of risk-only cells is persisted.
+    assert len(stored.prediction.cells) == 8
+    assert all(cell.spread_probability < PROPAGATION_THRESHOLD for cell in stored.prediction.cells)
+    assert all(cell.reached_step == 1 for cell in stored.prediction.cells)
     assert stored.prediction.severity_assessment_id == assessment_id
     assert stored.weather_observation_id == observation_id
     # Confirm it was actually persisted as VALID, not silently downgraded.
