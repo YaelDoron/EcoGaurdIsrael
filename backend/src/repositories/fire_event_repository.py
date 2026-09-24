@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import math
 
 from sqlalchemy import or_, select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
 
@@ -25,6 +26,7 @@ from src.models.fire_detection_status import FireDetectionStatus
 from src.models.fire_event import FireEvent
 from src.models.fire_event_ml_assessment import FireEventMLAssessment
 from src.models.fire_event_status import FireEventStatus
+from src.models.fire_event_response_eligibility import ACTIVE_FOR_MONITORING_STATUSES, RESPONSE_ELIGIBLE_STATUSES
 from src.models.fire_evidence_ref import FireEvidenceRef
 from src.models.fire_evidence_type import FireEvidenceType
 from src.repositories.exceptions import FireEventRepositoryError
@@ -37,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 _EARTH_RADIUS_KM = 6371.0088
 _DISTANCE_TOLERANCE_KM = 1e-9
-_ACTIVE_STATUSES = {FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED}
+_ACTIVE_STATUSES = set(ACTIVE_FOR_MONITORING_STATUSES)  # active for detection / monitoring (NOT response eligibility)
 
 
 @dataclass(frozen=True)
@@ -172,32 +174,150 @@ class FireEventRepository:
             raise FireEventRepositoryError("assessment.fire_event_id must match fire_event_id.")
 
         with self._session_scope() as session:
-            if self._get_db_event(session, fire_event_id) is None:
-                raise FireEventRepositoryError(f"FireEvent {fire_event_id!r} was not found.")
+            return self._upsert_ml_assessment_in_session(session, fire_event_id, assessment)
 
-            db_assessment = self._get_db_ml_assessment(session, fire_event_id)
-            if db_assessment is None:
-                db_assessment = FireEventMLAssessmentDB(fire_event_id=fire_event_id)
-                session.add(db_assessment)
+    def _upsert_ml_assessment_in_session(
+        self, session: Session, fire_event_id: int, assessment: FireEventMLAssessment
+    ) -> FireEventMLAssessment:
+        """The upsert itself, on the caller's session (no commit): shared by the standalone and the atomic paths."""
+        if self._get_db_event(session, fire_event_id) is None:
+            raise FireEventRepositoryError(f"FireEvent {fire_event_id!r} was not found.")
 
-            db_assessment.decision_mode = assessment.decision_mode.value
-            db_assessment.rule_status = assessment.rule_status.value
-            db_assessment.rule_confidence = assessment.rule_confidence
-            db_assessment.ml_available = assessment.ml_available
-            db_assessment.ml_probability = assessment.ml_probability
-            db_assessment.ml_model_name = assessment.ml_model_name
-            db_assessment.ml_model_version = assessment.ml_model_version
-            db_assessment.ml_feature_schema_version = assessment.ml_feature_schema_version
-            db_assessment.ml_failure_reason = assessment.ml_failure_reason
-            db_assessment.agreement = assessment.agreement.value
-            db_assessment.updated_at = assessment.updated_at
-
+        db_assessment = self._get_db_ml_assessment(session, fire_event_id)
+        is_ai_row = assessment.decision_mode is FireDetectionDecisionMode.AI_HYBRID_V5
+        if db_assessment is None and not is_ai_row:
+            # A legacy-mode row is inserted with an explicit column list that never names the Task 9B columns: an ORM
+            # INSERT would list every mapped column (as NULL), which would break legacy modes on a database that
+            # has not been migrated yet.
             try:
+                session.execute(
+                    insert(FireEventMLAssessmentDB.__table__).values(
+                        fire_event_id=fire_event_id,
+                        decision_mode=assessment.decision_mode.value,
+                        rule_status=assessment.rule_status.value,
+                        rule_confidence=assessment.rule_confidence,
+                        ml_available=assessment.ml_available,
+                        ml_probability=assessment.ml_probability,
+                        ml_model_name=assessment.ml_model_name,
+                        ml_model_version=assessment.ml_model_version,
+                        ml_feature_schema_version=assessment.ml_feature_schema_version,
+                        ml_failure_reason=assessment.ml_failure_reason,
+                        agreement=assessment.agreement.value,
+                        updated_at=assessment.updated_at,
+                    )
+                )
                 session.flush()
             except SQLAlchemyError as exc:
                 raise FireEventRepositoryError("FireEvent ML assessment upsert failed.") from exc
+            return assessment
+        if db_assessment is None:
+            db_assessment = FireEventMLAssessmentDB(fire_event_id=fire_event_id)
+            session.add(db_assessment)
 
-            return self._to_domain_ml_assessment(db_assessment)
+        db_assessment.decision_mode = assessment.decision_mode.value
+        db_assessment.rule_status = assessment.rule_status.value
+        db_assessment.rule_confidence = assessment.rule_confidence
+        db_assessment.ml_available = assessment.ml_available
+        db_assessment.ml_probability = assessment.ml_probability
+        db_assessment.ml_model_name = assessment.ml_model_name
+        db_assessment.ml_model_version = assessment.ml_model_version
+        db_assessment.ml_feature_schema_version = assessment.ml_feature_schema_version
+        db_assessment.ml_failure_reason = assessment.ml_failure_reason
+        db_assessment.agreement = assessment.agreement.value
+        db_assessment.updated_at = assessment.updated_at
+        if is_ai_row:
+            # Only AI_HYBRID_V5 writes/reads the Task 9B audit columns (see FireEventMLAssessmentDB).
+            db_assessment.policy_version = assessment.policy_version
+            db_assessment.policy_status = assessment.policy_status.value if assessment.policy_status else None
+            db_assessment.history_available = assessment.history_available
+            db_assessment.satellite_pass_count = assessment.satellite_pass_count
+            db_assessment.current_satellite_pixel_count = assessment.current_satellite_pixel_count
+
+        try:
+            session.flush()
+        except SQLAlchemyError as exc:
+            raise FireEventRepositoryError("FireEvent ML assessment upsert failed.") from exc
+
+        return self._to_domain_ml_assessment(db_assessment)
+
+    def create_event_with_ml_assessment(
+        self,
+        event: FireEvent,
+        supporting_evidence: tuple[FireEvidenceRef, ...],
+        assessment_factory,
+    ) -> StoredFireEvent:
+        """Atomically persist a new event, its evidence refs AND its ML assessment row (Task 9C).
+
+        `assessment_factory(fire_event_id)` builds the assessment once the id exists. Everything happens in ONE
+        transaction: if the assessment cannot be stored the FireEvent is not committed either.
+        """
+        self._validate_event(event)
+        if event.status not in _ACTIVE_STATUSES:
+            raise FireEventRepositoryError("Detection-created FireEvents must be SUSPECTED or CONFIRMED.")
+        evidence_refs = self._normalize_evidence_refs(supporting_evidence)
+        if not evidence_refs:
+            raise FireEventRepositoryError("FireEvent creation requires at least one supporting evidence ref.")
+
+        with self._session_scope() as session:
+            db_event = self._to_db_event(event)
+            session.add(db_event)
+            try:
+                session.flush()
+                self._insert_missing_evidence_refs(session, db_event.id, evidence_refs)
+                session.flush()
+            except (IntegrityError, SQLAlchemyError) as exc:
+                raise FireEventRepositoryError("FireEvent persistence failed.") from exc
+            assessment = assessment_factory(db_event.id)
+            self._validate_assessment(db_event.id, assessment)
+            self._upsert_ml_assessment_in_session(session, db_event.id, assessment)
+            logger.info("Stored FireEvent %s with %s evidence refs and its ML assessment", db_event.id, len(evidence_refs))
+            return self._to_stored_event(db_event, evidence_refs)
+
+    def update_event_with_ml_assessment(
+        self,
+        fire_event_id: int,
+        *,
+        event: FireEvent | None,
+        new_evidence: tuple[FireEvidenceRef, ...],
+        assessment: FireEventMLAssessment | None,
+    ) -> None:
+        """Atomically apply an existing event's status/confidence update, new evidence refs and ML assessment (Task 9C).
+
+        Any of the three parts may be absent (nothing to change), but the parts that are present commit together or not at
+        all - e.g. a SUSPECTED -> CONFIRMED promotion is never left behind by a failed assessment write.
+        """
+        self._validate_fire_event_id(fire_event_id)
+        if event is not None:
+            self._validate_event(event)
+        evidence_refs = self._normalize_evidence_refs(new_evidence)
+        if assessment is not None:
+            self._validate_assessment(fire_event_id, assessment)
+
+        with self._session_scope() as session:
+            db_event = self._get_db_event(session, fire_event_id)
+            if db_event is None:
+                raise FireEventRepositoryError(f"FireEvent {fire_event_id!r} was not found.")
+            try:
+                if evidence_refs:
+                    self._insert_missing_evidence_refs(session, fire_event_id, evidence_refs)
+                if event is not None:
+                    db_event.latitude = event.latitude
+                    db_event.longitude = event.longitude
+                    db_event.updated_at = event.updated_at
+                    db_event.status = event.status.value
+                    db_event.detection_confidence = event.detection_confidence
+                session.flush()
+            except (IntegrityError, SQLAlchemyError) as exc:
+                raise FireEventRepositoryError("FireEvent update failed.") from exc
+            if assessment is not None:
+                self._upsert_ml_assessment_in_session(session, fire_event_id, assessment)
+
+    @staticmethod
+    def _validate_assessment(fire_event_id: int, assessment: FireEventMLAssessment) -> None:
+        if not isinstance(assessment, FireEventMLAssessment):
+            raise FireEventRepositoryError(f"assessment must be a FireEventMLAssessment, got {assessment!r}.")
+        if assessment.fire_event_id != fire_event_id:
+            raise FireEventRepositoryError("assessment.fire_event_id must match fire_event_id.")
 
     def get_ml_assessment(self, fire_event_id: int) -> FireEventMLAssessment | None:
         """Return the FireEvent's latest ML/decision trace, or None if it was never evaluated with ML."""
@@ -305,7 +425,31 @@ class FireEventRepository:
         radius_km: float,
         as_of: datetime,
     ) -> tuple[StoredFireEvent, ...]:
-        """Return active events near a coordinate at a deterministic simulation instant."""
+        """Return events ACTIVE FOR MONITORING (SUSPECTED/CONFIRMED) near a coordinate at a deterministic instant.
+
+        This is NOT the set that may trigger emergency response - see get_response_eligible_events_near.
+        """
+        return self._events_near(latitude, longitude, radius_km, as_of, _ACTIVE_STATUSES)
+
+    def get_response_eligible_events_near(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        as_of: datetime,
+    ) -> tuple[StoredFireEvent, ...]:
+        """Return only RESPONSE-ELIGIBLE (CONFIRMED) events near a coordinate: the only ones that may drive
+        severity / spread / targets / routing / allocation / planning (Task 9A)."""
+        return self._events_near(latitude, longitude, radius_km, as_of, RESPONSE_ELIGIBLE_STATUSES)
+
+    def _events_near(
+        self,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        as_of: datetime,
+        statuses,
+    ) -> tuple[StoredFireEvent, ...]:
         self._validate_coordinate("latitude", latitude, -90, 90)
         self._validate_coordinate("longitude", longitude, -180, 180)
         self._validate_radius_km(radius_km)
@@ -320,7 +464,7 @@ class FireEventRepository:
                         selectinload(FireEventDB.news_evidence),
                     )
                     .where(
-                        FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES),
+                        FireEventDB.status.in_(status.value for status in statuses),
                         FireEventDB.detected_at <= as_of,
                     )
                 )
@@ -484,6 +628,23 @@ class FireEventRepository:
                 )
             )
 
+    def get_response_eligible_fire_event_ids(self) -> tuple[int, ...]:
+        """Return ids of all RESPONSE-ELIGIBLE (CONFIRMED) FireEvents, ordered by id (Task 9A).
+
+        The set global planning, resource allocation and resource commitment operate on. SUSPECTED events are
+        active for monitoring (get_active_fire_event_ids) but are deliberately absent here.
+        """
+        with self._session_scope() as session:
+            return tuple(
+                sorted(
+                    session.execute(
+                        select(FireEventDB.id).where(
+                            FireEventDB.status.in_(status.value for status in RESPONSE_ELIGIBLE_STATUSES)
+                        )
+                    ).scalars()
+                )
+            )
+
     def _insert_missing_evidence_refs(
         self,
         session: Session,
@@ -557,9 +718,22 @@ class FireEventRepository:
 
     @classmethod
     def _to_domain_ml_assessment(cls, db_assessment: FireEventMLAssessmentDB) -> FireEventMLAssessment:
+        decision_mode = FireDetectionDecisionMode(db_assessment.decision_mode)
+        ai_fields: dict = {}
+        if decision_mode is FireDetectionDecisionMode.AI_HYBRID_V5:
+            # Deferred Task 9B columns: read ONLY for ai_hybrid_v5 rows so legacy rows never need them.
+            ai_fields = {
+                "policy_version": db_assessment.policy_version,
+                "policy_status": (
+                    FireDetectionStatus(db_assessment.policy_status) if db_assessment.policy_status else None
+                ),
+                "history_available": db_assessment.history_available,
+                "satellite_pass_count": db_assessment.satellite_pass_count,
+                "current_satellite_pixel_count": db_assessment.current_satellite_pixel_count,
+            }
         return FireEventMLAssessment(
             fire_event_id=db_assessment.fire_event_id,
-            decision_mode=FireDetectionDecisionMode(db_assessment.decision_mode),
+            decision_mode=decision_mode,
             rule_status=FireDetectionStatus(db_assessment.rule_status),
             rule_confidence=db_assessment.rule_confidence,
             ml_available=db_assessment.ml_available,
@@ -570,6 +744,7 @@ class FireEventRepository:
             ml_failure_reason=db_assessment.ml_failure_reason,
             agreement=FireDetectionMLRuleAgreement(db_assessment.agreement),
             updated_at=cls._ensure_aware_datetime(db_assessment.updated_at),
+            **ai_fields,
         )
 
     @staticmethod

@@ -139,6 +139,46 @@ class FireDangerAssessmentRepository:
             )
             return self._to_stored_assessment(db_assessment) if db_assessment is not None else None
 
+    def get_assessed_between(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+    ) -> tuple[StoredFireDangerAssessment, ...]:
+        """Return every assessment with start_time <= assessed_at <= end_time, newest first.
+
+        Added for Fire Detection context lookup: unlike get_latest_for_area/
+        get_latest_for_all_areas, this respects an "as of" upper bound (so a
+        later assessment is never returned for an earlier instant) and a
+        freshness lower bound, across ALL areas. This repository has no area
+        registry, so geographic relevance is decided by the caller from each
+        row's own persisted area center/radius. Same deterministic ordering as
+        get_latest_for_area (assessed_at desc, id desc). Includes
+        INSUFFICIENT_DATA rows - callers decide what those mean.
+        """
+        for field_name, value in (("start_time", start_time), ("end_time", end_time)):
+            if not isinstance(value, datetime) or value.tzinfo is None:
+                raise FireDangerAssessmentRepositoryError(
+                    f"{field_name} must be a timezone-aware datetime, got {value!r}"
+                )
+        if start_time > end_time:
+            raise FireDangerAssessmentRepositoryError("start_time must not be after end_time.")
+
+        with self._session_scope() as session:
+            db_assessments = (
+                session.execute(
+                    select(FireDangerAssessmentDB)
+                    .options(selectinload(FireDangerAssessmentDB.weather_inputs))
+                    .where(
+                        FireDangerAssessmentDB.assessed_at >= start_time,
+                        FireDangerAssessmentDB.assessed_at <= end_time,
+                    )
+                    .order_by(FireDangerAssessmentDB.assessed_at.desc(), FireDangerAssessmentDB.id.desc())
+                )
+                .scalars()
+                .all()
+            )
+            return tuple(self._to_stored_assessment(db_assessment) for db_assessment in db_assessments)
+
     def get_recent(self, limit: int) -> tuple[StoredFireDangerAssessment, ...]:
         """Return the `limit` most recently assessed rows across ALL areas, newest first.
 

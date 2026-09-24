@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, deferred, mapped_column
 
 from src.database.base import Base
 
@@ -43,3 +43,13 @@ class FireEventMLAssessmentDB(Base):
 
     agreement: Mapped[str] = mapped_column(String, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # Task 9B (AI_HYBRID_V5 audit). Additive, nullable and DEFERRED: a SELECT of this row does not reference them unless
+    # they are read, and the repository writes them only for ai_hybrid_v5 rows - so RULE_ONLY / SHADOW / HYBRID never touch
+    # these columns and keep working on a database that has not been migrated yet
+    # (scripts/migrate_add_fire_event_ml_assessment_ai_columns.py adds them; only ai_hybrid_v5 needs it).
+    policy_version: Mapped[Optional[str]] = deferred(mapped_column(String, nullable=True))
+    policy_status: Mapped[Optional[str]] = deferred(mapped_column(String, nullable=True))
+    history_available: Mapped[Optional[bool]] = deferred(mapped_column(Boolean, nullable=True))
+    satellite_pass_count: Mapped[Optional[int]] = deferred(mapped_column(Integer, nullable=True))
+    current_satellite_pixel_count: Mapped[Optional[int]] = deferred(mapped_column(Integer, nullable=True))

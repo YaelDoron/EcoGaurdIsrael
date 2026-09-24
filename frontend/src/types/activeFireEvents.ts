@@ -36,6 +36,8 @@ export interface ActiveFireEventSeverity {
 export interface ActiveFireEventMLSummary {
   available: boolean;
   model_score: number | null;
+  /** Fire Detection decision mode that produced the score (e.g. "ai_hybrid_v5"); null for legacy rows. */
+  mode?: string | null;
 }
 
 export interface ActiveFireEvent {

@@ -194,3 +194,73 @@ describe("ActiveFireEventCard Opened time (created_at, not detected_at)", () => 
     expect(openedTime).toHaveAttribute("dateTime", "2026-09-20T11:46:00Z");
   });
 });
+
+describe("ActiveFireEventCard final Fire Detection semantics (Task 9C)", () => {
+  it("shows a monitoring message for a SUSPECTED event, and none for a CONFIRMED one", () => {
+    const { unmount } = renderCard(makeEvent({ status: "suspected" }));
+    expect(screen.getByText("Monitoring - awaiting additional evidence")).toBeInTheDocument();
+    unmount();
+
+    renderCard(makeEvent({ status: "confirmed" }));
+    expect(screen.queryByText(/Monitoring/)).not.toBeInTheDocument();
+  });
+
+  it.each(["suspected", "confirmed"] as const)(
+    "%s AI Hybrid card shows ONLY the AI likelihood as a percentage - no Rule, no Peak, no raw scores",
+    (status) => {
+      renderCard(
+        makeEvent({
+          status,
+          detection_confidence: 0.88, // the value the legacy card labelled "Rule" - must not surface in AI mode
+          ml_summary: { available: true, model_score: 0.79, mode: "ai_hybrid_v5" },
+        }),
+      );
+
+      const article = screen.getByRole("article");
+      expect(article).toHaveTextContent("AI likelihood 79%");
+      expect(article).not.toHaveTextContent(/Rule/);
+      expect(article).not.toHaveTextContent(/Peak/);
+      expect(article).not.toHaveTextContent("0.88");
+      expect(article).not.toHaveTextContent("0.79");
+      expect(article.textContent ?? "").not.toMatch(/certain/i);
+    },
+  );
+
+  it("shows an unavailable AI likelihood honestly (never 0%) in AI mode", () => {
+    renderCard(makeEvent({ ml_summary: { available: false, model_score: null, mode: "ai_hybrid_v5" } }));
+    expect(screen.getByRole("article")).toHaveTextContent("AI likelihood Unavailable");
+    expect(screen.getByRole("article")).not.toHaveTextContent("0%");
+  });
+
+  it("regression: the presentation follows the event's PERSISTED mode, not the mere existence of an AI score", () => {
+    // A shadow-mode (or mode-less legacy) event also carries an AI score. It was decided by the rules, so it keeps "Rule | AI".
+    const { unmount } = renderCard(
+      makeEvent({ detection_confidence: 0.88, ml_summary: { available: true, model_score: 0.79, mode: "shadow" } }),
+    );
+    expect(screen.getByRole("article")).toHaveTextContent("Rule 0.88");
+    expect(screen.getByRole("article")).toHaveTextContent("AI 0.79");
+    expect(screen.getByRole("article")).not.toHaveTextContent("AI likelihood");
+    unmount();
+
+    renderCard(makeEvent({ detection_confidence: 0.88, ml_summary: { available: true, model_score: 0.79 } })); // mode missing
+    expect(screen.getByRole("article")).toHaveTextContent("Rule 0.88");
+    expect(screen.getByRole("article")).not.toHaveTextContent("AI likelihood");
+  });
+
+  it("legacy hybrid and rule_only (no assessment row) keep the existing presentation", () => {
+    const { unmount } = renderCard(makeEvent({ ml_summary: { available: true, model_score: 0.6, mode: "hybrid" } }));
+    expect(screen.getByRole("article")).toHaveTextContent("Rule 0.90");
+    expect(screen.getByRole("article")).toHaveTextContent("AI 0.60");
+    unmount();
+
+    renderCard(makeEvent({ ml_summary: null }));
+    expect(screen.getByRole("article")).toHaveTextContent("Rule 0.90");
+    expect(screen.getByRole("article")).toHaveTextContent("AI -");
+  });
+
+  it("keeps the existing Rule | AI row for the other modes", () => {
+    renderCard(makeEvent({ ml_summary: { available: true, model_score: 0.9, mode: "shadow" } }));
+    expect(screen.getByText("Rule 0.90")).toBeInTheDocument();
+    expect(screen.getByText("AI 0.90")).toBeInTheDocument();
+  });
+});

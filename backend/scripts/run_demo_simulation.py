@@ -52,7 +52,8 @@ from src.simulation import (
     simulation_event_timestamp,
 )
 from src.simulation import SimulationFireSpreadCoordinator, SimulationFireSpreadResult
-from src.simulation.demo_state_reset_service import DemoStateResetDisabledError, DemoStateResetService
+from src.simulation.demo_run_preparation import DemoResetRequiredError, prepare_clean_demo_state
+from src.simulation.demo_state_reset_service import DemoStateResetDisabledError
 from src.simulation.demo_simulation_runner import (
     DemoSimulationEventPhase,
     DemoSimulationEventProgress,
@@ -135,15 +136,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Automatic-mode polling interval in seconds. "
             f"Default: {DEFAULT_POLL_INTERVAL_SECONDS}."
-        ),
-    )
-    parser.add_argument(
-        "--reset-demo-state",
-        action="store_true",
-        help=(
-            "DESTRUCTIVE: reset runtime demo state via DemoStateResetService before "
-            "running (see scripts/reset_demo_state.py). Requires ENABLE_DEMO_DATA_RESET=true; "
-            "intended only for a dedicated demo database, never the shared team database."
         ),
     )
     args = parser.parse_args(argv)
@@ -756,17 +748,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Database configuration error: {exc}", file=sys.stderr)
         return 2
 
-    if args.reset_demo_state:
-        try:
-            reset_result = DemoStateResetService().reset_demo_state()
-        except DemoStateResetDisabledError as exc:
-            print(f"Refused: {exc}", file=sys.stderr)
-            return 2
-        print("Demo state reset before run:")
-        for table_name, count in reset_result.deleted_counts.items():
-            print(f"- {table_name}: {count}")
-        print(f"Resources restored to AVAILABLE: {reset_result.resources_restored}")
-        print("")
+    # Task 9A: the runtime reset is MANDATORY for every demo run (there is no opt-out flag any more), so a run can
+    # never inherit the previous run's FireEvents / evidence / event history. Fail closed before any event runs.
+    try:
+        reset_result = prepare_clean_demo_state()
+    except (DemoResetRequiredError, DemoStateResetDisabledError) as exc:
+        print(f"Refused: {exc}", file=sys.stderr)
+        return 2
+    print("Demo state reset before run:")
+    for table_name, count in reset_result.deleted_counts.items():
+        print(f"- {table_name}: {count}")
+    print(f"Resources restored to AVAILABLE: {reset_result.resources_restored}")
+    print("")
 
     mode = SimulationMode(args.mode)
     if mode is SimulationMode.MANUAL:

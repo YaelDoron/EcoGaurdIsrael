@@ -65,24 +65,48 @@ class FireDetectionEvidenceService:
     ) -> tuple[FireDetectionEvidence, ...]:
         """Reload persisted evidence refs and normalize them for calculation."""
         normalized_refs = self._normalize_refs(refs)
+        for ref in normalized_refs:
+            if ref.evidence_type not in (FireEvidenceType.SATELLITE, FireEvidenceType.NEWS):
+                raise ValueError(f"Unsupported evidence type: {ref.evidence_type!r}.")
+        # Task 9C: one query per evidence family instead of one per ref (an event history can hold dozens of refs; on a remote
+        # database the per-ref round trips dominated the detection cycle). Semantics are unchanged: a missing ref still raises
+        # ValueError, and repositories without a batch method (test doubles) fall back to per-ref lookups.
+        satellite_by_id = self._batch_lookup(
+            self._satellite_repository, "get_by_ids", "get_by_id",
+            [ref.evidence_id for ref in normalized_refs if ref.evidence_type is FireEvidenceType.SATELLITE], lambda stored: stored.id)
+        news_by_id = self._batch_lookup(
+            self._news_repository, "get_by_ids", "get_by_id",
+            [ref.evidence_id for ref in normalized_refs if ref.evidence_type is FireEvidenceType.NEWS], lambda stored: stored.id)
         evidence: list[FireDetectionEvidence] = []
         for ref in normalized_refs:
             if ref.evidence_type is FireEvidenceType.SATELLITE:
-                stored_hotspot = self._satellite_repository.get_by_id(ref.evidence_id)
+                stored_hotspot = satellite_by_id.get(ref.evidence_id)
                 if stored_hotspot is None:
                     raise ValueError(f"Satellite evidence ref was not found: {ref.evidence_id!r}.")
                 normalized = self._normalize_satellite(stored_hotspot)
-            elif ref.evidence_type is FireEvidenceType.NEWS:
-                stored_report = self._news_repository.get_by_id(ref.evidence_id)
+            else:
+                stored_report = news_by_id.get(ref.evidence_id)
                 if stored_report is None:
                     raise ValueError(f"News evidence ref was not found: {ref.evidence_id!r}.")
                 normalized = self._normalize_news(stored_report)
-            else:
-                raise ValueError(f"Unsupported evidence type: {ref.evidence_type!r}.")
             if normalized is None:
                 raise ValueError(f"Evidence ref could not be normalized: {ref!r}.")
             evidence.append(normalized)
         return tuple(sorted(evidence, key=self._evidence_sort_key))
+
+    @staticmethod
+    def _batch_lookup(repository, batch_method: str, single_method: str, ids: list[int], key) -> dict:
+        if not ids:
+            return {}
+        batch = getattr(repository, batch_method, None)
+        if batch is not None:
+            return {key(stored): stored for stored in batch(tuple(ids))}
+        found = {}
+        for evidence_id in ids:
+            stored = getattr(repository, single_method)(evidence_id)
+            if stored is not None:
+                found[evidence_id] = stored
+        return found
 
     def _load_evidence(self, as_of: datetime) -> dict[tuple[FireEvidenceType, int], FireDetectionEvidence]:
         evidence_by_identity: dict[tuple[FireEvidenceType, int], FireDetectionEvidence] = {}
@@ -137,6 +161,8 @@ class FireDetectionEvidenceService:
                 satellite_frp=stored_hotspot.hotspot.frp,
                 satellite_brightness=stored_hotspot.hotspot.brightness,
                 satellite_day_night=stored_hotspot.hotspot.day_night,
+                satellite_name=stored_hotspot.hotspot.satellite,
+                satellite_instrument=stored_hotspot.hotspot.instrument,
             )
         except ValueError as exc:
             logger.info("Skipping invalid satellite hotspot %s: %s", stored_hotspot.id, exc)

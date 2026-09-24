@@ -1,0 +1,469 @@
+{
+  "dataset": "training_v4.csv",
+  "violations": [],
+  "basic": {
+    "rows": 9000,
+    "positive_rows": 4500,
+    "negative_rows": 4500,
+    "positive_percent": 50.0,
+    "scenario_families": 20,
+    "rows_per_family": {
+      "N10_repeated_reports_of_same_false_alarm": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "news_led"
+      },
+      "N1_extreme_danger_no_fire": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "satellite_only"
+      },
+      "N2_high_danger_no_fire_rumor": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "news_led"
+      },
+      "N3_isolated_low_confidence_hotspot_noise": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "satellite_only"
+      },
+      "N4_false_or_weak_news_report": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "news_led"
+      },
+      "N5_satellite_plus_unrelated_news": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "satellite_news"
+      },
+      "N6_multiple_weak_pieces_no_incident": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "multi_satellite"
+      },
+      "N7_no_fire_missing_fire_danger": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "satellite_news"
+      },
+      "N8_realistic_strong_looking_false_positive": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "satellite_news"
+      },
+      "N9_persistent_non_wildfire_heat_source": {
+        "rows": 450,
+        "label": 0,
+        "archetype": "multi_satellite"
+      },
+      "P10_fire_news_led_multiple_reports": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "news_led"
+      },
+      "P1_strong_satellite_strong_news_high_danger": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_news"
+      },
+      "P2_satellite_only_fire": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_only"
+      },
+      "P3_news_first_satellite_later": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "news_led"
+      },
+      "P4_fire_moderate_danger": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_news"
+      },
+      "P5_fire_low_ffwi_despite_ignition": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_news"
+      },
+      "P6_fire_missing_fire_danger": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_news"
+      },
+      "P7_fire_weak_satellite_measurements": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "satellite_only"
+      },
+      "P8_fire_evidence_spread_over_time": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "multi_satellite"
+      },
+      "P9_fire_persistent_multi_satellite": {
+        "rows": 450,
+        "label": 1,
+        "archetype": "multi_satellite"
+      }
+    },
+    "archetype_label_counts": {
+      "multi_satellite": {
+        "fire": 900,
+        "no_fire": 900
+      },
+      "news_led": {
+        "fire": 900,
+        "no_fire": 1350
+      },
+      "satellite_news": {
+        "fire": 1800,
+        "no_fire": 1350
+      },
+      "satellite_only": {
+        "fire": 900,
+        "no_fire": 900
+      }
+    }
+  },
+  "missingness": {
+    "fire_danger_unavailable_rate": 0.18911111111111112,
+    "fire_danger_unavailable_rate_by_label": {
+      "no_fire": 0.18266666666666667,
+      "fire": 0.19555555555555557
+    },
+    "rows_with_satellite": 7503,
+    "frp_missing_rate_among_satellite_rows": 0.12741570038651207,
+    "brightness_missing_rate_among_satellite_rows": 0.1250166600026656,
+    "rows_with_news": 6368,
+    "news_analysis_unavailable_rate_among_news_rows": 0.02858040201005025
+  },
+  "fire_danger_band_by_label": {
+    "low": {
+      "no_fire": 1010,
+      "fire": 655,
+      "total": 1665,
+      "fire_share": 0.3933933933933934
+    },
+    "moderate": {
+      "no_fire": 788,
+      "fire": 948,
+      "total": 1736,
+      "fire_share": 0.5460829493087558
+    },
+    "high": {
+      "no_fire": 293,
+      "fire": 324,
+      "total": 617,
+      "fire_share": 0.5251215559157212
+    },
+    "very_high": {
+      "no_fire": 780,
+      "fire": 820,
+      "total": 1600,
+      "fire_share": 0.5125
+    },
+    "extreme": {
+      "no_fire": 807,
+      "fire": 873,
+      "total": 1680,
+      "fire_share": 0.5196428571428572
+    },
+    "missing": {
+      "no_fire": 822,
+      "fire": 880,
+      "total": 1702,
+      "fire_share": 0.5170387779083431
+    }
+  },
+  "univariate_feature_diagnostics": [
+    {
+      "feature": "satellite_frp_max",
+      "rows_present": 9000,
+      "mean_no_fire": 28.243773333333333,
+      "mean_fire": 55.39813333333333,
+      "pearson_r": 0.35349195779888387,
+      "univariate_auc": 0.6910542716049383,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_frp_mean",
+      "rows_present": 9000,
+      "mean_no_fire": 26.802105703703702,
+      "mean_fire": 51.73194555555555,
+      "pearson_r": 0.34264252749959867,
+      "univariate_auc": 0.6858962962962962,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_brightness_max",
+      "rows_present": 9000,
+      "mean_no_fire": 210.2643711111111,
+      "mean_fire": 281.4690111111111,
+      "pearson_r": 0.23518886136813238,
+      "univariate_auc": 0.6715369135802468,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_brightness_mean",
+      "rows_present": 9000,
+      "mean_no_fire": 208.81387385185184,
+      "mean_fire": 278.46315077777774,
+      "pearson_r": 0.2322813132394897,
+      "univariate_auc": 0.6660799012345678,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "news_none_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.3668888888888889,
+      "mean_fire": 0.036222222222222225,
+      "pearson_r": -0.36904330596926016,
+      "univariate_auc": 0.6474361728395062,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_high_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.31422222222222224,
+      "mean_fire": 0.726,
+      "pearson_r": 0.26976819653683287,
+      "univariate_auc": 0.6385581728395062,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_brightness_available_ratio",
+      "rows_present": 9000,
+      "mean_no_fire": 0.5237740740740742,
+      "mean_fire": 0.7122185185185185,
+      "pearson_r": 0.2238386475967666,
+      "univariate_auc": 0.6188286666666667,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_frp_available_ratio",
+      "rows_present": 9000,
+      "mean_no_fire": 0.5232481481481481,
+      "mean_fire": 0.7073259259259259,
+      "pearson_r": 0.2185207566939596,
+      "univariate_auc": 0.6152227654320988,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "news_strong_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.122,
+      "mean_fire": 0.35977777777777775,
+      "pearson_r": 0.2299519066985128,
+      "univariate_auc": 0.5944129629629629,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "news_weak_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.4726666666666667,
+      "mean_fire": 0.26511111111111113,
+      "pearson_r": -0.17078179494139079,
+      "univariate_auc": 0.5836757777777779,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_nominal_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.6973333333333334,
+      "mean_fire": 0.8913333333333333,
+      "pearson_r": 0.10962562571360616,
+      "univariate_auc": 0.5738642962962962,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "satellite_low_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.5895555555555556,
+      "mean_fire": 0.33511111111111114,
+      "pearson_r": -0.1649899088212166,
+      "univariate_auc": 0.5610277283950618,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "fire_danger_score",
+      "rows_present": 7298,
+      "mean_no_fire": 33.27113643284394,
+      "mean_fire": 35.93914701657459,
+      "pearson_r": 0.059860634622358695,
+      "univariate_auc": 0.536691737342238,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "news_moderate_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.272,
+      "mean_fire": 0.37333333333333335,
+      "pearson_r": 0.0886334894824435,
+      "univariate_auc": 0.5353624444444445,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "max_pairwise_distance_km",
+      "rows_present": 9000,
+      "mean_no_fire": 1.1033157972094962,
+      "mean_fire": 1.2216533079770278,
+      "pearson_r": 0.06407486190794273,
+      "univariate_auc": 0.5308739506172839,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "time_span_minutes",
+      "rows_present": 9000,
+      "mean_no_fire": 11.047460400622223,
+      "mean_fire": 12.416437755977777,
+      "pearson_r": 0.0602711212573855,
+      "univariate_auc": 0.5293128641975309,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "news_unknown_count",
+      "rows_present": 9000,
+      "mean_no_fire": 0.07622222222222222,
+      "mean_fire": 0.05311111111111111,
+      "pearson_r": -0.045902467473417426,
+      "univariate_auc": 0.5116427901234568,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "fire_danger_available",
+      "rows_present": 9000,
+      "mean_no_fire": 0.8173333333333334,
+      "mean_fire": 0.8044444444444444,
+      "pearson_r": -0.016456833914333,
+      "univariate_auc": 0.5064444444444445,
+      "suspicious_shortcut": false
+    },
+    {
+      "feature": "fire_danger_age_minutes",
+      "rows_present": 7298,
+      "mean_no_fire": 29.951647634584013,
+      "mean_fire": 30.18359392265193,
+      "pearson_r": 0.006687261015204819,
+      "univariate_auc": 0.5038986853292234,
+      "suspicious_shortcut": false
+    }
+  ],
+  "shape_and_difficulty": {
+    "hard_negative_fraction_of_negatives": 0.7437777777777778,
+    "weak_positive_fraction_of_positives": 0.236,
+    "single_item_candidate_fire_share": 0.5181818181818182,
+    "candidates_over_3km_fire_share": 0.6151832460732984
+  },
+  "time_of_day_fire_share": {
+    "00-03h": {
+      "rows": 1483,
+      "fire_share": 0.49763991908294
+    },
+    "04-07h": {
+      "rows": 1472,
+      "fire_share": 0.5088315217391305
+    },
+    "08-11h": {
+      "rows": 1530,
+      "fire_share": 0.5098039215686274
+    },
+    "12-15h": {
+      "rows": 1520,
+      "fire_share": 0.48092105263157897
+    },
+    "16-19h": {
+      "rows": 1498,
+      "fire_share": 0.5040053404539386
+    },
+    "20-23h": {
+      "rows": 1497,
+      "fire_share": 0.49899799599198397
+    }
+  },
+  "duplicates": {
+    "rows": 9000,
+    "unique_feature_rows": 8954,
+    "duplicate_rows": 46,
+    "duplicate_rate": 0.005111111111111111,
+    "vectors_with_both_labels": 4
+  },
+  "grouped_evaluation": {
+    "family_folds_5": {
+      "0": {
+        "families": [
+          "N10_repeated_reports_of_same_false_alarm",
+          "N5_satellite_plus_unrelated_news",
+          "P10_fire_news_led_multiple_reports",
+          "P5_fire_low_ffwi_despite_ignition"
+        ],
+        "fire_rows": 900,
+        "no_fire_rows": 900
+      },
+      "1": {
+        "families": [
+          "N1_extreme_danger_no_fire",
+          "N6_multiple_weak_pieces_no_incident",
+          "P1_strong_satellite_strong_news_high_danger",
+          "P6_fire_missing_fire_danger"
+        ],
+        "fire_rows": 900,
+        "no_fire_rows": 900
+      },
+      "2": {
+        "families": [
+          "N2_high_danger_no_fire_rumor",
+          "N7_no_fire_missing_fire_danger",
+          "P2_satellite_only_fire",
+          "P7_fire_weak_satellite_measurements"
+        ],
+        "fire_rows": 900,
+        "no_fire_rows": 900
+      },
+      "3": {
+        "families": [
+          "N3_isolated_low_confidence_hotspot_noise",
+          "N8_realistic_strong_looking_false_positive",
+          "P3_news_first_satellite_later",
+          "P8_fire_evidence_spread_over_time"
+        ],
+        "fire_rows": 900,
+        "no_fire_rows": 900
+      },
+      "4": {
+        "families": [
+          "N4_false_or_weak_news_report",
+          "N9_persistent_non_wildfire_heat_source",
+          "P4_fire_moderate_danger",
+          "P9_fire_persistent_multi_satellite"
+        ],
+        "fire_rows": 900,
+        "no_fire_rows": 900
+      }
+    },
+    "leave_one_archetype_out": {
+      "multi_satellite": {
+        "train_rows": 7200,
+        "validation_rows": 1800,
+        "validation_fire_rows": 900
+      },
+      "news_led": {
+        "train_rows": 6750,
+        "validation_rows": 2250,
+        "validation_fire_rows": 900
+      },
+      "satellite_news": {
+        "train_rows": 5850,
+        "validation_rows": 3150,
+        "validation_fire_rows": 1800
+      },
+      "satellite_only": {
+        "train_rows": 7200,
+        "validation_rows": 1800,
+        "validation_fire_rows": 900
+      }
+    }
+  }
+}

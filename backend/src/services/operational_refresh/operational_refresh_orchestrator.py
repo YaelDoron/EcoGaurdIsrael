@@ -6,7 +6,11 @@ import logging
 
 from src.agents.analysis.response_target_generation_agent import ResponseTargetGenerationAgent
 from src.agents.analysis.response_target_generation_result import ResponseTargetGenerationStatus
-from src.models.fire_event_status import FireEventStatus
+from src.models.fire_event_response_eligibility import (
+    RESPONSE_ELIGIBLE_STATUSES,
+    is_active_for_monitoring,
+    is_response_eligible,
+)
 from src.models.firefighting_resource import FirefightingResource
 from src.models.operational_refresh_trigger_type import OperationalRefreshTriggerType
 from src.models.resource_status import ResourceStatus
@@ -34,7 +38,8 @@ _ENVIRONMENTAL_TRIGGER_TYPES = frozenset(
         OperationalRefreshTriggerType.SEVERITY_UPDATE,
     }
 )
-_ACTIVE_FIRE_EVENT_STATUSES = frozenset({FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED})
+# Task 9A: only response-eligible (CONFIRMED) events run the severity -> spread -> targets chain.
+_ACTIVE_FIRE_EVENT_STATUSES = RESPONSE_ELIGIBLE_STATUSES
 
 
 class OperationalRefreshOrchestrator:
@@ -78,6 +83,23 @@ class OperationalRefreshOrchestrator:
         """
         self._validate_fire_event_request(fire_event_id, trigger_type, as_of)
         stored_event = self._fire_event_repository.get_by_id(fire_event_id)
+
+        # Task 9A - THE orchestration boundary for emergency-response work. An event that is active for monitoring
+        # but not response-eligible (SUSPECTED) stays persisted and visible, and keeps collecting evidence, but must
+        # not run severity, spread or response-target generation (nor, downstream, routing / allocation / planning).
+        # Inactive events (RESOLVED / DISMISSED) keep their existing handling below.
+        if (
+            stored_event is not None
+            and is_active_for_monitoring(stored_event.event.status)
+            and not is_response_eligible(stored_event.event.status)
+        ):
+            return OperationalRefreshResult(
+                trigger_type=trigger_type,
+                status=OperationalRefreshStatus.NOT_RESPONSE_ELIGIBLE,
+                success=True,
+                fire_event_id=fire_event_id,
+                as_of=as_of,
+            )
 
         severity_result = None
         try:
@@ -236,6 +258,8 @@ class OperationalRefreshOrchestrator:
     ) -> OperationalRefreshStatus:
         if target_status is ResponseTargetGenerationStatus.INACTIVE_EVENT:
             return OperationalRefreshStatus.INACTIVE_EVENT
+        if target_status is ResponseTargetGenerationStatus.NOT_RESPONSE_ELIGIBLE:
+            return OperationalRefreshStatus.NOT_RESPONSE_ELIGIBLE
         if spread_result.horizon_results and all(
             result.status is FireSpreadRefreshHorizonStatus.NO_OP
             for result in spread_result.horizon_results

@@ -176,7 +176,17 @@ def test_ml_summary_available_serializes_correctly():
     body = client.get(ENDPOINT).json()
 
     ml_summary = body["items"][0]["ml_summary"]
-    assert ml_summary == {"available": True, "model_score": 0.9933510680894274}
+    assert ml_summary == {"available": True, "model_score": 0.9933510680894274, "mode": None}
+
+
+def test_ml_summary_carries_the_decision_mode_when_present():
+    event = make_event(ml_summary=ActiveFireEventMLSummary(available=True, model_score=0.53, mode="ai_hybrid_v5"))
+    result = ActiveFireEventsResult(as_of=AS_OF, items=(event,))
+    client = client_for(FakeActiveFireEventsService(result))
+
+    body = client.get(ENDPOINT).json()
+
+    assert body["items"][0]["ml_summary"] == {"available": True, "model_score": 0.53, "mode": "ai_hybrid_v5"}
 
 
 def test_ml_summary_missing_serializes_as_null():

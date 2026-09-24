@@ -101,11 +101,16 @@ def test_start_run_executes_in_background_and_becomes_pollable_to_completion(mon
     monkeypatch.setattr(
         _settings_module,
         "settings",
-        SimpleNamespace(ENABLE_SIMULATION_CONTROL_API=True, ENABLE_DEMO_DATA_RESET=False),
+        SimpleNamespace(ENABLE_SIMULATION_CONTROL_API=True, ENABLE_DEMO_DATA_RESET=True),
     )
+
+    class NoopReset:  # the mandatory reset (Task 9A) must not touch a real database in this test
+        def reset_demo_state(self):
+            return None
 
     manager = SimulationRunManager(
         runner_factory=InstantFakeRunner,
+        reset_service_factory=NoopReset,
         executor=ThreadPoolExecutor(max_workers=1, thread_name_prefix="test-simulation-run"),
     )
     app = create_app()
@@ -114,7 +119,7 @@ def test_start_run_executes_in_background_and_becomes_pollable_to_completion(mon
 
     start_response = client.post(
         "/api/v1/simulation/runs",
-        json={"preset": "operations_demo", "seed": 7, "reset_demo_state": False},
+        json={"preset": "operations_demo", "seed": 7},
     )
 
     # POST returns immediately - it never blocks on the runner, so the

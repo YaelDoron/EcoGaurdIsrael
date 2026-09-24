@@ -205,6 +205,11 @@ class EventDetailsService:
             feature_schema_version=assessment.ml_feature_schema_version,
             failure_reason=_sanitize_ml_failure_reason(assessment.ml_failure_reason),
             updated_at=assessment.updated_at,
+            policy_version=assessment.policy_version,
+            policy_status=assessment.policy_status,
+            history_available=assessment.history_available,
+            satellite_pass_count=assessment.satellite_pass_count,
+            current_satellite_pixel_count=assessment.current_satellite_pixel_count,
         )
 
     def _load_detection_evidence(self, supporting_evidence) -> DetectionEvidenceResponse:  # noqa: ANN001

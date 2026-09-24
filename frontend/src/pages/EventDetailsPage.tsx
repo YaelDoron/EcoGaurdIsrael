@@ -16,6 +16,14 @@ import { ResponseTargetLayer } from "../components/map/ResponseTargetLayer";
 import { SpreadLayer } from "../components/map/SpreadLayer";
 import { StationLayer } from "../components/map/StationLayer";
 import { translateIfUntranslated } from "../components/map/stationTranslations";
+import {
+  AI_LIKELIHOOD_HELP_TEXT,
+  SUSPECTED_MONITORING_LABEL,
+  aiAssessmentFacts,
+  formatLikelihood,
+  peakAiLikelihood,
+  statusHelpText,
+} from "../components/status/fireDetectionPresentation";
 import type { LatLngPoint, LayerToggle, LayerVisibility } from "../components/map/mapTypes";
 import { SeverityBadge } from "../components/status/SeverityBadge";
 import { StatusBadge } from "../components/status/StatusBadge";
@@ -44,10 +52,11 @@ const DANGER_LEVEL_LABEL: Record<NonNullable<DangerAssessment["level"]>, string>
   extreme: "Extreme",
 };
 
-// ml_assessment.model_score is a model-estimated score from the
-// synthetic-trained Logistic Regression V3 classifier, not a calibrated
-// real-world probability of wildfire occurrence - see
-// backend/docs/fire_detection_runtime_ml.md, "Probability interpretation".
+// ml_assessment.model_score is a model-estimated score from a
+// synthetic-trained classifier, not a calibrated real-world probability of
+// wildfire occurrence - see backend/docs/fire_detection_runtime_ml.md,
+// "Probability interpretation". In the AI Hybrid mode it is shown as "Fire
+// likelihood" (never "certainty").
 const AI_MODEL_SCORE_HELP_TEXT = "Experimental score produced by the Fire Detection ML model.";
 const AI_MODEL_SCORE_UNAVAILABLE_LABEL = "Unavailable";
 
@@ -300,7 +309,16 @@ export function EventDetailsPage() {
   // event (suspected/confirmed) with no plan YET is "pending" - the button
   // stays visible in a disabled/loading state rather than disappearing, so it
   // doesn't look like it never renders on a page the operator just opened.
-  const isPlanStatusPending = fireEvent.status === "suspected" || fireEvent.status === "confirmed";
+  // Final semantics (Task 9A/9C): only a CONFIRMED event is response eligible, so only CONFIRMED can be "pending". A SUSPECTED event
+  // with no plan is being MONITORED for more evidence - it must never read as if a plan were being computed.
+  const isPlanStatusPending = fireEvent.status === "confirmed";
+  const isMonitoringOnly = fireEvent.status === "suspected" && !currentPlan;
+  const aiFacts = aiAssessmentFacts(mlAssessment);
+  const isAiMode = aiFacts !== null;
+  // Peak = the highest AI likelihood the event has reached (FireEvent.detection_confidence for AI-created events). It can be higher
+  // than the latest assessment, e.g. an event confirmed at 87% whose later assessment is 79% stays CONFIRMED.
+  const peakLikelihood = peakAiLikelihood(fireEvent.methodology, fireEvent.detection_confidence);
+  const helpText = statusHelpText(fireEvent.status, mlAssessment?.mode);
 
   return (
     <section className="event-details-page">
@@ -364,6 +382,10 @@ export function EventDetailsPage() {
                   <ClipboardIcon />
                   No Resources Available
                 </Link>
+              ) : isMonitoringOnly ? (
+                <span className="event-details-page__monitoring" data-testid="monitoring-state">
+                  {SUSPECTED_MONITORING_LABEL}
+                </span>
               ) : isPlanStatusPending ? (
                 <span
                   className="event-details-page__action event-details-page__action--primary event-details-page__action--pending"
@@ -393,17 +415,41 @@ export function EventDetailsPage() {
                   <TimestampDisplay value={fireEvent.detected_at} />
                 </dd>
               </div>
-              <div className="event-details-page__fact">
-                <dt>Rule Score</dt>
-                <dd>{ruleScore}</dd>
-              </div>
-              {mlAssessment ? (
-                <div className="event-details-page__fact">
-                  <dt title={AI_MODEL_SCORE_HELP_TEXT}>AI Model Score</dt>
-                  <dd>{aiModelScore}</dd>
-                </div>
-              ) : null}
+              {isAiMode ? (
+                <>
+                  <div className="event-details-page__fact">
+                    <dt title={AI_LIKELIHOOD_HELP_TEXT}>Latest AI likelihood</dt>
+                    <dd>{aiFacts.latestLikelihood}</dd>
+                  </div>
+                  {peakLikelihood !== null ? (
+                    <div className="event-details-page__fact">
+                      <dt title="The highest AI likelihood this event has reached. The event keeps its status if a later assessment is lower.">
+                        Peak AI likelihood
+                      </dt>
+                      <dd>{formatLikelihood(peakLikelihood)}</dd>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <div className="event-details-page__fact">
+                    <dt>Rule Score</dt>
+                    <dd>{ruleScore}</dd>
+                  </div>
+                  {mlAssessment ? (
+                    <div className="event-details-page__fact">
+                      <dt title={AI_MODEL_SCORE_HELP_TEXT}>AI Model Score</dt>
+                      <dd>{aiModelScore}</dd>
+                    </div>
+                  ) : null}
+                </>
+              )}
             </dl>
+            {helpText ? (
+              <p className="event-details-page__note event-details-page__status-help" data-testid="status-help">
+                {helpText}
+              </p>
+            ) : null}
           </section>
 
           <section aria-labelledby="assessments-heading" className="event-details-page__section">
@@ -440,6 +486,40 @@ export function EventDetailsPage() {
               ) : null}
             </dl>
           </section>
+
+          {aiFacts ? (
+            <section aria-labelledby="ai-assessment-heading" className="event-details-page__section">
+              <h2 id="ai-assessment-heading" className="event-details-page__section-title">
+                AI Assessment
+              </h2>
+              <dl className="event-details-page__facts">
+                <div className="event-details-page__fact">
+                  <dt>Detection mode</dt>
+                  <dd>{aiFacts.detectionMode}</dd>
+                </div>
+                {aiFacts.policyVerdict ? (
+                  <div className="event-details-page__fact">
+                    <dt>Latest AI verdict</dt>
+                    <dd>{aiFacts.policyVerdict}</dd>
+                  </div>
+                ) : null}
+                {aiFacts.satellitePassCount !== null ? (
+                  <div className="event-details-page__fact">
+                    <dt>Satellite passes</dt>
+                    <dd>{aiFacts.satellitePassCount}</dd>
+                  </div>
+                ) : null}
+                {aiFacts.currentSatellitePixelCount !== null ? (
+                  <div className="event-details-page__fact">
+                    <dt>Current satellite pixels</dt>
+                    <dd>{aiFacts.currentSatellitePixelCount}</dd>
+                  </div>
+                ) : null}
+                {/* Operator view only: history flag, model and policy names are implementation details. The API still returns
+                    them (and the types keep them) for diagnostics; the likelihoods live in the Fire Event card above. */}
+              </dl>
+            </section>
+          ) : null}
 
           <div className="event-details-page__pair">
             <section aria-labelledby="detection-evidence-heading" className="event-details-page__section">

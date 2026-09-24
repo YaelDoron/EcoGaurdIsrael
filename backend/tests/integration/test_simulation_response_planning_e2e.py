@@ -43,6 +43,8 @@ from datetime import datetime, timedelta, timezone
 from src.agents.analysis import FireDetectionAgent, FireSeverityAssessmentAgent, ResponseTargetGenerationAgent
 from src.agents.analysis.fire_spread_prediction_agent import FireSpreadPredictionAgent
 from src.calculators.fire_detection.fire_detection_calculator import FireDetectionCalculator
+from src.calculators.fire_detection.fire_detection_decision_policy import FireDetectionHybridPolicy
+from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
 from src.calculators.fire_severity.fire_severity_calculator import FireSeverityCalculator
 from src.calculators.fire_spread import FireSpreadCalculator
 from src.calculators.response_target import ResponseTargetCalculator
@@ -173,14 +175,23 @@ def seed_station_and_road_network(
 class RealSimulationStack:
     """Bundles the real production simulation + Epic 4/5 components for one SQLite DB."""
 
-    def __init__(self, session_factory) -> None:
+    def __init__(self, session_factory, *, detection_agent_kwargs: dict | None = None, executor=None) -> None:
+        # Task 9C: `detection_agent_kwargs` lets a test choose the FireDetectionAgent mode (e.g. decision_mode for ai_hybrid_v5);
+        # `executor` lets the AI acceptance scenario supply its own evidence source. The default pins SHADOW (rule-decided status,
+        # the project's default mode) explicitly, so these tests never depend on FIRE_DETECTION_DECISION_MODE in the environment.
+        if detection_agent_kwargs is None:
+            detection_agent_kwargs = {"decision_policy": FireDetectionHybridPolicy(mode=FireDetectionDecisionMode.SHADOW)}
         self.session_factory = session_factory
         self.fire_event_repository = FireEventRepository(session_factory)
+        self.severity_repository = None
         satellite_repository = SatelliteHotspotRepository(session_factory)
         news_repository = NewsRepository(session_factory)
         weather_repository = WeatherRepository(session_factory)
 
-        self.executor = SimulationEventExecutor(
+        self.satellite_repository = satellite_repository
+        self.news_repository = news_repository
+        self.weather_repository = weather_repository
+        self.executor = executor or SimulationEventExecutor(
             weather_repository=weather_repository,
             satellite_repository=satellite_repository,
             news_repository=news_repository,
@@ -194,8 +205,12 @@ class RealSimulationStack:
             fire_event_repository=self.fire_event_repository,
             satellite_repository=satellite_repository,
             news_repository=news_repository,
+            **(detection_agent_kwargs or {}),
         )
-        self.fire_detection_coordinator = SimulationFireDetectionCoordinator(detection_agent=detection_agent)
+        self.detection_agent = detection_agent
+        self.fire_detection_coordinator = SimulationFireDetectionCoordinator(
+            detection_agent=detection_agent, fire_event_repository=self.fire_event_repository
+        )
 
         severity_repository = FireSeverityAssessmentRepository(session_factory)
         severity_input_service = FireSeverityInputService(
@@ -210,7 +225,7 @@ class RealSimulationStack:
             calculator=FireSeverityCalculator(),
             repository=severity_repository,
         )
-        severity_refresh_orchestrator = FireSeverityRefreshOrchestrator(
+        severity_refresh_orchestrator = self.severity_refresh_orchestrator = FireSeverityRefreshOrchestrator(
             input_service=severity_input_service,
             assessment_agent=severity_agent,
             assessment_repository=severity_repository,
@@ -227,14 +242,14 @@ class RealSimulationStack:
             calculator=FireSpreadCalculator(),
             repository=self.spread_prediction_repository,
         )
-        spread_refresh_orchestrator = FireSpreadRefreshOrchestrator(
+        spread_refresh_orchestrator = self.spread_refresh_orchestrator = FireSpreadRefreshOrchestrator(
             input_service=spread_input_service,
             prediction_agent=spread_agent,
             prediction_repository=self.spread_prediction_repository,
         )
 
         self.response_target_repository = ResponseTargetRepository(session_factory)
-        response_target_agent = ResponseTargetGenerationAgent(
+        response_target_agent = self.response_target_agent = ResponseTargetGenerationAgent(
             input_service=ResponseTargetInputService(
                 fire_event_repository=self.fire_event_repository,
                 fire_severity_assessment_repository=severity_repository,
@@ -245,7 +260,7 @@ class RealSimulationStack:
         )
 
         self.resource_repository = FirefightingResourceRepository(session_factory)
-        operational_refresh_orchestrator = OperationalRefreshOrchestrator(
+        operational_refresh_orchestrator = self.operational_refresh_orchestrator = OperationalRefreshOrchestrator(
             severity_refresh_orchestrator=severity_refresh_orchestrator,
             spread_refresh_orchestrator=spread_refresh_orchestrator,
             response_target_agent=response_target_agent,
@@ -347,6 +362,8 @@ def test_active_fire_simulation_reaches_a_persisted_response_plan(sqlite_session
     fire_event_ids = _all_fire_event_ids(stack)
     assert fire_event_ids, "the simulation path must have created a FireEvent through real detection"
     fire_event_id = fire_event_ids[0]
+    # Task 9A/9C semantic truth: the response pipeline below ran because satellite + news made the event CONFIRMED.
+    assert stack.fire_event_repository.get_by_id(fire_event_id).event.status.value == "confirmed"
 
     # Severity: at least one VALID assessment was persisted for this event.
     severity_repository = FireSeverityAssessmentRepository(sqlite_session_factory)
@@ -385,6 +402,49 @@ def test_active_fire_simulation_reaches_a_persisted_response_plan(sqlite_session
     assert CARMEL_RESOURCE_ID in stack.route_planning_repository.get_by_id(
         stored_plan.plan.route_planning_run_id
     ).run.resource_ids
+
+
+def _satellite_only(scenario):
+    """The same scenario without its NEWS events: satellite evidence alone can never CONFIRM a FireEvent."""
+    from src.simulation.simulation_scenario import SimulationScenario
+
+    return SimulationScenario(
+        duration_seconds=scenario.duration_seconds,
+        seed=scenario.seed,
+        incidents=scenario.incidents,
+        events=tuple(event for event in scenario.events if event.event_type is not SimulationEventType.NEWS),
+    )
+
+
+def test_satellite_only_evidence_yields_a_suspected_event_and_no_response_plan(sqlite_session_factory):
+    """The old assumption "satellite evidence -> event -> response plan" is gone: a satellite-only event stays SUSPECTED
+    (monitoring, visible) and NOTHING downstream is produced for it - no severity, spread, targets, routing, global plan or
+    commitment. (Contrast with test_active_fire_simulation_reaches_a_persisted_response_plan, where news makes it CONFIRMED.)"""
+    from sqlalchemy import func, select
+
+    from src.database.models.global_planning_run_db import GlobalPlanningRunDB
+    from src.database.models.resource_commitment_db import ResourceCommitmentDB
+    from src.database.models.response_plan_db import ResponsePlanDB
+    from src.database.models.route_planning_run_db import RoutePlanningRunDB
+
+    seed_station_and_road_network(
+        sqlite_session_factory, station_id=CARMEL_STATION_ID, resource_id=CARMEL_RESOURCE_ID,
+        latitude=CARMEL_LOCATION.latitude, longitude=CARMEL_LOCATION.longitude)
+    stack = RealSimulationStack(sqlite_session_factory)
+    scenario = _satellite_only(build_active_fire_scenario(location=CARMEL_LOCATION, seed=42))
+
+    refresh_results = stack.run_scenario(scenario)
+
+    (fire_event_id,) = _all_fire_event_ids(stack)  # the SUSPECTED event is active for monitoring
+    assert stack.fire_event_repository.get_by_id(fire_event_id).event.status.value == "suspected"
+    assert FireSeverityAssessmentRepository(sqlite_session_factory).get_latest_for_event(fire_event_id) is None
+    assert stack.response_target_repository.get_history_for_event(fire_event_id) == ()
+    assert stack.plan_counts(fire_event_id) == {"runs": 0, "plans": 0, "comparisons": 0}
+    with sqlite_session_factory() as session:
+        for model in (GlobalPlanningRunDB, RoutePlanningRunDB, ResponsePlanDB, ResourceCommitmentDB):
+            assert session.execute(select(func.count()).select_from(model)).scalar_one() == 0, model.__tablename__
+    for result in refresh_results:  # only the (weather-triggered / suspected) refreshes that skipped planning are allowed
+        assert result.global_planning_result is None or result.global_planning_result.status is not GlobalPlanningRefreshStatus.ACTIVATED
 
 
 # ---------------------------------------------------------------------------

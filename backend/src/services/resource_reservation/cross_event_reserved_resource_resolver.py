@@ -64,7 +64,7 @@ class CrossEventReservedResourceResolver:
 
         other_active_fire_event_ids = tuple(
             fire_event_id
-            for fire_event_id in self._fire_event_repository.get_active_fire_event_ids()
+            for fire_event_id in self._fire_event_repository.get_response_eligible_fire_event_ids()
             if fire_event_id != excluded_fire_event_id
         )
         if not other_active_fire_event_ids:

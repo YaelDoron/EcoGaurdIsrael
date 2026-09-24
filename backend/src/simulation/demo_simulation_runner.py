@@ -162,7 +162,7 @@ def build_fire_detection_coordinator() -> SimulationFireDetectionCoordinator:
         satellite_repository=satellite_repository,
         news_repository=news_repository,
     )
-    return SimulationFireDetectionCoordinator(detection_agent=agent)
+    return SimulationFireDetectionCoordinator(detection_agent=agent, fire_event_repository=fire_event_repository)
 
 
 def build_operational_coordinator() -> SimulationOperationalCoordinator:
@@ -430,6 +430,7 @@ def execute_simulation_event(
     simulation_refresh_coordinator: SimulationRefreshCoordinator | None = None,
     fire_spread_coordinator_factory: Callable[[], SimulationFireSpreadCoordinator] | None = None,
     response_target_coordinator_factory: Callable[[], SimulationResponseTargetCoordinator] | None = None,
+    activated_fire_event_ids: set[int] | None = None,
 ) -> SimulationEventOutcome:
     """Execute one simulation event through the real production pipeline.
 
@@ -478,11 +479,25 @@ def execute_simulation_event(
             if detection_result is not None and detection_result.success:
                 affected_fire_event_ids.extend(detection_result.event_ids)
             if operational_coordinator is not None:
-                should_scramble = (
-                    detection_result is not None
-                    and detection_result.success
-                    and detection_result.events_created > 0
-                )
+                # Task 9A: the demo "operational load" scramble depletes trucks, i.e. it is response-side work: it
+                # runs when a FireEvent BECOMES response-eligible (created as CONFIRMED, or promoted SUSPECTED ->
+                # CONFIRMED), never for a SUSPECTED event. `activated_fire_event_ids` (owned by the runner, one set
+                # per run) makes it happen once per event; without it the original "new FireEvent created" test is
+                # kept but still requires the event to be response-eligible.
+                eligible_ids = fire_detection_result.response_eligible_event_ids
+                if eligible_ids is None:  # eligibility not determined (no repository wired): original behaviour
+                    became_eligible = detection_result is not None and detection_result.success and detection_result.events_created > 0
+                else:
+                    newly_eligible = [i for i in eligible_ids if activated_fire_event_ids is None or i not in activated_fire_event_ids]
+                    became_eligible = bool(
+                        detection_result is not None
+                        and detection_result.success
+                        and newly_eligible
+                        and (activated_fire_event_ids is not None or detection_result.events_created > 0)
+                    )
+                    if became_eligible and activated_fire_event_ids is not None:
+                        activated_fire_event_ids.update(newly_eligible)
+                should_scramble = became_eligible
                 if should_scramble:
                     operational_context_scrambled = True
                     depleted_resource_count = _scramble_resources_for_new_fire_events(
@@ -732,6 +747,8 @@ class DemoSimulationRunner:
 
         event_summaries: list[DemoSimulationEventSummary] = []
         events_total = len(scenario.events)
+        # Task 9A: FireEvents that already became response-eligible during THIS run (one set per run, never shared).
+        activated_fire_event_ids: set[int] = set()
 
         def handle_event(event: SimulationEvent, event_index: int) -> None:
             if on_progress is not None:
@@ -761,6 +778,7 @@ class DemoSimulationRunner:
                 simulation_refresh_coordinator=self._simulation_refresh_coordinator,
                 fire_spread_coordinator_factory=self._get_fire_spread_coordinator,
                 response_target_coordinator_factory=self._get_response_target_coordinator,
+                activated_fire_event_ids=activated_fire_event_ids,
             )
             result = outcome.execution_result
             event_summaries.append(

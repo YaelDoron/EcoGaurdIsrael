@@ -137,7 +137,7 @@ class NodeMappingService:
         if snap_distance_km > MAX_SNAP_DISTANCE_KM:
             return None
         if snap_distance_km > SNAP_DISTANCE_WARNING_KM:
-            logger.warning(
+            logger.debug(
                 "Snap-distance guard: %s at (%.6f, %.6f) snapped to node %s %.0fm away "
                 "(warning threshold %.0fm) - the road network near its actual coordinate "
                 "may be missing from the fetched graph; the resulting route will start/end "

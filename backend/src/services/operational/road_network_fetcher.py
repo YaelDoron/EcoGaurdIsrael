@@ -47,6 +47,18 @@ NETWORK_TYPE = "drive"
 # real service road that functions as a real connector is now included,
 # but an actual private driveway or parking aisle still is not.
 #
+# Also drops "track" from osmnx's default exclusion list (real incident:
+# Jerusalem Forest fire-access roads are tagged highway=track in OSM -
+# unpaved roads for agricultural/forestry use, which is exactly what a
+# fire truck needs to reach an off-road incident - and were missing
+# entirely from the fetched graph, leaving Dijkstra a straight-line gap
+# to the target instead of a real route). highway=path stays excluded:
+# unlike track, it is OSM's tag for foot/cycle trails, not something a
+# fire truck can drive. Once fetched, these edges need no further special
+# handling - _add_travel_times' fallback speed covers any edge (track
+# included) that has no tagged speed, so Dijkstra can weight and route
+# over them like any other edge.
+#
 # Deliberately NOT the default for every fetch: it costs more data/time to
 # process (more edges to fetch and convert) for a benefit that mostly
 # matters at the edges of an already-covered area, so it is reserved for
@@ -57,7 +69,7 @@ GRAPH_FIDELITY_CUSTOM_FILTER = (
     '["area"!~"yes"]'
     '["access"!~"private"]'
     '["highway"!~"abandoned|bridleway|bus_guideway|construction|corridor|cycleway|elevator|escalator|'
-    'footway|no|path|pedestrian|planned|platform|proposed|raceway|razed|rest_area|steps|track"]'
+    'footway|no|path|pedestrian|planned|platform|proposed|raceway|razed|rest_area|steps"]'
     '["motor_vehicle"!~"no"]'
     '["motorcar"!~"no"]'
     '["service"!~"alley|driveway|emergency_access|parking|parking_aisle|private"]'
@@ -72,7 +84,7 @@ GRAPH_FIDELITY_CUSTOM_FILTER = (
 # activity in between, which is indistinguishable from a hang. This bound
 # makes the fetch's own documented "degrade gracefully on Overpass timeout"
 # contract actually hold for that case too, not just for outright exceptions.
-OSM_FETCH_TIMEOUT_SECONDS = 60.0
+OSM_FETCH_TIMEOUT_SECONDS = 30.0
 
 # Retry (live incident: a station-micro fetch - see
 # GlobalPlanningInputBuilder's Step 4 - observed failing every single cycle
@@ -95,7 +107,7 @@ OSM_FETCH_TIMEOUT_SECONDS = 60.0
 # would only add latency for a certain, unchanging outcome) or any other
 # unexpected exception (a real bug/data problem retries cannot fix).
 # Bounded worst case if every attempt times out: MAX_OSM_FETCH_ATTEMPTS *
-# OSM_FETCH_TIMEOUT_SECONDS plus backoff (~3 * 60s + 1s + 2s = ~183s) for
+# OSM_FETCH_TIMEOUT_SECONDS plus backoff (~3 * 30s + 1s + 2s = ~93s) for
 # ONE bbox - still finite, and this is exactly the same shape as
 # fetch_network_in_bbox's existing never-raises contract: the caller either
 # gets real data or a clean ([], []), just after genuinely trying harder
@@ -223,19 +235,21 @@ class RoadNetworkFetcher:
                 if not is_last_attempt and _is_transient_osm_error(exc):
                     delay_seconds = _OSM_FETCH_RETRY_BASE_DELAY_SECONDS * (2**attempt)
                     logger.warning(
-                        "OSM fetch attempt %d/%d failed transiently for this bbox; retrying in %.1fs.",
+                        "OSM fetch attempt %d/%d failed transiently for this bbox (%s); retrying in %.1fs.",
                         attempt + 1,
                         MAX_OSM_FETCH_ATTEMPTS,
+                        exc,
                         delay_seconds,
-                        exc_info=True,
+                        exc_info=False,
                     )
                     time.sleep(delay_seconds)
                     continue
                 logger.warning(
-                    "No OSM road network could be fetched for the requested bounding box (attempt %d/%d).",
+                    "No OSM road network could be fetched for the requested bounding box (attempt %d/%d): %s",
                     attempt + 1,
                     MAX_OSM_FETCH_ATTEMPTS,
-                    exc_info=True,
+                    exc,
+                    exc_info=False,
                 )
                 return [], []
             else:

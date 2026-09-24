@@ -35,9 +35,24 @@ def _is_transient_llm_error(exc: Exception) -> bool:
         return response is not None and (response.status_code == 429 or response.status_code >= 500)
     return False
 
-# The prompt template for the LLM to extract a location from the article text.
-_LOCATION_PROMPT_TEMPLATE = """\
-You are a news analyst parsing Hebrew news articles to extract a single geographical location (city, settlement, forest, mountain, or region in Israel) where the described wildfire event is taking place.
+# The prompt template for ONE LLM call that returns both the article's location
+# and how strongly its own text claims an active wildfire (see TextProcessor.analyze).
+_ANALYSIS_PROMPT_TEMPLATE = """\
+You are a news analyst reading Hebrew news articles about possible wildfires in Israel.
+
+Judge ONLY the supplied title and summary below. Do not use outside knowledge about real events, and do not assume a wildfire is actually happening just because a wildfire-related word appears in the text.
+
+Task 1 - location: extract a single geographical location (city, settlement, forest, mountain, or region in Israel) where the described event is taking place, if any.
+- Clean Hebrew prepositions from the beginning of the location name (e.g., "בכרמל" -> "כרמל", "ליער ירושלים" -> "יער ירושלים").
+- If no specific location is mentioned, use null.
+
+Task 2 - wildfireSignalStrength: classify how strongly the ARTICLE TEXT ITSELF claims an active wildfire is occurring right now. Use exactly one of these four values:
+- "none": the text does not actually provide meaningful evidence of an active wildfire (e.g. a retrospective article, a fire-prevention article, an unrelated use of a fire-related word, or an explicit report that a suspected fire was false).
+- "weak": possible or indirect evidence only (e.g. smoke reported, a rumor, an unverified social-media report, "suspected" flames).
+- "moderate": the text directly reports an active wildfire, but the information is still preliminary or indirect.
+- "strong": the text explicitly describes an active wildfire with strong evidence, such as visible flames/active burning, a firefighting response, an evacuation due to an active fire, or an explicit official/emergency-service statement within the text.
+
+Distinguish smoke, rumor, or suspicion ("weak") from explicit, current active-fire reporting ("moderate"/"strong"). A retrospective, preventive, or explicitly-false-alarm article is "none" even if it uses wildfire-related words.
 
 Rules:
 - Return ONLY a valid JSON object, with no extra text, no markdown, and no explanations.
@@ -88,7 +103,7 @@ Location name: {location_name}
 
 
 class TextProcessor:
-    """Filters articles by keyword relevance and extracts locations via a fast LLM."""
+    """Filters articles by keyword relevance; analyzes location + wildfire signal strength and translates via an LLM."""
 
     def __init__(self, keywords: list[str], llm_config: dict):
         self.keywords = keywords
@@ -98,7 +113,7 @@ class TextProcessor:
         self.max_tokens = llm_config.get("max_tokens", 100)
         # Translating a title+summary needs far more headroom than the
         # short {"locationName": "..."} extraction reply - a separate
-        # budget so raising it can never silently loosen extract_location's
+        # budget so raising it can never silently loosen analyze's
         # own (deliberately tight) max_tokens.
         self.translation_max_tokens = llm_config.get("translation_max_tokens", 600)
         self.timeout = llm_config.get("request_timeout_seconds", 15)
@@ -147,12 +162,12 @@ class TextProcessor:
         an explicit "analysis unavailable" state. It never fabricates NONE,
         which has the different meaning "analyzed, no signal found".
         """
-        prompt = _ANALYSIS_PROMPT_TEMPLATE.format(title=title, summary=summary)
         try:
+            prompt = _ANALYSIS_PROMPT_TEMPLATE.format(title=title, summary=summary)
             raw_content = self._call_llm(prompt, max_tokens=self.max_tokens)
-            return self._parse_location(raw_content)
+            return self._parse_analysis(raw_content)
         except Exception:
-            logger.exception("LLM structured news analysis failed for title: %r", title[:80])
+            logger.exception("LLM structured news analysis failed for title: %r", str(title)[:80])
             return NewsTextAnalysis(location_name=None, wildfire_signal_strength=None)
 
     def translate_report(self, title: str, summary: str, location_name: str | None) -> tuple[str, str, str | None]:
@@ -217,7 +232,7 @@ class TextProcessor:
         returns the last known-good English translation for this exact
         text if one was ever produced, otherwise the ORIGINAL location_name
         unchanged - the same never-raise, never-block contract as
-        extract_location/translate_report, extended so a transient failure
+        analyze/translate_report, extended so a transient failure
         can never regress an already-correct translation back to the
         source language.
         """
@@ -251,7 +266,7 @@ class TextProcessor:
         provider) raises immediately on the first attempt - only the class
         of error a retry could plausibly fix is ever retried. The final
         attempt's exception always propagates to the caller unchanged (the
-        translate_*/extract_location methods' own try/except is what turns
+        translate_*/analyze methods' own try/except is what turns
         that into the original-text fallback - this method itself never
         swallows a failure)."""
         last_exc: Exception | None = None
@@ -278,7 +293,7 @@ class TextProcessor:
         raise last_exc  # pragma: no cover - loop always returns or raises above
 
     # Call the Groq API to run one prompt. `max_tokens` is per-call (not
-    # self.max_tokens) so extract_location's tight budget and
+    # self.max_tokens) so analyze's tight budget and
     # translate_report's much larger one never interfere with each other.
     def _call_groq(self, prompt: str, *, max_tokens: int) -> str:
         payload = {
@@ -323,13 +338,24 @@ class TextProcessor:
     # non-string locationName, or a missing/unrecognized wildfireSignalStrength -
     # analyze() catches this and converts it to the "unavailable" state.
     @staticmethod
-    def _parse_location(raw_content: str) -> str | None:
+    def _parse_analysis(raw_content: str) -> NewsTextAnalysis:
         data = TextProcessor._parse_json_object(raw_content)
+
         location = data.get("locationName")
-        if location is None:
-            return None
-        location = location.strip()
-        return location or None
+        if location is not None:
+            if not isinstance(location, str):
+                raise ValueError(f"locationName must be a string or null, got {location!r}")
+            location = location.strip() or None
+
+        raw_strength = data.get("wildfireSignalStrength")
+        if not isinstance(raw_strength, str):
+            raise ValueError(f"wildfireSignalStrength must be a string, got {raw_strength!r}")
+        try:
+            strength = NewsWildfireSignalStrength(raw_strength.strip().lower())
+        except ValueError:
+            raise ValueError(f"Unsupported wildfireSignalStrength value: {raw_strength!r}") from None
+
+        return NewsTextAnalysis(location_name=location, wildfire_signal_strength=strength)
 
     @staticmethod
     def _parse_translation(

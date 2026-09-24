@@ -113,7 +113,7 @@ class FakeFireEventRepository:
         self.event_ids = tuple(event_ids)
         self.calls = []
 
-    def get_active_events_near(self, *, latitude, longitude, radius_km, as_of):
+    def get_response_eligible_events_near(self, *, latitude, longitude, radius_km, as_of):  # Task 9A
         self.calls.append({"latitude": latitude, "longitude": longitude, "radius_km": radius_km, "as_of": as_of})
         return tuple(
             StoredFireEvent(

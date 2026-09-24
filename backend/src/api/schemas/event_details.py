@@ -104,6 +104,14 @@ class FireEventMLAssessmentResponse(BaseModel):
     feature_schema_version: Optional[str]
     failure_reason: Optional[str]
     updated_at: datetime
+    # Task 9B explainability, populated only in `ai_hybrid_v5` mode (all None otherwise). `model_score` above is then
+    # the LATEST P(fire); the event's own `detection_confidence` is the monotonic PEAK. Not a calibrated real-world
+    # probability. The 25-feature vector is intentionally not exposed.
+    policy_version: Optional[str] = None
+    policy_status: Optional[FireDetectionStatus] = None
+    history_available: Optional[bool] = None
+    satellite_pass_count: Optional[int] = None
+    current_satellite_pixel_count: Optional[int] = None
 
 
 class DangerAssessmentResponse(BaseModel):

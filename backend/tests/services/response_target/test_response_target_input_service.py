@@ -186,14 +186,24 @@ def build_service(
     return service, event_repo, severity_repo, spread_repo
 
 
-@pytest.mark.parametrize("status", [FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED])
-def test_active_fire_event_returns_ready(status):
-    service, *_ = build_service(stored_event=make_event(status=status), predictions_by_horizon={})
+def test_a_confirmed_event_returns_ready():
+    service, *_ = build_service(stored_event=make_event(status=FireEventStatus.CONFIRMED), predictions_by_horizon={})
 
     result = service.prepare_input(10, AS_OF)
 
     assert result.status is ResponseTargetInputStatus.READY
     assert result.input_data.fire_event_id == 10
+
+
+def test_a_suspected_event_is_active_for_monitoring_but_not_response_eligible_and_loads_nothing():
+    """Task 9A: SUSPECTED never gets emergency-response targets, and the gate runs before any severity/spread read."""
+    service, _, severity_repo, spread_repo = build_service(stored_event=make_event(status=FireEventStatus.SUSPECTED))
+
+    result = service.prepare_input(10, AS_OF)
+
+    assert result.status is ResponseTargetInputStatus.NOT_RESPONSE_ELIGIBLE
+    assert result.input_data is None and result.fire_event_id == 10
+    assert severity_repo.calls == [] and spread_repo.calls == []
 
 
 @pytest.mark.parametrize("status", [FireEventStatus.RESOLVED, FireEventStatus.DISMISSED])

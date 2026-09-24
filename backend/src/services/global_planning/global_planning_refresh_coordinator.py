@@ -159,7 +159,7 @@ class GlobalPlanningRefreshCoordinator:
     def refresh(self, *, trigger: str, as_of: datetime) -> GlobalPlanningRefreshResult:
         self._validate_request(trigger, as_of)
 
-        active_fire_event_ids = self._fire_event_repository.get_active_fire_event_ids()
+        active_fire_event_ids = self._fire_event_repository.get_response_eligible_fire_event_ids()
         if not active_fire_event_ids:
             return GlobalPlanningRefreshResult(
                 status=GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS, trigger=trigger, as_of=as_of
@@ -188,7 +188,7 @@ class GlobalPlanningRefreshCoordinator:
             # changed between attempts (a new fire, a resolve) - re-capture
             # it fresh for the next full cycle rather than reusing the
             # stale snapshot.
-            active_fire_event_ids = self._fire_event_repository.get_active_fire_event_ids()
+            active_fire_event_ids = self._fire_event_repository.get_response_eligible_fire_event_ids()
             if not active_fire_event_ids:
                 return GlobalPlanningRefreshResult(
                     status=GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS,
@@ -393,8 +393,7 @@ class GlobalPlanningRefreshCoordinator:
                 "GlobalPlanningRun %s: a hard-dispatched resource has no feasible route to its locked "
                 "FireEvent in this cycle's road network (likely a transient OSM coverage gap); failing "
                 "this cycle so the bounded retry can rebuild with a fresh road-network fetch.",
-                stored_run.id,
-                exc_info=True,
+                stored_run.id
             )
             self._global_planning_run_repository.complete_run(
                 stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of

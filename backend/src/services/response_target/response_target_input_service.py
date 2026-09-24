@@ -18,6 +18,7 @@ from src.models import (
     ResponseTargetInputResult,
     ResponseTargetInputStatus,
 )
+from src.models.fire_event_response_eligibility import is_response_eligible
 from src.models.fire_spread_prediction import SUPPORTED_HORIZON_MINUTES
 from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_severity_assessment_repository import FireSeverityAssessmentRepository
@@ -92,6 +93,13 @@ class ResponseTargetInputService:
             )
         if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
             raise ValueError(f"Unsupported FireEvent status for response targets: {stored_event.event.status!r}")
+        if not is_response_eligible(stored_event.event.status):
+            # Task 9A: SUSPECTED is active for monitoring but never gets emergency-response targets.
+            return ResponseTargetInputResult(
+                status=ResponseTargetInputStatus.NOT_RESPONSE_ELIGIBLE,
+                input_data=None,
+                fire_event_id=fire_event_id,
+            )
 
         severity_score = self._select_severity_score(fire_event_id, as_of, resolved_severity)
         predicted_candidates = self._select_predicted_candidates(fire_event_id, as_of, resolved_spread_by_horizon)

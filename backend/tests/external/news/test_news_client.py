@@ -12,6 +12,8 @@ import pytest
 import requests
 
 from src.external.news.news_client import TextProcessor
+from src.models.news_text_analysis import NewsTextAnalysis
+from src.models.news_wildfire_signal_strength import NewsWildfireSignalStrength
 
 GROQ_LLM_CONFIG = {
     "provider": "groq",
@@ -53,8 +55,8 @@ def make_processor(monkeypatch: pytest.MonkeyPatch, config: dict | None = None) 
 
 
 # ---------------------------------------------------------------------------
-# is_relevant / extract_location (regression coverage for the pre-existing
-# behavior, not previously unit-tested at this layer)
+# is_relevant / analyze (location + wildfire signal strength in ONE LLM call;
+# regression coverage for the pre-existing behavior)
 # ---------------------------------------------------------------------------
 
 
@@ -65,23 +67,27 @@ def test_is_relevant_matches_a_configured_keyword(monkeypatch: pytest.MonkeyPatc
     assert processor.is_relevant("תוצאות הבחירות", "סיכום היום") is False
 
 
-def test_extract_location_returns_the_llm_location(monkeypatch: pytest.MonkeyPatch):
+ANALYSIS_PAYLOAD = {"locationName": "כרמל", "wildfireSignalStrength": "strong"}
+
+
+def test_analyze_returns_the_llm_location_and_signal_strength(monkeypatch: pytest.MonkeyPatch):
     processor = make_processor(monkeypatch)
 
-    with patch("src.external.news.news_client.requests.post", return_value=groq_reply({"locationName": "כרמל"})) as post:
-        location = processor.extract_location("שריפה בכרמל", "כוחות כיבוי בדרך")
+    with patch("src.external.news.news_client.requests.post", return_value=groq_reply(ANALYSIS_PAYLOAD)) as post:
+        analysis = processor.analyze("שריפה בכרמל", "כוחות כיבוי בדרך")
 
-    assert location == "כרמל"
+    assert analysis == NewsTextAnalysis(location_name="כרמל", wildfire_signal_strength=NewsWildfireSignalStrength.STRONG)
+    assert post.call_count == 1  # location + signal come from ONE LLM call
     assert post.call_args.kwargs["json"]["max_tokens"] == 100
 
 
-def test_extract_location_returns_none_on_llm_failure(monkeypatch: pytest.MonkeyPatch):
+def test_analyze_returns_an_unavailable_analysis_on_llm_failure(monkeypatch: pytest.MonkeyPatch):
     processor = make_processor(monkeypatch)
 
     with patch("src.external.news.news_client.requests.post", side_effect=RuntimeError("network down")):
-        location = processor.extract_location("שריפה בכרמל", "כוחות כיבוי בדרך")
+        analysis = processor.analyze("שריפה בכרמל", "כוחות כיבוי בדרך")
 
-    assert location is None
+    assert analysis == NewsTextAnalysis(location_name=None, wildfire_signal_strength=None)
 
 
 # ---------------------------------------------------------------------------
@@ -99,9 +105,9 @@ def test_reasoning_effort_is_sent_when_configured(monkeypatch: pytest.MonkeyPatc
     processor = make_processor(monkeypatch, config)
 
     with patch(
-        "src.external.news.news_client.requests.post", return_value=groq_reply({"locationName": "כרמל"})
+        "src.external.news.news_client.requests.post", return_value=groq_reply(ANALYSIS_PAYLOAD)
     ) as post:
-        processor.extract_location("שריפה בכרמל", "כוחות כיבוי בדרך")
+        processor.analyze("שריפה בכרמל", "כוחות כיבוי בדרך")
 
     assert post.call_args.kwargs["json"]["reasoning_effort"] == "low"
 
@@ -110,9 +116,9 @@ def test_reasoning_effort_is_omitted_when_not_configured(monkeypatch: pytest.Mon
     processor = make_processor(monkeypatch)
 
     with patch(
-        "src.external.news.news_client.requests.post", return_value=groq_reply({"locationName": "כרמל"})
+        "src.external.news.news_client.requests.post", return_value=groq_reply(ANALYSIS_PAYLOAD)
     ) as post:
-        processor.extract_location("שריפה בכרמל", "כוחות כיבוי בדרך")
+        processor.analyze("שריפה בכרמל", "כוחות כיבוי בדרך")
 
     assert "reasoning_effort" not in post.call_args.kwargs["json"]
 

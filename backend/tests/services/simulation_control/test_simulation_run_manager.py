@@ -176,6 +176,13 @@ def make_manager(runner=None, reset_service=None) -> SimulationRunManager:
     )
 
 
+@pytest.fixture(autouse=True)
+def _demo_reset_is_enabled(monkeypatch):
+    """Task 9A: every run now resets first, so the reset safety flag must be on for a run to start at all.
+    Tests that exercise the disabled flag turn it off explicitly (see disable_demo_reset)."""
+    enable_demo_reset(monkeypatch)
+
+
 # ---------------------------------------------------------------------------
 # 1. Initial state
 # ---------------------------------------------------------------------------
@@ -199,7 +206,7 @@ def test_initial_state_is_idle_with_no_run():
 def test_start_reserves_a_run_immediately():
     manager = make_manager()
 
-    snapshot = manager.start_run(preset_id="operations_demo", seed=42, reset_demo_state=False)
+    snapshot = manager.start_run(preset_id="operations_demo", seed=42)
 
     assert snapshot.run_id is not None
     assert snapshot.preset_id == "operations_demo"
@@ -215,7 +222,7 @@ def test_start_reserves_a_run_immediately():
 def test_explicit_seed_is_used_exactly_as_given():
     manager = make_manager()
 
-    snapshot = manager.start_run(preset_id="operations_demo", seed=42, reset_demo_state=False)
+    snapshot = manager.start_run(preset_id="operations_demo", seed=42)
 
     assert snapshot.seed == 42
 
@@ -223,7 +230,7 @@ def test_explicit_seed_is_used_exactly_as_given():
 def test_omitted_seed_generates_a_real_integer_seed():
     manager = make_manager()
 
-    snapshot = manager.start_run(preset_id="operations_demo", reset_demo_state=False)
+    snapshot = manager.start_run(preset_id="operations_demo")
 
     assert isinstance(snapshot.seed, int)
     assert snapshot.seed is not None
@@ -234,7 +241,7 @@ def test_omitted_seed_default_is_also_generated():
     never passes the keyword at all gets the same auto-generation."""
     manager = make_manager()
 
-    snapshot = manager.start_run(preset_id="operations_demo", reset_demo_state=False)
+    snapshot = manager.start_run(preset_id="operations_demo")
 
     assert snapshot.seed is not None
 
@@ -242,8 +249,8 @@ def test_omitted_seed_default_is_also_generated():
 def test_two_consecutive_auto_seeded_runs_do_not_reuse_the_immediately_previous_seed():
     manager = make_manager()
 
-    first = manager.start_run(preset_id="operations_demo", reset_demo_state=False)
-    second = manager.start_run(preset_id="operations_demo", reset_demo_state=False)
+    first = manager.start_run(preset_id="operations_demo")
+    second = manager.start_run(preset_id="operations_demo")
 
     assert first.seed != second.seed
 
@@ -254,7 +261,7 @@ def test_auto_generated_seed_still_builds_a_valid_reproducible_scenario(monkeypa
     from src.simulation.simulation_scenario import build_operations_demo_scenario
 
     manager = make_manager()
-    snapshot = manager.start_run(preset_id="operations_demo", reset_demo_state=False)
+    snapshot = manager.start_run(preset_id="operations_demo")
 
     scenario_a = build_operations_demo_scenario(seed=snapshot.seed)
     scenario_b = build_operations_demo_scenario(seed=snapshot.seed)
@@ -281,7 +288,7 @@ def test_second_start_during_preparing_is_rejected(monkeypatch):
         _wait_for_state(manager, SimulationRunState.PREPARING)
 
         with pytest.raises(SimulationAlreadyRunningError):
-            manager.start_run(preset_id="operations_demo", seed=99, reset_demo_state=False)
+            manager.start_run(preset_id="operations_demo", seed=99)
     finally:
         proceed.set()
 
@@ -294,12 +301,12 @@ def test_second_start_during_running_is_rejected():
         executor=ThreadPoolExecutor(max_workers=1),
     )
 
-    manager.start_run(preset_id="operations_demo", seed=42, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=42)
     try:
         _wait_for_state(manager, SimulationRunState.RUNNING)
 
         with pytest.raises(SimulationAlreadyRunningError):
-            manager.start_run(preset_id="operations_demo", seed=99, reset_demo_state=False)
+            manager.start_run(preset_id="operations_demo", seed=99)
     finally:
         proceed.set()
 
@@ -322,23 +329,23 @@ def _wait_for_state(manager: SimulationRunManager, state: SimulationRunState, ti
 
 def test_start_after_completed_is_allowed():
     manager = make_manager(runner=FakeRunner(make_result(DemoSimulationStatus.COMPLETED)))
-    first = manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    first = manager.start_run(preset_id="operations_demo", seed=1)
     assert manager.get_current_snapshot().state is SimulationRunState.COMPLETED
 
-    second = manager.start_run(preset_id="operations_demo", seed=2, reset_demo_state=False)
+    second = manager.start_run(preset_id="operations_demo", seed=2)
 
     assert second.run_id != first.run_id
 
 
 def test_start_after_failed_is_allowed():
     manager = make_manager(runner=RaisingRunner())
-    first = manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    first = manager.start_run(preset_id="operations_demo", seed=1)
     assert manager.get_current_snapshot().state is SimulationRunState.FAILED
 
     manager2 = make_manager(runner=FakeRunner(make_result(DemoSimulationStatus.COMPLETED)))
     # Re-use the same manager instance to prove FAILED -> new start works:
     manager._runner_factory = lambda: FakeRunner(make_result(DemoSimulationStatus.COMPLETED))
-    second = manager.start_run(preset_id="operations_demo", seed=2, reset_demo_state=False)
+    second = manager.start_run(preset_id="operations_demo", seed=2)
 
     assert second.run_id != first.run_id
     assert manager.get_current_snapshot().state is SimulationRunState.COMPLETED
@@ -372,7 +379,7 @@ def test_progress_callback_updates_counters_and_current_event():
     runner = FakeRunner(make_result(DemoSimulationStatus.COMPLETED), progress_events=progress_events)
     manager = make_manager(runner=runner)
 
-    manager.start_run(preset_id="operations_demo", seed=42, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=42)
 
     final = manager.get_current_snapshot()
     # The final _apply_result overwrites completed/succeeded/failed with the
@@ -405,7 +412,7 @@ def test_progress_events_completed_reflects_only_finished_events_before_result()
             return make_result(DemoSimulationStatus.COMPLETED)
 
     manager = make_manager(runner=RecordingRunner())
-    manager.start_run(preset_id="operations_demo", seed=42, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=42)
 
     started_snapshot, completed_snapshot = seen_snapshots
     assert started_snapshot.events_completed == 7
@@ -431,7 +438,7 @@ def test_snapshot_returned_before_mutation_is_unaffected_by_later_changes():
     runner = FakeRunner(make_result(DemoSimulationStatus.COMPLETED))
     manager = make_manager(runner=runner)
 
-    before = manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    before = manager.start_run(preset_id="operations_demo", seed=1)
     after = manager.get_current_snapshot()
 
     assert before.state is SimulationRunState.PREPARING
@@ -447,7 +454,7 @@ def test_snapshot_returned_before_mutation_is_unaffected_by_later_changes():
 def test_runner_completed_maps_to_manager_completed():
     manager = make_manager(runner=FakeRunner(make_result(DemoSimulationStatus.COMPLETED)))
 
-    manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=1)
 
     assert manager.get_current_snapshot().state is SimulationRunState.COMPLETED
 
@@ -456,7 +463,7 @@ def test_runner_completed_with_errors_maps_to_manager_completed_with_errors():
     result = make_result(DemoSimulationStatus.COMPLETED_WITH_ERRORS, succeeded=2, failed=1)
     manager = make_manager(runner=FakeRunner(result))
 
-    manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=1)
 
     snapshot = manager.get_current_snapshot()
     assert snapshot.state is SimulationRunState.COMPLETED_WITH_ERRORS
@@ -467,7 +474,7 @@ def test_runner_completed_with_errors_maps_to_manager_completed_with_errors():
 def test_runner_exception_maps_to_manager_failed_with_sanitized_error():
     manager = make_manager(runner=RaisingRunner())
 
-    manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=1)
 
     snapshot = manager.get_current_snapshot()
     assert snapshot.state is SimulationRunState.FAILED
@@ -527,22 +534,37 @@ def test_reset_failure_prevents_runner_from_starting_and_manager_is_failed(monke
     assert manager.get_current_snapshot().state is SimulationRunState.FAILED
 
 
-def test_reset_false_never_calls_reset_service():
+def test_every_run_resets_first_without_being_asked():
+    """Task 9A: the reset is mandatory - a plain start_run() (no flag) resets before the runner."""
     reset_service = FakeResetService()
     manager = make_manager(reset_service=reset_service)
 
-    manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=1)
+
+    assert reset_service.calls == 1
+
+
+def test_opting_out_of_the_reset_is_refused_and_nothing_is_reserved():
+    from src.services.simulation_control.simulation_run_manager import SimulationResetRequiredError
+
+    reset_service = FakeResetService()
+    manager = make_manager(reset_service=reset_service)
+
+    for opt_out in (False, None, 0):
+        with pytest.raises(SimulationResetRequiredError):
+            manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=opt_out)
 
     assert reset_service.calls == 0
+    assert manager.get_current_snapshot().state is SimulationRunState.IDLE
 
 
-def test_reset_requested_while_disabled_is_rejected_safely(monkeypatch):
+def test_start_is_refused_fail_closed_when_the_reset_flag_is_off_even_without_asking_for_it(monkeypatch):
     disable_demo_reset(monkeypatch)
     reset_service = FakeResetService()
     manager = make_manager(reset_service=reset_service)
 
     with pytest.raises(SimulationResetDisabledError):
-        manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=True)
+        manager.start_run(preset_id="operations_demo", seed=1)
 
     assert reset_service.calls == 0
     assert manager.get_current_snapshot().state is SimulationRunState.IDLE  # nothing was reserved
@@ -556,8 +578,8 @@ def test_reset_requested_while_disabled_is_rejected_safely(monkeypatch):
 def test_run_id_changes_between_runs():
     manager = make_manager(runner=FakeRunner(make_result(DemoSimulationStatus.COMPLETED)))
 
-    first = manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
-    second = manager.start_run(preset_id="operations_demo", seed=2, reset_demo_state=False)
+    first = manager.start_run(preset_id="operations_demo", seed=1)
+    second = manager.start_run(preset_id="operations_demo", seed=2)
 
     assert first.run_id != second.run_id
 
@@ -565,7 +587,7 @@ def test_run_id_changes_between_runs():
 def test_completed_result_remains_available_until_next_run():
     manager = make_manager(runner=FakeRunner(make_result(DemoSimulationStatus.COMPLETED, succeeded=5, failed=0)))
 
-    manager.start_run(preset_id="operations_demo", seed=1, reset_demo_state=False)
+    manager.start_run(preset_id="operations_demo", seed=1)
     snapshot_a = manager.get_current_snapshot()
     snapshot_b = manager.get_current_snapshot()
 
@@ -598,6 +620,6 @@ def test_preset_not_found_raises_without_reserving_a_run():
     manager = make_manager()
 
     with pytest.raises(SimulationPresetNotFoundError):
-        manager.start_run(preset_id="does-not-exist", seed=1, reset_demo_state=False)
+        manager.start_run(preset_id="does-not-exist", seed=1)
 
     assert manager.get_current_snapshot().state is SimulationRunState.IDLE

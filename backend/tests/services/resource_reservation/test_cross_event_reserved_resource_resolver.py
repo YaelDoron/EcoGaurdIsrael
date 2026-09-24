@@ -28,7 +28,7 @@ class FakeFireEventRepository:
         self.active_fire_event_ids = active_fire_event_ids
         self.calls = 0
 
-    def get_active_fire_event_ids(self) -> tuple[int, ...]:
+    def get_response_eligible_fire_event_ids(self) -> tuple[int, ...]:
         self.calls += 1
         return self.active_fire_event_ids
 
@@ -139,7 +139,7 @@ def test_overlapping_ids_from_both_sources_are_deduplicated():
 
 def test_relies_on_fire_event_repository_for_active_status_filtering():
     """Task 7: the resolver does not re-derive SUSPECTED/CONFIRMED filtering
-    itself - it trusts get_active_fire_event_ids() completely (that method
+    itself - it trusts get_response_eligible_fire_event_ids() completely (that method
     already excludes RESOLVED/DISMISSED events, tested at the repository
     level - see test_get_active_events_excludes_resolved_and_dismissed)."""
     resolver, fire_event_repository, _, _ = make_resolver((1, 2))

@@ -39,6 +39,7 @@ from src.services.simulation_control.simulation_run_manager import (
     SimulationAlreadyRunningError,
     SimulationPresetNotFoundError,
     SimulationResetDisabledError,
+    SimulationResetRequiredError,
     SimulationRunManager,
 )
 from src.simulation.simulation_presets import SIMULATION_PRESETS
@@ -50,6 +51,7 @@ SIMULATION_CONTROL_DISABLED_MESSAGE = "The Simulation Control API is not enabled
 SIMULATION_ALREADY_RUNNING_CODE = "SIMULATION_ALREADY_RUNNING"
 SIMULATION_PRESET_NOT_FOUND_CODE = "SIMULATION_PRESET_NOT_FOUND"
 SIMULATION_RESET_DISABLED_CODE = "SIMULATION_RESET_DISABLED"
+SIMULATION_RESET_REQUIRED_CODE = "SIMULATION_RESET_REQUIRED"
 SIMULATION_START_FAILED_CODE = "SIMULATION_START_FAILED"
 
 
@@ -124,6 +126,13 @@ def start_simulation_run(
     if not _is_simulation_control_enabled():
         return _disabled_response()
 
+    if request.reset_demo_state is not True:
+        return _error_response(
+            422,
+            SIMULATION_RESET_REQUIRED_CODE,
+            "A demo simulation cannot start without the runtime reset; reset_demo_state must be true (or omitted).",
+        )
+
     try:
         snapshot = manager.start_run(
             preset_id=request.preset,
@@ -132,6 +141,8 @@ def start_simulation_run(
         )
     except SimulationPresetNotFoundError as exc:
         return _error_response(404, SIMULATION_PRESET_NOT_FOUND_CODE, str(exc))
+    except SimulationResetRequiredError as exc:
+        return _error_response(422, SIMULATION_RESET_REQUIRED_CODE, str(exc))
     except SimulationResetDisabledError as exc:
         return _error_response(403, SIMULATION_RESET_DISABLED_CODE, str(exc))
     except SimulationAlreadyRunningError as exc:

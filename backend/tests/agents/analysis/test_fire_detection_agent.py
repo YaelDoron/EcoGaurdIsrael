@@ -1,7 +1,7 @@
 """Tests for FireDetectionAgent orchestration."""
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -836,3 +836,219 @@ def test_unchanged_reevaluation_does_not_rewrite_ml_assessment():
     # and the ML assessment is materially the same, so no rewrite.
     assert repository.ml_assessment_writes == []
     assert repository.updated == []
+
+
+# --- Fire Danger context infrastructure must not alter detection decisions ---
+
+
+class _FailingFireDangerRepository:
+    """Stands in for a Fire Danger store that is down - every lookup raises."""
+
+    def get_assessed_between(self, start_time, end_time):
+        raise RuntimeError("fire danger store unavailable")
+
+
+def _run_detection_snapshot(policy, ml_probability, decision_status, decision_confidence, with_failing_context):
+    from src.services.fire_detection.fire_detection_context_service import FireDetectionContextService
+
+    evidence = satellite(confidence="high")
+    fire_candidate = candidate(evidence)
+    if with_failing_context:
+        # Fire Danger context is data access only: a failing lookup must yield
+        # unavailable context and leave the detection pipeline untouched.
+        context = FireDetectionContextService(fire_danger_repository=_FailingFireDangerRepository()).build_context(
+            fire_candidate, AS_OF
+        )
+        assert context.fire_danger_available is False
+
+    service = FakeEvidenceService(candidates=[fire_candidate])
+    calculator = FakeCalculator([decision(decision_status, decision_confidence, (sat_ref(1),))])
+    repository = FakeFireEventRepository()
+    ml_classifier = None if policy.mode is FireDetectionDecisionMode.RULE_ONLY else FakeMLClassifier(
+        assessment=ml_available(probability=ml_probability)
+    )
+
+    result = make_agent(service, calculator, repository, decision_policy=policy, ml_classifier=ml_classifier).detect(AS_OF)
+    return (
+        result,
+        [(event.status, event.detection_confidence, event.latitude, event.longitude) for event, _, _ in repository.created],
+        # updated_at is the agent's own wall-clock write time, so it is normalized.
+        [replace(assessment, updated_at=OBSERVED_AT) for _, assessment in repository.ml_assessment_writes],
+    )
+
+
+@pytest.mark.parametrize("policy", [RULE_ONLY_POLICY, SHADOW_POLICY, HYBRID_POLICY], ids=lambda policy: policy.mode.value)
+@pytest.mark.parametrize(
+    "decision_status, decision_confidence, ml_probability",
+    [
+        (FireDetectionStatus.CONFIRMED, 0.875, 0.95),
+        (FireDetectionStatus.SUSPECTED, 0.6, 0.10),
+        (FireDetectionStatus.NO_EVENT, 0.4, 0.95),
+    ],
+    ids=["rule-confirmed", "rule-suspected-ml-disagrees", "rule-no-event-ml-says-fire"],
+)
+def test_failing_fire_danger_context_lookup_does_not_alter_detection_in_any_mode(
+    policy, decision_status, decision_confidence, ml_probability
+):
+    baseline = _run_detection_snapshot(policy, ml_probability, decision_status, decision_confidence, False)
+    with_failing_context = _run_detection_snapshot(policy, ml_probability, decision_status, decision_confidence, True)
+
+    assert with_failing_context == baseline
+    assert with_failing_context[0].success is True
+
+
+# ---------------------------------------------------------------------------
+# Task 5B: an existing event is updated by evaluating the CURRENT candidate;
+# earlier observation waves stay attached as history.
+# ---------------------------------------------------------------------------
+EARLIER_WAVE_AT = OBSERVED_AT - timedelta(hours=3)
+
+
+def _multi_wave_setup(existing_confidence=0.8, existing_status=FireEventStatus.CONFIRMED):
+    earlier = satellite(1, observed_at=EARLIER_WAVE_AT)
+    current = satellite(2, observed_at=OBSERVED_AT)
+    existing = StoredFireEvent(7, event(status=existing_status, confidence=existing_confidence, detected_at=EARLIER_WAVE_AT), (sat_ref(1),))
+    service = FakeEvidenceService(
+        candidates=[candidate(current)],
+        resolved={(sat_ref(1), sat_ref(2)): (earlier, current)},
+    )
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    return earlier, current, existing, service, repository
+
+
+def test_update_evaluates_only_the_current_candidate_not_hours_old_history():
+    earlier, current, _existing, service, repository = _multi_wave_setup()
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),  # candidate decision
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),  # re-evaluation
+    ])
+
+    result = make_agent(service, calculator, repository).detect(AS_OF)
+
+    assert result.success is True
+    assert calculator.calls[1] == (current,)  # the 3-hour-old wave is NOT forced into the same evaluation
+    assert repository.attached == [(7, (sat_ref(2),))]  # ...but the new evidence is attached, history kept
+
+
+def test_a_weaker_current_wave_keeps_the_events_peak_confidence_and_status():
+    _earlier, _current, _existing, service, repository = _multi_wave_setup(existing_confidence=0.85)
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.55, (sat_ref(2),)),
+        decision(FireDetectionStatus.SUSPECTED, 0.55, (sat_ref(2),)),
+    ])
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    # Status, confidence and first-seen time are all retained, so the event row needs no rewrite at all -
+    # only the new observation is attached to it.
+    assert repository.updated == []
+    assert repository.attached == [(7, (sat_ref(2),))]
+
+
+def test_a_stronger_current_wave_raises_the_events_confidence():
+    _earlier, _current, _existing, service, repository = _multi_wave_setup(existing_confidence=0.5, existing_status=FireEventStatus.SUSPECTED)
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.CONFIRMED, 0.9, (sat_ref(2),)),
+        decision(FireDetectionStatus.CONFIRMED, 0.9, (sat_ref(2),)),
+    ])
+
+    make_agent(service, calculator, repository).detect(AS_OF)
+
+    updated_event = repository.updated[0][1]
+    assert updated_event.status is FireEventStatus.CONFIRMED
+    assert updated_event.detection_confidence == pytest.approx(0.9)
+
+
+def test_ml_is_reevaluated_once_on_the_current_evidence_only():
+    earlier, current, _existing, service, repository = _multi_wave_setup()
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),
+    ])
+    ml_classifier = FakeMLClassifier(assessments=[ml_available(0.4), ml_available(0.9)])
+
+    make_agent(service, calculator, repository, decision_policy=SHADOW_POLICY, ml_classifier=ml_classifier).detect(AS_OF)
+
+    assert len(ml_classifier.calls) == 2  # unchanged contract: candidate check + re-evaluation
+    assert tuple(ml_classifier.calls[1]) == (current,)
+
+
+def test_an_old_ref_that_no_longer_resolves_does_not_block_the_new_observation():
+    current = satellite(2, observed_at=OBSERVED_AT)
+
+    class PartlyMissingService(FakeEvidenceService):
+        def resolve_evidence_refs(self, refs):
+            refs = tuple(refs)
+            self.resolve_calls.append(refs)
+            if sat_ref(1) in refs:
+                raise ValueError("Satellite evidence ref was not found: 1.")
+            return (current,)
+
+    existing = StoredFireEvent(7, event(status=FireEventStatus.SUSPECTED, confidence=0.5), (sat_ref(1),))
+    service = PartlyMissingService(candidates=[candidate(current)])
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    calculator = FakeCalculator([
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),
+        decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),)),
+    ])
+
+    result = make_agent(service, calculator, repository).detect(AS_OF)
+
+    assert result.success is True
+    assert repository.attached == [(7, (sat_ref(2),))]
+
+
+def test_the_current_evidence_itself_must_resolve():
+    existing = StoredFireEvent(7, event(), (sat_ref(1),))
+
+    class NothingResolves(FakeEvidenceService):
+        def resolve_evidence_refs(self, refs):
+            raise ValueError("gone")
+
+    service = NothingResolves(candidates=[candidate(satellite(2))])
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    calculator = FakeCalculator([decision(FireDetectionStatus.SUSPECTED, 0.6, (sat_ref(2),))])
+
+    result = make_agent(service, calculator, repository).detect(AS_OF)
+
+    assert result.success is False and repository.attached == []
+
+
+def test_hybrid_reevaluation_of_an_ml_escalated_event_no_longer_raises_on_rule_no_event():
+    """Regression: rule NO_EVENT + ML escalation created the event; the re-evaluation used to raise ValueError."""
+    evidence = satellite(1, confidence="low")
+    existing = StoredFireEvent(7, event(status=FireEventStatus.SUSPECTED, confidence=0.1), (sat_ref(1),))
+    service = FakeEvidenceService(candidates=[candidate(evidence)], resolved={(sat_ref(1),): (evidence,)})
+    no_event = decision(FireDetectionStatus.NO_EVENT, 0.1, ())
+    calculator = FakeCalculator([no_event, no_event])
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    ml_classifier = FakeMLClassifier(assessments=[ml_available(0.9), ml_available(0.9)])
+
+    result = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier).detect(AS_OF)
+
+    assert result.success is True
+    assert result.event_ids == (7,)
+
+
+def test_ml_drop_on_reevaluation_keeps_status_confidence_and_location():
+    evidence = satellite(1, confidence="low")
+    existing = StoredFireEvent(7, event(status=FireEventStatus.SUSPECTED, confidence=0.1), (sat_ref(1),))
+    service = FakeEvidenceService(candidates=[candidate(evidence)], resolved={(sat_ref(1),): (evidence,)})
+    no_event = decision(FireDetectionStatus.NO_EVENT, 0.1, ())
+    calculator = FakeCalculator([no_event, no_event])
+    repository = FakeFireEventRepository(match=existing)
+    repository.refs_by_event_id[7] = (sat_ref(1),)
+    ml_classifier = FakeMLClassifier(assessments=[ml_available(0.9), ml_available(0.1)])
+
+    result = make_agent(service, calculator, repository, decision_policy=HYBRID_POLICY, ml_classifier=ml_classifier).detect(AS_OF)
+
+    assert result.success is True
+    assert repository.created == []
+    for _event_id, written in repository.updated:
+        assert written.status is FireEventStatus.SUSPECTED
+        assert written.detection_confidence == pytest.approx(0.1)
+        assert (written.latitude, written.longitude) == (existing.event.latitude, existing.event.longitude)

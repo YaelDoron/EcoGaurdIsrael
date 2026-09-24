@@ -154,7 +154,8 @@ class SimulationRefreshCoordinator:
             return SimulationRefreshResult(triggered=False, reason=reason)
 
         incident = scenario.get_incident(event.incident_id)
-        active_events = self._fire_event_repository.get_active_events_near(
+        # Task 9A: only response-eligible (CONFIRMED) fires near the weather station are refreshed / planned for.
+        active_events = self._fire_event_repository.get_response_eligible_events_near(
             latitude=incident.location.latitude,
             longitude=incident.location.longitude,
             radius_km=SEVERITY_WEATHER_RADIUS_KM,
