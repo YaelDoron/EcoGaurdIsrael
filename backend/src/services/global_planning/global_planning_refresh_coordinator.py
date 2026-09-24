@@ -393,8 +393,7 @@ class GlobalPlanningRefreshCoordinator:
                 "GlobalPlanningRun %s: a hard-dispatched resource has no feasible route to its locked "
                 "FireEvent in this cycle's road network (likely a transient OSM coverage gap); failing "
                 "this cycle so the bounded retry can rebuild with a fresh road-network fetch.",
-                stored_run.id,
-                exc_info=True,
+                stored_run.id
             )
             self._global_planning_run_repository.complete_run(
                 stored_run.id, status=GlobalPlanningRunStatus.FAILED, completed_at=as_of
