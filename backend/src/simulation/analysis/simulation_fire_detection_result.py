@@ -13,6 +13,9 @@ class SimulationFireDetectionResult:
     triggered: bool
     detection_result: FireDetectionResult | None
     reason: str | None = None
+    # Task 9A: which of the detection cycle's FireEvents are RESPONSE-ELIGIBLE (CONFIRMED) right now. None = not
+    # determined (no repository was wired, e.g. in unit tests); an empty tuple = none of them are.
+    response_eligible_event_ids: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.triggered, bool):

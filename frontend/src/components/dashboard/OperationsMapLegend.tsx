@@ -1,3 +1,4 @@
+import { SUSPECTED_LEGEND_TITLE } from "../status/fireDetectionPresentation";
 import { FIRE_DANGER_PRESENTATION } from "../status/fireDangerPresentation";
 import "./OperationsMapLegend.css";
 
@@ -35,14 +36,14 @@ export function OperationsMapLegend() {
       <div className="operations-map-legend__group">
         <h4 className="operations-map-legend__title">Active fires</h4>
         <ul className="operations-map-legend__list">
-          <li className="operations-map-legend__item">
+          <li className="operations-map-legend__item" title={SUSPECTED_LEGEND_TITLE}>
             <span
               className="operations-map-legend__marker operations-map-legend__marker--suspected"
               aria-hidden="true"
             />
             <span>Suspected</span>
           </li>
-          <li className="operations-map-legend__item">
+          <li className="operations-map-legend__item" title="Response eligible">
             <span
               className="operations-map-legend__marker operations-map-legend__marker--confirmed"
               aria-hidden="true"

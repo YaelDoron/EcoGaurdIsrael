@@ -1,6 +1,6 @@
 """Application configuration, loaded from environment variables (and a local .env file)."""
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,6 +36,10 @@ DEFAULT_FIRE_DETECTION_ML_MODEL_PATH = str(_BACKEND_ROOT / "models" / "fire_dete
 DEFAULT_FIRE_DETECTION_ML_METADATA_PATH = str(
     _BACKEND_ROOT / "models" / "fire_detection" / "fire_detection_logistic_v3_metadata.json"
 )
+DEFAULT_FIRE_DETECTION_AI_V5_MODEL_PATH = str(_BACKEND_ROOT / "models" / "fire_detection" / "fire_detection_hgb_v5.joblib")
+DEFAULT_FIRE_DETECTION_AI_V5_METADATA_PATH = str(
+    _BACKEND_ROOT / "models" / "fire_detection" / "fire_detection_hgb_v5_metadata.json"
+)
 DEFAULT_FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD = 0.50
 # Selected via scripts.analyze_fire_detection_ml_threshold (out-of-fold CV on
 # training_v3.csv): 0.70 is the smallest candidate threshold reaching
@@ -56,6 +60,7 @@ DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
 
 @dataclass(frozen=True)
 class Settings:
+    # Secret fields (tokens, keys, DATABASE_URL) use repr=False so a failing assertion / log line / debugger can never print them.
     """Application configuration values.
 
     IMS_API_TOKEN may be empty (we are currently waiting for the real IMS API
@@ -63,11 +68,11 @@ class Settings:
     """
 
     IMS_BASE_URL: str = os.getenv("IMS_BASE_URL", DEFAULT_IMS_BASE_URL)
-    IMS_API_TOKEN: str = os.getenv("IMS_API_TOKEN", "")
+    IMS_API_TOKEN: str = field(default=os.getenv("IMS_API_TOKEN", ""), repr=False)
     IMS_REQUEST_TIMEOUT: int = int(os.getenv("IMS_REQUEST_TIMEOUT", str(DEFAULT_IMS_REQUEST_TIMEOUT)))
 
     FIRMS_BASE_URL: str = os.getenv("FIRMS_BASE_URL", DEFAULT_FIRMS_BASE_URL)
-    FIRMS_MAP_KEY: str = os.getenv("FIRMS_MAP_KEY", "")
+    FIRMS_MAP_KEY: str = field(default=os.getenv("FIRMS_MAP_KEY", ""), repr=False)
     FIRMS_SOURCE: str = os.getenv("FIRMS_SOURCE", DEFAULT_FIRMS_SOURCE)
     FIRMS_DAY_RANGE: int = int(os.getenv("FIRMS_DAY_RANGE", str(DEFAULT_FIRMS_DAY_RANGE)))
     FIRMS_REQUEST_TIMEOUT: int = int(
@@ -78,8 +83,8 @@ class Settings:
     FIRMS_EAST: float = float(os.getenv("FIRMS_EAST", str(DEFAULT_FIRMS_EAST)))
     FIRMS_NORTH: float = float(os.getenv("FIRMS_NORTH", str(DEFAULT_FIRMS_NORTH)))
 
-    COPERNICUS_CLIENT_ID: str = os.getenv("COPERNICUS_CLIENT_ID", "")
-    COPERNICUS_CLIENT_SECRET: str = os.getenv("COPERNICUS_CLIENT_SECRET", "")
+    COPERNICUS_CLIENT_ID: str = field(default=os.getenv("COPERNICUS_CLIENT_ID", ""), repr=False)
+    COPERNICUS_CLIENT_SECRET: str = field(default=os.getenv("COPERNICUS_CLIENT_SECRET", ""), repr=False)
     COPERNICUS_TOKEN_URL: str = os.getenv("COPERNICUS_TOKEN_URL", DEFAULT_COPERNICUS_TOKEN_URL)
     COPERNICUS_STATISTICS_URL: str = os.getenv(
         "COPERNICUS_STATISTICS_URL",
@@ -97,7 +102,7 @@ class Settings:
     # environments that don't use the database (e.g. Task 1/2 unit tests).
     # URL normalization (postgresql:// -> postgresql+psycopg://) happens in
     # src.database.connection, not here.
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "")
+    DATABASE_URL: str = field(default=os.getenv("DATABASE_URL", ""), repr=False)
 
     # Comma-separated list of origins allowed to call the API via CORS
     # (React/Vite dev server by default). Parsed once here so callers get a
@@ -141,6 +146,14 @@ class Settings:
     FIRE_DETECTION_ML_METADATA_PATH: str = os.getenv(
         "FIRE_DETECTION_ML_METADATA_PATH", DEFAULT_FIRE_DETECTION_ML_METADATA_PATH
     )
+    # Task 9B: artifact used ONLY when FIRE_DETECTION_DECISION_MODE=ai_hybrid_v5 (the thresholds are locked in code, not
+    # configurable). Other modes never read these paths.
+    FIRE_DETECTION_AI_V5_MODEL_PATH: str = os.getenv(
+        "FIRE_DETECTION_AI_V5_MODEL_PATH", DEFAULT_FIRE_DETECTION_AI_V5_MODEL_PATH
+    )
+    FIRE_DETECTION_AI_V5_METADATA_PATH: str = os.getenv(
+        "FIRE_DETECTION_AI_V5_METADATA_PATH", DEFAULT_FIRE_DETECTION_AI_V5_METADATA_PATH
+    )
     FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD: float = float(
         os.getenv("FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD", str(DEFAULT_FIRE_DETECTION_ML_CLASSIFICATION_THRESHOLD))
     )
@@ -157,7 +170,7 @@ class Settings:
     # empty in environments that don't use the chatbot feature; GeminiClient
     # handles that case explicitly when a request is attempted. MODEL/TIMEOUT
     # are not required in .env - they default here and may be overridden.
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_API_KEY: str = field(default=os.getenv("GEMINI_API_KEY", ""), repr=False)
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
     GEMINI_REQUEST_TIMEOUT: int = int(os.getenv("GEMINI_REQUEST_TIMEOUT", str(DEFAULT_GEMINI_REQUEST_TIMEOUT)))
     GEMINI_FALLBACK_MODEL: str = os.getenv("GEMINI_FALLBACK_MODEL", DEFAULT_GEMINI_FALLBACK_MODEL)

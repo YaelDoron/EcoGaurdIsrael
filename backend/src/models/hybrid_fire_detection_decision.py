@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import math
 from numbers import Real
 
+from src.models.fire_detection_ai_assessment import FireDetectionAIAssessment
 from src.models.fire_detection_decision import FireDetectionDecision
 from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
 from src.models.fire_detection_ml_assessment import FireDetectionMLAssessment
@@ -17,7 +18,7 @@ from src.models.fire_evidence_ref import FireEvidenceRef
 class HybridFireDetectionDecision:
     """The decision FireDetectionAgent actually acts on, plus full rule/ML traceability.
 
-    `final_confidence` always equals `rule_decision.confidence` - the ML
+    (Legacy modes.) `final_confidence` always equals `rule_decision.confidence` - the ML
     assessment never changes the persisted confidence number, even when
     HYBRID mode escalates NO_EVENT to SUSPECTED (in that case the escalation
     is explained by `ml_assessment`/`agreement`/`decision_mode`, not by a
@@ -37,6 +38,9 @@ class HybridFireDetectionDecision:
     rule_decision: FireDetectionDecision
     ml_assessment: FireDetectionMLAssessment
     agreement: FireDetectionMLRuleAgreement
+    # Task 9B: set only by AI_HYBRID_V5. In that mode `final_status` is the locked AI policy's status,
+    # `final_confidence` is the model probability, and the rule decision is diagnostics only.
+    ai_assessment: FireDetectionAIAssessment | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.decision_mode, FireDetectionDecisionMode):

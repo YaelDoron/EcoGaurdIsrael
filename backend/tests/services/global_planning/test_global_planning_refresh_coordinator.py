@@ -28,7 +28,7 @@ class _FakeFireEventRepository:
         self._sequence = list(active_ids_sequence)
         self.calls = 0
 
-    def get_active_fire_event_ids(self):
+    def get_response_eligible_fire_event_ids(self):
         index = min(self.calls, len(self._sequence) - 1)
         self.calls += 1
         return self._sequence[index]

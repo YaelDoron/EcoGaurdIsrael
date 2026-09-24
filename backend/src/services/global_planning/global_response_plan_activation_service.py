@@ -59,6 +59,7 @@ from src.database.models.firefighting_resource_db import FirefightingResourceDB
 from src.database.models.resource_commitment_db import ResourceCommitmentDB
 from src.database.models.response_plan_db import ResponsePlanDB
 from src.models.dispatch_state import DispatchState
+from src.models.fire_event_response_eligibility import RESPONSE_ELIGIBLE_STATUSES
 from src.models.fire_event_status import FireEventStatus
 from src.models.global_optimization_result import GlobalOptimizationResult
 from src.models.global_planning_input import GlobalPlanningInput
@@ -76,7 +77,8 @@ from src.repositories.resource_commitment_repository import ResourceCommitmentRe
 from src.repositories.route_planning_repository import RoutePlanningRepository
 from src.services.resource_reservation.resource_commitment_conflict import ResourceCommitmentConflict
 
-_ACTIVE_STATUSES = frozenset({FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED})
+# Task 9A: only response-eligible (CONFIRMED) events may receive an activated global plan / resource commitments.
+_RESPONSE_ELIGIBLE_STATUSES = RESPONSE_ELIGIBLE_STATUSES
 
 
 class GlobalPlanningStaleInput(Exception):
@@ -329,12 +331,12 @@ class GlobalResponsePlanActivationService:
         db_events_by_id: dict[int, FireEventDB],
         db_resources_by_id: dict[str, FirefightingResourceDB],
     ) -> None:
-        # 1. Every event the input was built for must still exist and be active.
+        # 1. Every event the input was built for must still exist and be response-eligible (CONFIRMED).
         for fire_event_id in fire_event_ids_sorted:
             db_event = db_events_by_id.get(fire_event_id)
-            if db_event is None or FireEventStatus(db_event.status) not in _ACTIVE_STATUSES:
+            if db_event is None or FireEventStatus(db_event.status) not in _RESPONSE_ELIGIBLE_STATUSES:
                 raise GlobalPlanningStaleInput(
-                    f"FireEvent {fire_event_id!r} is no longer active/found; input is stale."
+                    f"FireEvent {fire_event_id!r} is no longer active/found (or not response-eligible); input is stale."
                 )
 
         # 2. The currently-active FireEvent set must not have grown beyond
@@ -343,7 +345,7 @@ class GlobalResponsePlanActivationService:
         currently_active_ids = frozenset(
             row[0]
             for row in session.execute(
-                select(FireEventDB.id).where(FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES))
+                select(FireEventDB.id).where(FireEventDB.status.in_(status.value for status in _RESPONSE_ELIGIBLE_STATUSES))
             )
         )
         unexpected_new_events = currently_active_ids - set(fire_event_ids_sorted)

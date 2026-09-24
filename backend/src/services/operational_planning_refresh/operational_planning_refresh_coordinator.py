@@ -72,6 +72,10 @@ class OperationalPlanningRefreshCoordinator:
         operational_result = self._run_operational_fire_event_refresh(fire_event_id, trigger_type, as_of)
         if not operational_result.success:
             return OperationalPlanningRefreshResult(operational_result=operational_result, global_planning_result=None)
+        if operational_result.status is OperationalRefreshStatus.NOT_RESPONSE_ELIGIBLE:
+            # Task 9A: a SUSPECTED event is active for monitoring only - no operational work happened, so there is
+            # nothing for global planning to react to (and no reason to load the road graph / run routing / the GA).
+            return OperationalPlanningRefreshResult(operational_result=operational_result, global_planning_result=None)
 
         global_planning_result = self._global_planning_refresh.refresh(trigger=trigger_type.value, as_of=as_of)
         return OperationalPlanningRefreshResult(
@@ -97,7 +101,12 @@ class OperationalPlanningRefreshCoordinator:
             self._run_operational_fire_event_refresh(fire_event_id, trigger_type, as_of)
             for fire_event_id in fire_event_ids
         )
-        if not any(result.success for result in operational_results):
+        if not any(
+            result.success and result.status is not OperationalRefreshStatus.NOT_RESPONSE_ELIGIBLE
+            for result in operational_results
+        ):
+            # No refresh succeeded, or every FireEvent in the batch was only active for monitoring (SUSPECTED,
+            # Task 9A): nothing changed for the emergency-response pipeline, so no global planning cycle runs.
             return OperationalPlanningRefreshBatchResult(
                 operational_results=operational_results, global_planning_result=None
             )

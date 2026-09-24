@@ -27,3 +27,9 @@ class FireDetectionCandidateAssessment:
     ml_probability: float | None
     ml_model_version: str | None
     agreement: FireDetectionMLRuleAgreement
+    # Task 9B: explainability for AI_HYBRID_V5 (None in every other mode). `ml_probability` is the model probability,
+    # `final_status` the policy-derived status; the 25-feature vector is deliberately not exposed.
+    ai_policy_version: str | None = None
+    ai_current_satellite_pixel_count: int | None = None
+    ai_satellite_pass_count: int | None = None
+    ai_history_available: bool | None = None

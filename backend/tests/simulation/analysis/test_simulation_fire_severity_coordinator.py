@@ -75,7 +75,7 @@ class FakeFireEventRepository:
         self.events = tuple(events)
         self.calls = []
 
-    def get_active_events_near(self, latitude, longitude, radius_km, as_of):
+    def get_response_eligible_events_near(self, latitude, longitude, radius_km, as_of):  # Task 9A: severity is response work
         self.calls.append(
             {
                 "latitude": latitude,
@@ -85,6 +85,11 @@ class FakeFireEventRepository:
             }
         )
         return self.events
+
+    def get_by_id(self, fire_event_id):
+        """A registered event, else a CONFIRMED one (these tests are about severity of response-eligible fires)."""
+        self.by_id_calls = getattr(self, "by_id_calls", []) + [fire_event_id]
+        return next((e for e in self.events if e.id == fire_event_id), None) or stored_event(fire_event_id)
 
 
 def make_scenario() -> SimulationScenario:
@@ -148,7 +153,7 @@ def stored_event(event_id, latitude=CARMEL_LOCATION.latitude, longitude=CARMEL_L
             longitude=longitude,
             detected_at=T20,
             updated_at=T20,
-            status=FireEventStatus.SUSPECTED,
+            status=FireEventStatus.CONFIRMED,  # only response-eligible events are assessed (Task 9A)
             detection_confidence=0.6,
             methodology="ECOGUARD_ACTIVE_FIRE_DETECTION",
             methodology_version="1.0",
@@ -467,3 +472,36 @@ def test_simulation_fire_severity_result_is_immutable():
 def test_non_triggered_result_requires_reason():
     with pytest.raises(ValueError):
         SimulationFireSeverityResult(triggered=False)
+
+
+# --- Task 9A: SUSPECTED events are active for monitoring but not assessed ---
+
+
+def test_a_suspected_event_from_detection_is_not_assessed_but_a_confirmed_one_is():
+    from dataclasses import replace
+
+    suspected = replace(stored_event(7), event=replace(stored_event(7).event, status=FireEventStatus.SUSPECTED))
+    repository = FakeFireEventRepository(events=(suspected, stored_event(8)))
+    agent = FakeSeverityAgent()
+    coordinator = SimulationFireSeverityCoordinator(severity_agent=agent, fire_event_repository=repository)
+    scenario = make_scenario()
+    satellite = next(e for e in scenario.events if e.event_type is SimulationEventType.SATELLITE)
+
+    result = handle(coordinator, scenario, satellite, T20, detection_result=make_detection_result((7, 8)))
+
+    assert [call["fire_event_id"] for call in agent.calls] == [8]  # only the CONFIRMED event was assessed
+    assert result.triggered
+
+
+def test_only_suspected_events_trigger_no_severity_work_at_all():
+    from dataclasses import replace
+
+    suspected = replace(stored_event(7), event=replace(stored_event(7).event, status=FireEventStatus.SUSPECTED))
+    agent = FakeSeverityAgent()
+    coordinator = SimulationFireSeverityCoordinator(severity_agent=agent, fire_event_repository=FakeFireEventRepository(events=(suspected,)))
+    scenario = make_scenario()
+    satellite = next(e for e in scenario.events if e.event_type is SimulationEventType.SATELLITE)
+
+    result = handle(coordinator, scenario, satellite, T20, detection_result=make_detection_result((7,)))
+
+    assert agent.calls == [] and not result.triggered and result.reason == "no_response_eligible_fire_events"

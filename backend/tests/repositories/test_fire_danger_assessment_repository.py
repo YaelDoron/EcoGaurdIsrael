@@ -499,3 +499,93 @@ def test_get_recent_with_level_in_rejects_invalid_limit(repository):
 def test_get_recent_with_level_in_rejects_non_level_values(repository):
     with pytest.raises(FireDangerAssessmentRepositoryError):
         repository.get_recent_with_level_in(("high",), 10)
+
+
+# --- get_assessed_between (Fire Detection context lookup) ---
+
+
+def test_get_assessed_between_returns_only_rows_in_window_newest_first(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    for minutes_ago in (90, 45, 30, 5):
+        repository.save_assessment(
+            make_assessment(assessed_at=ASSESSED_AT - timedelta(minutes=minutes_ago)),
+            (observation_id,),
+            (station_id,),
+        )
+    repository.save_assessment(  # after end_time: must never be returned for an earlier instant
+        make_assessment(assessed_at=ASSESSED_AT + timedelta(minutes=1)), (observation_id,), (station_id,)
+    )
+
+    result = repository.get_assessed_between(ASSESSED_AT - timedelta(minutes=60), ASSESSED_AT)
+
+    assert [stored.assessment.assessed_at for stored in result] == [
+        ASSESSED_AT - timedelta(minutes=5),
+        ASSESSED_AT - timedelta(minutes=30),
+        ASSESSED_AT - timedelta(minutes=45),
+    ]
+
+
+def test_get_assessed_between_bounds_are_inclusive(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    start = ASSESSED_AT - timedelta(minutes=60)
+    repository.save_assessment(make_assessment(assessed_at=start), (observation_id,), (station_id,))
+    repository.save_assessment(make_assessment(assessed_at=ASSESSED_AT), (observation_id,), (station_id,))
+
+    assert len(repository.get_assessed_between(start, ASSESSED_AT)) == 2
+
+
+def test_get_assessed_between_spans_all_areas_and_includes_insufficient_data(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    repository.save_assessment(make_assessment(area_id="area-a"), (observation_id,), (station_id,))
+    repository.save_assessment(
+        make_assessment(
+            area_id="area-b",
+            status=FireDangerAssessmentStatus.INSUFFICIENT_DATA,
+            score=None,
+            level=None,
+        ),
+        (),
+        (),
+    )
+
+    result = repository.get_assessed_between(ASSESSED_AT - timedelta(minutes=1), ASSESSED_AT)
+
+    assert {stored.assessment.area_id for stored in result} == {"area-a", "area-b"}
+    insufficient = next(stored for stored in result if stored.assessment.area_id == "area-b")
+    assert insufficient.assessment.status is FireDangerAssessmentStatus.INSUFFICIENT_DATA
+    assert insufficient.assessment.score is None
+
+
+def test_get_assessed_between_ties_are_ordered_by_id_descending(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    first = repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+    second = repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+
+    result = repository.get_assessed_between(ASSESSED_AT, ASSESSED_AT)
+
+    assert [stored.assessment_id for stored in result] == [second.assessment_id, first.assessment_id]
+
+
+def test_get_assessed_between_populates_source_traceability(repository, weather_repository):
+    observation_id, station_id = create_weather_observation(weather_repository, 1001)
+    saved = repository.save_assessment(make_assessment(), (observation_id,), (station_id,))
+
+    (stored,) = repository.get_assessed_between(ASSESSED_AT, ASSESSED_AT)
+
+    assert stored.assessment_id == saved.assessment_id
+    assert stored.observation_ids == (observation_id,)
+    assert stored.station_ids == (station_id,)
+
+
+def test_get_assessed_between_empty_window_returns_empty_tuple(repository):
+    assert repository.get_assessed_between(ASSESSED_AT - timedelta(hours=1), ASSESSED_AT) == ()
+
+
+def test_get_assessed_between_rejects_invalid_arguments(repository):
+    naive = datetime(2026, 9, 14, 12, 0)
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_assessed_between(naive, ASSESSED_AT)
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_assessed_between(ASSESSED_AT, naive)
+    with pytest.raises(FireDangerAssessmentRepositoryError):
+        repository.get_assessed_between(ASSESSED_AT, ASSESSED_AT - timedelta(minutes=1))

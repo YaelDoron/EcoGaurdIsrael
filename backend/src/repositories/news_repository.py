@@ -191,6 +191,34 @@ class NewsRepository:
                 observed_at=self._report_observed_at(db_report),
             )
 
+    def get_by_ids(self, report_ids: tuple[int, ...]) -> tuple[StoredWildfireReport, ...]:
+        """Return persisted reports for exact DB ids in ONE query (Task 9C: batches Fire Detection history retrieval).
+
+        Mirrors SatelliteHotspotRepository.get_by_ids: duplicate ids count once, ids with no row are silently omitted
+        (callers compare against what they asked for), deterministic ascending-id order.
+        """
+        try:
+            ids = tuple(report_ids)
+        except TypeError as exc:
+            raise NewsRepositoryError("report_ids must be iterable.") from exc
+        for value in ids:
+            self._validate_report_id(value)
+        ids = tuple(sorted(set(ids)))
+        if not ids:
+            return ()
+        with self._session_scope() as session:
+            db_reports = (
+                session.execute(select(WildfireReportDB).where(WildfireReportDB.id.in_(ids)).order_by(WildfireReportDB.id.asc()))
+                .scalars()
+                .all()
+            )
+            return tuple(
+                StoredWildfireReport(
+                    id=db_report.id, report=self._to_domain_report(db_report), observed_at=self._report_observed_at(db_report)
+                )
+                for db_report in db_reports
+            )
+
     @staticmethod
     def _find_by_source_url(session: Session, source_url: str) -> WildfireReportDB | None:
         return session.execute(

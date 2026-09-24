@@ -17,6 +17,7 @@ from src.database.models.response_target_set_db import ResponseTargetSetDB
 from src.database.models.route_planning_run_db import RoutePlanningRunDB
 from src.database.models.route_result_db import RouteResultDB
 from src.models import GraphNode, ResponseAction, ResponsePlan, ResponsePlanStatus
+from sqlalchemy import text
 from src.models.fire_event_status import FireEventStatus
 from src.models.resource_status import ResourceStatus
 from src.repositories.fire_event_repository import FireEventRepository
@@ -208,13 +209,18 @@ def test_resolve_preserves_historical_response_plan_and_actions(wiring, sqlite_s
 
 
 def test_dismiss_releases_commitments_and_sets_status(wiring, sqlite_session_factory):
+    # Task 9A: commitments can only be created for a CONFIRMED event. A SUSPECTED event that still owns commitments can
+    # only be legacy data (committed before 9A) - reproduce that by demoting the status directly, then dismiss it.
     session = sqlite_session_factory()
-    fire_event_id = _persist_fire_event(session, status="suspected")
+    fire_event_id = _persist_fire_event(session, status="confirmed")
     session.commit()
     session.close()
     _activate_plan_with_resources(
         sqlite_session_factory, wiring["response_plan_repository"], fire_event_id, ("R1",)
     )
+    with sqlite_session_factory() as session:
+        session.execute(text("UPDATE fire_events SET status = 'suspected' WHERE id = :id"), {"id": fire_event_id})
+        session.commit()
 
     result = wiring["lifecycle_service"].dismiss_event(fire_event_id, as_of=LATER)
 
@@ -230,15 +236,13 @@ def test_dismiss_releases_commitments_and_sets_status(wiring, sqlite_session_fac
 # ---------------------------------------------------------------------------
 
 
-def test_suspected_to_confirmed_transition_leaves_commitments_unchanged(wiring, sqlite_session_factory):
+def test_suspected_to_confirmed_transition_creates_no_commitments_and_only_then_allows_them(wiring, sqlite_session_factory):
     session = sqlite_session_factory()
     fire_event_id = _persist_fire_event(session, status="suspected")
     session.commit()
     session.close()
-    _activate_plan_with_resources(
-        sqlite_session_factory, wiring["response_plan_repository"], fire_event_id, ("R1", "R2")
-    )
-    before = wiring["resource_commitment_repository"].get_for_fire_event(fire_event_id)
+    commitments = wiring["resource_commitment_repository"]
+    assert commitments.get_for_fire_event(fire_event_id) == ()  # Task 9A: a SUSPECTED event owns no commitments
 
     stored = wiring["fire_event_repository"].get_by_id(fire_event_id)
     from dataclasses import replace
@@ -246,9 +250,11 @@ def test_suspected_to_confirmed_transition_leaves_commitments_unchanged(wiring, 
     confirmed_event = replace(stored.event, status=FireEventStatus.CONFIRMED, updated_at=LATER)
     wiring["fire_event_repository"].update_event(fire_event_id, confirmed_event)
 
-    after = wiring["resource_commitment_repository"].get_for_fire_event(fire_event_id)
-    assert after == before
-    assert {c.resource_id for c in after} == {"R1", "R2"}
+    assert commitments.get_for_fire_event(fire_event_id) == ()  # promotion itself commits nothing
+    _activate_plan_with_resources(
+        sqlite_session_factory, wiring["response_plan_repository"], fire_event_id, ("R1", "R2")
+    )  # ...but now the response-eligible event may commit resources
+    assert {c.resource_id for c in commitments.get_for_fire_event(fire_event_id)} == {"R1", "R2"}
 
 
 # ---------------------------------------------------------------------------

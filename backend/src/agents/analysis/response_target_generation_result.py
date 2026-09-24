@@ -12,6 +12,7 @@ class ResponseTargetGenerationStatus(Enum):
 
     GENERATED = "generated"
     INACTIVE_EVENT = "inactive_event"
+    NOT_RESPONSE_ELIGIBLE = "not_response_eligible"  # Task 9A: SUSPECTED - a successful no-op, nothing persisted
     FAILED = "failed"
 
 
@@ -50,7 +51,10 @@ class ResponseTargetGenerationResult:
 
         if self.status is ResponseTargetGenerationStatus.GENERATED:
             self._validate_generated_result(targets)
-        elif self.status is ResponseTargetGenerationStatus.INACTIVE_EVENT:
+        elif self.status in (
+            ResponseTargetGenerationStatus.INACTIVE_EVENT,
+            ResponseTargetGenerationStatus.NOT_RESPONSE_ELIGIBLE,
+        ):
             self._validate_inactive_result(targets)
         elif self.status is ResponseTargetGenerationStatus.FAILED:
             self._validate_failed_result(targets)

@@ -159,7 +159,7 @@ class GlobalPlanningRefreshCoordinator:
     def refresh(self, *, trigger: str, as_of: datetime) -> GlobalPlanningRefreshResult:
         self._validate_request(trigger, as_of)
 
-        active_fire_event_ids = self._fire_event_repository.get_active_fire_event_ids()
+        active_fire_event_ids = self._fire_event_repository.get_response_eligible_fire_event_ids()
         if not active_fire_event_ids:
             return GlobalPlanningRefreshResult(
                 status=GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS, trigger=trigger, as_of=as_of
@@ -188,7 +188,7 @@ class GlobalPlanningRefreshCoordinator:
             # changed between attempts (a new fire, a resolve) - re-capture
             # it fresh for the next full cycle rather than reusing the
             # stale snapshot.
-            active_fire_event_ids = self._fire_event_repository.get_active_fire_event_ids()
+            active_fire_event_ids = self._fire_event_repository.get_response_eligible_fire_event_ids()
             if not active_fire_event_ids:
                 return GlobalPlanningRefreshResult(
                     status=GlobalPlanningRefreshStatus.NO_ACTIVE_EVENTS,

@@ -142,6 +142,16 @@ class ResponseTargetGenerationAgent:
                 target_count=0,
                 error_message=None,
             )
+        if input_result.status is ResponseTargetInputStatus.NOT_RESPONSE_ELIGIBLE:
+            return ResponseTargetGenerationResult(
+                success=True,
+                fire_event_id=fire_event_id,
+                status=ResponseTargetGenerationStatus.NOT_RESPONSE_ELIGIBLE,
+                target_set_id=None,
+                targets=(),
+                target_count=0,
+                error_message=None,
+            )
         if input_result.status is not ResponseTargetInputStatus.READY:
             raise ValueError(f"Unsupported response-target input status: {input_result.status!r}")
         if input_result.input_data is None:

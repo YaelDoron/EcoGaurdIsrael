@@ -5,6 +5,12 @@ import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
 import type { ActiveFireEvent, ActiveFireEventMLSummary } from "../../types/activeFireEvents";
 import { SEVERITY_STATUS_CAPTION } from "./severityStatusCaption";
+import {
+  AI_LIKELIHOOD_HELP_TEXT,
+  SUSPECTED_MONITORING_LABEL,
+  formatLikelihood,
+  isAiHybridMode,
+} from "../status/fireDetectionPresentation";
 import "./ActiveFireEventCard.css";
 
 export interface ActiveFireEventCardProps {
@@ -66,6 +72,13 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
   // not percent) and label ("Rule") match Event Details' terminology now.
   const ruleScore = event.detection_confidence.toFixed(2);
   const aiScore = formatAiScore(event.ml_summary);
+  // AI Hybrid mode: the event's PERSISTED decision mode (ml_summary.mode) decides the presentation - the AI assessment is then THE
+  // detection value; the rule score is diagnostics only and is not shown. Legacy events (rule_only / shadow / hybrid, incl. old
+  // persisted rows) keep the "Rule | AI" row.
+  const isAiMode = isAiHybridMode(event.ml_summary?.mode);
+  const aiLikelihood = event.ml_summary && event.ml_summary.available ? formatLikelihood(event.ml_summary.model_score) : "Unavailable";
+  // SUSPECTED = monitored for more evidence; it is never response-planned, so say so instead of leaving it unexplained.
+  const isMonitoringOnly = event.status === "suspected";
   const severity = event.severity;
   const severityCaption = severity && severity.status !== "valid" ? SEVERITY_STATUS_CAPTION[severity.status] : null;
   const emphasize = event.status === "confirmed" && (severity?.level === "high" || severity?.level === "critical");
@@ -101,12 +114,18 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
 
         <div className="fire-event-card__row">
           <dt>Detection</dt>
-          <dd className="fire-event-card__scores">
-            <span>Rule {ruleScore}</span>
-            <span className="fire-event-card__scores-divider" aria-hidden="true">
-              |
-            </span>
-            <span>AI {aiScore}</span>
+          <dd className="fire-event-card__scores" title={isAiMode ? AI_LIKELIHOOD_HELP_TEXT : undefined}>
+            {isAiMode ? (
+              <span>AI likelihood {aiLikelihood}</span>
+            ) : (
+              <>
+                <span>Rule {ruleScore}</span>
+                <span className="fire-event-card__scores-divider" aria-hidden="true">
+                  |
+                </span>
+                <span>AI {aiScore}</span>
+              </>
+            )}
           </dd>
         </div>
 
@@ -117,6 +136,8 @@ export function ActiveFireEventCard({ event }: ActiveFireEventCardProps) {
           </dd>
         </div>
       </dl>
+
+      {isMonitoringOnly ? <p className="fire-event-card__monitoring">{SUSPECTED_MONITORING_LABEL}</p> : null}
 
       <Link to={`/events/${event.fire_event_id}`} className="fire-event-card__link">
         View Event

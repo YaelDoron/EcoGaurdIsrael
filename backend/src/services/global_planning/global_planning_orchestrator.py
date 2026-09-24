@@ -127,8 +127,11 @@ class GlobalPlanningOrchestrator:
         return self._to_global_result(completed, event_results)
 
     def _capture_snapshot(self, as_of: datetime) -> GlobalPlanningSnapshot:
-        """Capture the active-event set and its per-event/commitment context exactly once (Task 6)."""
-        active_fire_event_ids = self._fire_event_repository.get_active_fire_event_ids()  # already id-ASC (Task 9)
+        """Capture the RESPONSE-ELIGIBLE event set and its per-event/commitment context exactly once (Task 6).
+
+        Task 9A: only CONFIRMED events are planned for; SUSPECTED events are active for monitoring but never
+        consume routing / allocation / commitment work."""
+        active_fire_event_ids = self._fire_event_repository.get_response_eligible_fire_event_ids()  # id-ASC
 
         fingerprints: dict[int, str | None] = {}
         for fire_event_id in active_fire_event_ids:

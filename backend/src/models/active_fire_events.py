@@ -70,6 +70,8 @@ class ActiveFireEventMLSummary:
 
     available: bool
     model_score: float | None
+    # Which Fire Detection decision mode produced the assessment (e.g. "ai_hybrid_v5"); lets the dashboard label the scores correctly.
+    mode: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.available, bool):

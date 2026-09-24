@@ -268,15 +268,13 @@ def test_start_happy_path_returns_202_with_preparing_snapshot(monkeypatch):
     manager = FakeSimulationRunManager(start_result=make_preparing_snapshot())
     client = client_for(manager)
 
-    response = client.post(
-        START_ENDPOINT, json={"preset": "operations_demo", "seed": 42, "reset_demo_state": False}
-    )
+    response = client.post(START_ENDPOINT, json={"preset": "operations_demo", "seed": 42})
 
     assert response.status_code == 202
     body = response.json()
     assert body["state"] == "preparing"
     assert body["run_id"] == "run-1"
-    assert manager.start_calls == [{"preset_id": "operations_demo", "seed": 42, "reset_demo_state": False}]
+    assert manager.start_calls == [{"preset_id": "operations_demo", "seed": 42, "reset_demo_state": True}]
 
 
 def test_start_accepts_a_request_with_seed_omitted_entirely(monkeypatch):
@@ -298,19 +296,32 @@ def test_start_still_uses_an_explicit_seed_exactly_as_given(monkeypatch):
     manager = FakeSimulationRunManager(start_result=make_preparing_snapshot())
     client = client_for(manager)
 
-    client.post(START_ENDPOINT, json={"preset": "operations_demo", "seed": 42, "reset_demo_state": False})
+    client.post(START_ENDPOINT, json={"preset": "operations_demo", "seed": 42})
 
     assert manager.start_calls[0]["seed"] == 42
 
 
-def test_start_defaults_reset_demo_state_to_false(monkeypatch):
+def test_start_defaults_reset_demo_state_to_true(monkeypatch):
+    """Task 9A: the reset is mandatory, so the request field defaults to TRUE (it used to default to false)."""
     enable_control(monkeypatch)
     manager = FakeSimulationRunManager(start_result=make_preparing_snapshot())
     client = client_for(manager)
 
     client.post(START_ENDPOINT, json={"preset": "operations_demo", "seed": 42})
 
-    assert manager.start_calls[0]["reset_demo_state"] is False
+    assert manager.start_calls[0]["reset_demo_state"] is True
+
+
+def test_start_refuses_an_explicit_opt_out_of_the_reset_with_422_and_never_reaches_the_manager(monkeypatch):
+    enable_control(monkeypatch)
+    manager = FakeSimulationRunManager(start_result=make_preparing_snapshot())
+    client = client_for(manager)
+
+    response = client.post(START_ENDPOINT, json={"preset": "operations_demo", "seed": 42, "reset_demo_state": False})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "SIMULATION_RESET_REQUIRED"
+    assert manager.start_calls == []
 
 
 def test_start_forwards_reset_demo_state_true(monkeypatch):

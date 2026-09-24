@@ -67,69 +67,104 @@ class NewsMonitoringAgent:
             return path
         return PROJECT_ROOT / path
 
-    # The cycle of fetching, filtering, extracting, geocoding, and storing is encapsulated in this method.
+    # The cycle of fetching, filtering, analyzing, geocoding, translating, and storing is encapsulated in this method.
     def run_once(self) -> int:
-        """Runs a single fetch-filter-extract-geocode-store cycle. Returns the number
-        of new reports saved."""
+        """Runs a single fetch-filter-analyze-geocode-translate-store cycle. Returns the
+        number of new reports saved. A failure on one article is logged and that article
+        skipped - it never aborts the rest of the cycle."""
         # Fetch all entries from the configured RSS feeds
         entries = self.rss_fetcher.fetch_all()
         # Filter entries based on relevance to the configured keywords using the TextProcessor
-        relevant_entries = [
-            e for e in entries if self.text_processor.is_relevant(e["title"], e["summary"])
-        ]
+        relevant_entries = [e for e in entries if self._is_relevant_entry(e)]
         logger.info("%d/%d entries matched keyword filter", len(relevant_entries), len(entries))
 
         saved_count = 0
         for entry in relevant_entries:
-            source_url = entry["link"]
-            if not source_url or self.news_repository.exists_by_source_url(source_url):
-                continue
-
-            location_name = self.text_processor.extract_location(entry["title"], entry["summary"])
-            # Geocoding uses the ORIGINAL (Hebrew) location name, extracted
-            # above - Nominatim resolves Israeli place names most reliably
-            # in their native script. Translation happens after, and only
-            # changes what gets displayed/persisted, never what got geocoded.
-            latitude, longitude = self.geocoder.geocode(location_name)
-
-            title_en, summary_en, location_name_en = self.text_processor.translate_report(
-                entry["title"], entry["summary"], location_name
-            )
-
-            # Create a WildfireReport object with the translated text and the
-            # geocoded coordinates. The object is saved to the database.
-            report = WildfireReport(
-                source_url=source_url,
-                source_feed=entry["source_feed"],
-                title=title_en,
-                summary=summary_en,
-                location_name=location_name_en,
-                latitude=latitude,
-                longitude=longitude,
-                published_at=self._parse_published_at(entry.get("published")),
-                fetched_at=datetime.now(timezone.utc),
-                wildfire_signal_strength=analysis.wildfire_signal_strength,
-            )
-
             try:
-                save_result = self.news_repository.save_report(report)
-            except NewsRepositoryError:
-                logger.exception("Failed to save wildfire news report: %s", report.source_url)
-                continue
-
-            if not save_result.is_duplicate:
-                saved_count += 1
-                logger.info(
-                    "Saved report: '%s...' -> location=%s (%s, %s), signal=%s",
-                    report.title[:60],
-                    analysis.location_name,
-                    latitude,
-                    longitude,
-                    analysis.wildfire_signal_strength,
+                if self._process_entry(entry):
+                    saved_count += 1
+            except Exception:  # noqa: BLE001 - one bad article must never abort the whole cycle.
+                logger.exception(
+                    "Skipping wildfire news entry after an unexpected error: %s", self._entry_label(entry)
                 )
 
         logger.info("Cycle complete: %d new reports saved", saved_count)
         return saved_count
+
+    def _is_relevant_entry(self, entry: Any) -> bool:
+        """Keyword relevance for one entry; a malformed entry is logged and treated as irrelevant."""
+        try:
+            return bool(self.text_processor.is_relevant(entry["title"], entry["summary"]))
+        except Exception:  # noqa: BLE001 - a malformed entry must not abort the cycle.
+            logger.exception("Skipping malformed feed entry (relevance check failed): %s", self._entry_label(entry))
+            return False
+
+    def _process_entry(self, entry: dict[str, Any]) -> bool:
+        """Analyze, geocode, translate and persist ONE relevant entry.
+
+        Returns True only when a NEW report was saved (False for an already-known URL,
+        a duplicate the repository reports, or a repository failure that was logged).
+        """
+        source_url = entry["link"]
+        if not source_url or self.news_repository.exists_by_source_url(source_url):
+            return False
+
+        # ONE LLM call returns both the article's location and its wildfire signal
+        # strength. TextProcessor.analyze never raises: if the LLM is unavailable it
+        # returns location_name=None / wildfire_signal_strength=None ("analysis
+        # unavailable", never a fabricated NONE) and the report is still stored.
+        analysis = self.text_processor.analyze(entry["title"], entry["summary"])
+        # Geocoding uses the ORIGINAL (Hebrew) location name, extracted
+        # above - Nominatim resolves Israeli place names most reliably
+        # in their native script. Translation happens after, and only
+        # changes what gets displayed/persisted, never what got geocoded.
+        # Geocoder.geocode never raises: (None, None) on a miss or failure.
+        latitude, longitude = self.geocoder.geocode(analysis.location_name)
+
+        title_en, summary_en, location_name_en = self.text_processor.translate_report(
+            entry["title"], entry["summary"], analysis.location_name
+        )
+
+        # Create a WildfireReport object with the translated text, the geocoded
+        # coordinates and the analyzed signal strength. The object is saved to the database.
+        report = WildfireReport(
+            source_url=source_url,
+            source_feed=entry["source_feed"],
+            title=title_en,
+            summary=summary_en,
+            location_name=location_name_en,
+            latitude=latitude,
+            longitude=longitude,
+            published_at=self._parse_published_at(entry.get("published")),
+            fetched_at=datetime.now(timezone.utc),
+            wildfire_signal_strength=analysis.wildfire_signal_strength,
+        )
+
+        try:
+            save_result = self.news_repository.save_report(report)
+        except NewsRepositoryError:
+            logger.exception("Failed to save wildfire news report: %s", report.source_url)
+            return False
+
+        if save_result.is_duplicate:
+            return False
+
+        logger.info(
+            "Saved report: '%s...' -> location=%s (%s, %s), signal=%s",
+            report.title[:60],
+            analysis.location_name,
+            latitude,
+            longitude,
+            analysis.wildfire_signal_strength,
+        )
+        return True
+
+    @staticmethod
+    def _entry_label(entry: Any) -> str:
+        """A short, safe identifier for logging an entry that may itself be malformed."""
+        if isinstance(entry, dict):
+            return str(entry.get("link") or entry.get("title") or "<entry without link/title>")[:120]
+        return repr(entry)[:120]
 
     # Continuously runs the monitoring cycle at the configured inteval.
     def run_forever(self) -> None:

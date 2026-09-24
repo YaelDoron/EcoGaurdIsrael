@@ -1,0 +1,195 @@
+{
+  "confirm_threshold": 0.8,
+  "confirmatory_dataset_sha256": "7c24405e83fdceb1c4f74801da97d80aae84ea46161654c282df30ea190d8ead",
+  "confirmatory_metrics": {
+    "brier_score": 0.20884528615326153,
+    "confirmed_precision": 0.9366925064599483,
+    "confirmed_precision_non_sparse": 0.9366925064599483,
+    "confirmed_recall_all_positives": 0.145,
+    "confirmed_recall_non_sparse": 0.16111111111111112,
+    "confirmed_rows": 774,
+    "expected_calibration_error": 0.01738762798938668,
+    "false_confirmation_rate": 0.0098,
+    "false_confirmed_rows": 49,
+    "fire_retained_recall_non_sparse": 0.8175555555555556,
+    "non_sparse_no_fire_alert_rate": 0.5015555555555555,
+    "persistent_thermal_roc_auc": 0.7790665680473374,
+    "pr_auc": 0.7394429681330199,
+    "roc_auc": 0.72849198,
+    "rule_non_sparse_no_fire_alert_rate": 0.7944444444444444,
+    "sparse_confirmed_rate": 0.0
+  },
+  "created_at": "2026-09-24T15:28:16.119317+00:00",
+  "feature_names": [
+    "satellite_low_count",
+    "satellite_nominal_count",
+    "satellite_high_count",
+    "satellite_frp_available_ratio",
+    "satellite_frp_mean",
+    "satellite_frp_max",
+    "satellite_brightness_available_ratio",
+    "satellite_brightness_mean",
+    "satellite_brightness_max",
+    "news_none_count",
+    "news_weak_count",
+    "news_moderate_count",
+    "news_strong_count",
+    "news_unknown_count",
+    "satellite_frp_sum",
+    "satellite_frp_std",
+    "satellite_brightness_std",
+    "satellite_night_fraction",
+    "satellite_cluster_radius_km",
+    "news_satellite_lag_minutes",
+    "satellite_pass_count",
+    "satellite_history_span_minutes",
+    "satellite_centroid_stability_km",
+    "satellite_frp_trend_per_hour",
+    "satellite_brightness_trend_per_hour"
+  ],
+  "feature_schema_version": "v5",
+  "hyperparameters": {
+    "early_stopping": false,
+    "l2_regularization": 1.0,
+    "learning_rate": 0.1,
+    "max_depth": 3,
+    "max_iter": 200,
+    "min_samples_leaf": 40
+  },
+  "joblib_version": "1.5.3",
+  "known_limitations": [
+    "trained and confirmed ONLY on synthetic data; not a measure of real-world wildfire detection accuracy",
+    "the policy is offline: not integrated into FireDetectionAgent, the decision policy or any runtime path",
+    "static confirmatory data cannot prove sequential temporal progression of one event",
+    "SUSPECTED currently triggers the full response pipeline; runtime semantics must change before integration"
+  ],
+  "model_name": "fire_detection_hgb_v5",
+  "model_type": "HistGradientBoostingClassifier",
+  "model_version": "5.0",
+  "multi_pixel_corroboration": "satellite_low_count + satellite_nominal_count + satellite_high_count >= 2 (hotspots of the current candidate)",
+  "numpy_version": "2.0.2",
+  "outcome_matrix": {
+    "all_rows": {
+      "fire": {
+        "CONFIRMED": 725,
+        "NO_EVENT": 939,
+        "SUSPECTED": 3336,
+        "rates": {
+          "CONFIRMED": 0.145,
+          "NO_EVENT": 0.1878,
+          "SUSPECTED": 0.6672
+        },
+        "rows": 5000
+      },
+      "no_fire": {
+        "CONFIRMED": 49,
+        "NO_EVENT": 2423,
+        "SUSPECTED": 2528,
+        "rates": {
+          "CONFIRMED": 0.0098,
+          "NO_EVENT": 0.4846,
+          "SUSPECTED": 0.5056
+        },
+        "rows": 5000
+      }
+    },
+    "non_sparse_rows": {
+      "fire": {
+        "CONFIRMED": 725,
+        "NO_EVENT": 821,
+        "SUSPECTED": 2954,
+        "rates": {
+          "CONFIRMED": 0.16111111111111112,
+          "NO_EVENT": 0.18244444444444444,
+          "SUSPECTED": 0.6564444444444445
+        },
+        "rows": 4500
+      },
+      "no_fire": {
+        "CONFIRMED": 49,
+        "NO_EVENT": 2243,
+        "SUSPECTED": 2208,
+        "rates": {
+          "CONFIRMED": 0.010888888888888889,
+          "NO_EVENT": 0.49844444444444447,
+          "SUSPECTED": 0.49066666666666664
+        },
+        "rows": 4500
+      }
+    }
+  },
+  "policy_gate": {
+    "criteria": {
+      "brier_score": {
+        "passed": true,
+        "requirement": "< 0.25",
+        "value": 0.20884528615326153
+      },
+      "confirmed_precision": {
+        "passed": true,
+        "requirement": ">= 0.9",
+        "value": 0.9366925064599483
+      },
+      "confirmed_recall_non_sparse": {
+        "passed": true,
+        "requirement": ">= 0.1",
+        "value": 0.16111111111111112
+      },
+      "expected_calibration_error": {
+        "passed": true,
+        "requirement": "<= 0.1",
+        "value": 0.01738762798938668
+      },
+      "false_confirmation_rate": {
+        "passed": true,
+        "requirement": "<= 0.1",
+        "value": 0.0098
+      },
+      "fire_retained_recall_non_sparse": {
+        "passed": true,
+        "requirement": ">= 0.8",
+        "value": 0.8175555555555556
+      },
+      "non_sparse_no_fire_alert_rate_vs_rules": {
+        "passed": true,
+        "requirement": "<= 0.75 x the rule detector's 0.794 = 0.596",
+        "value": 0.5015555555555555
+      },
+      "persistent_thermal_roc_auc": {
+        "passed": true,
+        "requirement": ">= 0.7",
+        "value": 0.7790665680473374
+      },
+      "sparse_confirmed_rate": {
+        "passed": true,
+        "requirement": "<= 0.05",
+        "value": 0.0
+      }
+    },
+    "failed_criteria": [],
+    "passed": true
+  },
+  "policy_version": "ai_hybrid_policy_v5.0",
+  "preprocessing": {
+    "imputation": "none (HistGradientBoostingClassifier handles NaN natively)",
+    "missing_indicators": "none",
+    "nullable_features": [
+      "satellite_night_fraction",
+      "satellite_cluster_radius_km",
+      "news_satellite_lag_minutes",
+      "satellite_history_span_minutes",
+      "satellite_centroid_stability_km",
+      "satellite_frp_trend_per_hour",
+      "satellite_brightness_trend_per_hour"
+    ],
+    "scaling": "none"
+  },
+  "python_version": "3.9.6",
+  "random_seed": 42,
+  "scikit_learn_version": "1.6.1",
+  "suspect_threshold": 0.4,
+  "synthetic_data_notice": "All training and confirmatory evaluation data is SYNTHETIC. These results describe the AI Hybrid policy on the V5 benchmark generator and are NOT real-world wildfire detection accuracy.",
+  "task_7_binary_primary_model_gate": "FAILED",
+  "task_8_ai_hybrid_policy_gate": "PASSED",
+  "training_dataset_sha256": "37e056793fb4dda72f517a20153b21094b284e1579a065140483b8a6e1d78035"
+}

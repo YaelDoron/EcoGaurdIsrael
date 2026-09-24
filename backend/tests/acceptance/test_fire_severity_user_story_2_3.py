@@ -113,6 +113,17 @@ class FakeFireEventRepository:
         self.calls.append({"latitude": latitude, "longitude": longitude, "radius_km": radius_km, "as_of": as_of})
         return self.events
 
+    def get_by_id(self, fire_event_id):
+        # Task 9A: the satellite path re-reads each detected event's status; the fixture events are CONFIRMED.
+        for stored in self.events:
+            if stored.id == fire_event_id:
+                return stored
+        return StoredFireEvent(fire_event_id, _fire_event_at(CARMEL_LATITUDE, CARMEL_LONGITUDE))
+
+    def get_response_eligible_events_near(self, latitude, longitude, radius_km, as_of):
+        # Task 9A: the fixture events are CONFIRMED; the eligible query is the one the coordinators now use.
+        return self.get_active_events_near(latitude, longitude, radius_km, as_of)
+
 
 class FakeDetectionAgent:
     def __init__(self, result: FireDetectionResult) -> None:
@@ -652,7 +663,7 @@ def _fire_event_at(latitude: float, longitude: float) -> FireEvent:
         longitude=longitude,
         detected_at=AS_OF,
         updated_at=AS_OF,
-        status=FireEventStatus.SUSPECTED,
+        status=FireEventStatus.CONFIRMED,  # Task 9A: only CONFIRMED events trigger severity
         detection_confidence=0.6,
         methodology="ECOGUARD_MULTI_SOURCE_DETECTION",
         methodology_version="1.0",

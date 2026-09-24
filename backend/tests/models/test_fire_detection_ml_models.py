@@ -222,7 +222,11 @@ def test_fire_event_ml_assessment_requires_aware_datetime():
 
 
 def test_decision_mode_values():
-    assert {mode.value for mode in FireDetectionDecisionMode} == {"rule_only", "shadow", "hybrid"}
+    # The three legacy modes keep their exact values; Task 9B ADDED ai_hybrid_v5 without redefining any of them.
+    assert {mode.value for mode in FireDetectionDecisionMode} == {"rule_only", "shadow", "hybrid", "ai_hybrid_v5"}
+    assert FireDetectionDecisionMode("rule_only") is FireDetectionDecisionMode.RULE_ONLY
+    assert FireDetectionDecisionMode("shadow") is FireDetectionDecisionMode.SHADOW
+    assert FireDetectionDecisionMode("hybrid") is FireDetectionDecisionMode.HYBRID
 
 
 def test_agreement_values():

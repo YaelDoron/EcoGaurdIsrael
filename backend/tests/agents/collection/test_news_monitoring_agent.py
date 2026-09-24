@@ -48,7 +48,10 @@ def make_agent(
 
 def _wire_success(text_processor: Mock, geocoder: Mock, news_repository: Mock) -> None:
     text_processor.is_relevant.return_value = True
-    text_processor.extract_location.return_value = "Haifa"
+    text_processor.analyze.return_value = NewsTextAnalysis(
+        location_name="Haifa",
+        wildfire_signal_strength=NewsWildfireSignalStrength.STRONG,
+    )
     # translate_report's default double is a passthrough (returns its own
     # arguments unchanged) so tests that don't care about translation still
     # see the same title/summary/location_name they set up on the entry -
@@ -158,7 +161,10 @@ def test_saved_report_uses_the_translated_text_not_the_raw_hebrew_entry():
         make_entry(title="שריפה גדולה בכרמל", summary="כוחות כיבוי בדרך למקום.")
     ]
     _wire_success(text_processor, geocoder, news_repository)
-    text_processor.extract_location.return_value = "כרמל"
+    text_processor.analyze.return_value = NewsTextAnalysis(
+        location_name="כרמל",
+        wildfire_signal_strength=NewsWildfireSignalStrength.STRONG,
+    )
     # Overrides _wire_success's passthrough double: side_effect (not just
     # return_value) must be cleared, or Mock would keep using it.
     text_processor.translate_report.side_effect = None
@@ -194,7 +200,7 @@ def test_irrelevant_article_is_not_saved():
     assert saved_count == 0
     news_repository.exists_by_source_url.assert_not_called()
     news_repository.save_report.assert_not_called()
-    text_processor.extract_location.assert_not_called()
+    text_processor.analyze.assert_not_called()
     text_processor.translate_report.assert_not_called()
     geocoder.geocode.assert_not_called()
 
@@ -213,7 +219,7 @@ def test_duplicate_article_is_skipped_before_external_processing():
 
     assert saved_count == 0
     news_repository.save_report.assert_not_called()
-    text_processor.extract_location.assert_not_called()
+    text_processor.analyze.assert_not_called()
     text_processor.translate_report.assert_not_called()
     geocoder.geocode.assert_not_called()
 
