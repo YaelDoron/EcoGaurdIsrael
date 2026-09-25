@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from src.models.fire_spread_input import FireSpreadInput
 from src.models.fire_spread_input_status import FireSpreadInputStatus
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,9 @@ class FireSpreadInputResult:
     resolved before the failure point (e.g. a severity assessment id even
     though weather selection subsequently failed), mirroring
     FireSeverityInputResult's own traceability pattern.
+
+    `insufficient_data_reason` is required for INSUFFICIENT_DATA and must be
+    None for READY/INACTIVE_EVENT.
     """
 
     status: FireSpreadInputStatus
@@ -25,6 +29,7 @@ class FireSpreadInputResult:
     fire_event_id: int
     severity_assessment_id: int | None = None
     weather_observation_id: int | None = None
+    insufficient_data_reason: FireSpreadInsufficientDataReason | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.fire_event_id, bool) or not isinstance(self.fire_event_id, int) or self.fire_event_id <= 0:
@@ -44,6 +49,15 @@ class FireSpreadInputResult:
                 raise ValueError("READY spread input result requires weather_observation_id.")
         elif self.input_data is not None:
             raise ValueError(f"{self.status.value} spread input result must not include input_data.")
+
+        if self.status is FireSpreadInputStatus.INSUFFICIENT_DATA:
+            if not isinstance(self.insufficient_data_reason, FireSpreadInsufficientDataReason):
+                raise ValueError(
+                    "insufficient_data spread input result requires a FireSpreadInsufficientDataReason, "
+                    f"got {self.insufficient_data_reason!r}"
+                )
+        elif self.insufficient_data_reason is not None:
+            raise ValueError(f"{self.status.value} spread input result must not include insufficient_data_reason.")
 
     @staticmethod
     def _validate_optional_positive_int(field_name: str, value: object) -> None:

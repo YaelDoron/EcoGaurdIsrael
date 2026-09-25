@@ -40,6 +40,7 @@ class WeatherObservationDB(Base):
 
     temperature: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     relative_humidity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # wind_speed / wind_gust are km/h (canonical WeatherObservation unit).
     wind_speed: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     wind_direction: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     wind_gust: Mapped[Optional[float]] = mapped_column(Float, nullable=True)

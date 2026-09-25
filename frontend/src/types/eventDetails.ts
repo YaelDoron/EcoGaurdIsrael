@@ -12,6 +12,18 @@ export type FireDangerLevel = "low" | "moderate" | "high" | "very_high" | "extre
 
 export type FireSpreadPredictionStatus = "valid" | "insufficient_data" | "inactive_event";
 
+/** Backend FireSpreadInsufficientDataReason values (only set for "insufficient_data"). */
+export type SpreadInsufficientDataReason =
+  | "event_unavailable"
+  | "missing_severity"
+  | "severity_not_valid"
+  | "missing_weather"
+  | "incomplete_weather"
+  | "stale_weather"
+  | "future_weather"
+  | "missing_vegetation"
+  | "unsupported_vegetation";
+
 export type ResourceStatus = "available" | "assigned" | "unavailable";
 
 export type ResponseTargetType = "active_fire" | "predicted_risk";
@@ -93,6 +105,20 @@ export interface SpreadPrediction {
   status: FireSpreadPredictionStatus;
   predicted_at: string;
   cells: SpreadPredictionCell[];
+  /** Why an "insufficient_data" prediction is unavailable; null otherwise and on historical rows. */
+  insufficient_data_reason?: SpreadInsufficientDataReason | null;
+}
+
+/**
+ * US 4.2 methodology 1.1: a cell whose spread_probability reaches this
+ * threshold is propagation-capable ("spreading"); below it (but > 0) it is a
+ * risk-only cell that the model does not treat as spreading further. Mirrors
+ * the backend's PROPAGATION_THRESHOLD.
+ */
+export const SPREAD_PROPAGATION_THRESHOLD = 0.5;
+
+export function isSpreadingCell(cell: SpreadPredictionCell): boolean {
+  return cell.spread_probability >= SPREAD_PROPAGATION_THRESHOLD;
 }
 
 export interface ResponseTarget {

@@ -14,6 +14,7 @@ from src.models import (
     FireSpreadInput,
     FireSpreadInputResult,
     FireSpreadInputStatus,
+    FireSpreadInsufficientDataReason,
 )
 
 FIRE_EVENT_ID = 42
@@ -178,12 +179,35 @@ def test_methodology_identity_difference_changes_fingerprint(methodology, method
     assert changed.fingerprint != baseline.fingerprint
 
 
+def test_methodology_1_1_fingerprint_differs_from_legacy_1_0_so_old_predictions_are_not_reused():
+    # Methodology 1.1 emits risk-only cells; a stored 1.0 prediction (which
+    # dropped them) for identical inputs must never be matched as a NO_OP.
+    assert METHODOLOGY_VERSION == "1.1"
+    current = make_state()
+    legacy = FireSpreadEffectiveState.from_input(
+        fire_event_id=FIRE_EVENT_ID,
+        spread_input=make_input(),
+        methodology_version="1.0",
+    )
+
+    assert current.fingerprint != legacy.fingerprint
+
+
 @pytest.mark.parametrize(
     "status",
     [FireSpreadInputStatus.INSUFFICIENT_DATA, FireSpreadInputStatus.INACTIVE_EVENT],
 )
 def test_non_ready_input_results_do_not_provide_fake_effective_state(status):
-    result = FireSpreadInputResult(status=status, input_data=None, fire_event_id=FIRE_EVENT_ID)
+    result = FireSpreadInputResult(
+        status=status,
+        input_data=None,
+        fire_event_id=FIRE_EVENT_ID,
+        insufficient_data_reason=(
+            FireSpreadInsufficientDataReason.MISSING_WEATHER
+            if status is FireSpreadInputStatus.INSUFFICIENT_DATA
+            else None
+        ),
+    )
 
     with pytest.raises(ValueError):
         FireSpreadEffectiveState.from_input(fire_event_id=FIRE_EVENT_ID, spread_input=result.input_data)

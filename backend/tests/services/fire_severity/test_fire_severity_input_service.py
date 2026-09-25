@@ -10,7 +10,12 @@ from src.calculators.fire_detection.fire_detection_config import (
     FIRE_DETECTION_METHODOLOGY_VERSION,
 )
 from src.external.copernicus import (
+    CopernicusAuthenticationError,
+    CopernicusClientError,
+    CopernicusConfigurationError,
     CopernicusCoverFraction,
+    CopernicusInvalidResponseError,
+    CopernicusLandCoverClient,
     CopernicusLandCoverStatistics,
     CopernicusServiceUnavailableError,
 )
@@ -422,6 +427,157 @@ def test_copernicus_failure_is_ready_without_vegetation_when_mandatory_inputs_ex
     assert result.status is FireSeverityInputStatus.READY
     assert result.input_data.vegetation_fuel_score is None
     assert result.vegetation_data is None
+
+
+# ---------------------------------------------------------------------------
+# Copernicus failure logging (vegetation stays optional)
+# ---------------------------------------------------------------------------
+
+_SERVICE_LOGGER = "src.services.fire_severity.fire_severity_input_service"
+
+
+def _warnings(caplog):
+    return [record for record in caplog.records if record.levelname == "WARNING" and record.name == _SERVICE_LOGGER]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        CopernicusConfigurationError("Copernicus credentials are not configured."),
+        CopernicusAuthenticationError("Copernicus authentication failed."),
+        CopernicusServiceUnavailableError("Copernicus statistics request timed out."),
+        CopernicusInvalidResponseError("Copernicus statistics returned invalid JSON."),
+        CopernicusClientError("Copernicus statistics request failed with HTTP 404."),
+    ],
+)
+def test_copernicus_failure_logs_one_warning_and_severity_stays_ready(caplog, error):
+    service, *_ = build_service(copernicus_error=error)
+
+    with caplog.at_level("INFO", logger=_SERVICE_LOGGER):
+        result = service.prepare_input(10, AS_OF)
+
+    assert result.status is FireSeverityInputStatus.READY
+    assert result.vegetation_data is None
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    message = warnings[0].getMessage()
+    assert "FireEvent 10" in message
+    assert "32.73100" in message and "35.04600" in message
+    assert type(error).__name__ in message
+    assert str(error) in message
+
+
+@pytest.mark.parametrize(
+    "statistics",
+    [
+        None,
+        CopernicusLandCoverStatistics(
+            cover_fractions=(CopernicusCoverFraction("unknown", 1.0),),
+            source="COPERNICUS_GLOBAL_LAND_COVER_100M_API",
+            dataset_year=2019,
+            radius_km=VEGETATION_RADIUS_KM,
+        ),
+    ],
+)
+def test_successful_no_data_logs_no_warning(caplog, statistics):
+    service, *_ = build_service(statistics=statistics)
+
+    with caplog.at_level("INFO", logger=_SERVICE_LOGGER):
+        result = service.prepare_input(10, AS_OF)
+
+    assert result.status is FireSeverityInputStatus.READY
+    assert result.vegetation_data is None
+    assert _warnings(caplog) == []
+    assert any("no usable vegetation" in record.getMessage() for record in caplog.records)
+
+
+def test_successful_vegetation_logs_no_warning(caplog):
+    service, *_ = build_service(
+        statistics=CopernicusLandCoverStatistics(
+            cover_fractions=(CopernicusCoverFraction("tree", 1.0),),
+            source="COPERNICUS_GLOBAL_LAND_COVER_100M_API",
+            dataset_year=2019,
+            radius_km=VEGETATION_RADIUS_KM,
+        )
+    )
+
+    with caplog.at_level("INFO", logger=_SERVICE_LOGGER):
+        result = service.prepare_input(10, AS_OF)
+
+    assert result.vegetation_data.dominant_land_cover == "Tree cover"
+    assert _warnings(caplog) == []
+    assert not any("Copernicus" in record.getMessage() for record in caplog.records)
+
+
+_SENTINEL_CLIENT_ID = "sentinel-client-id-7f3a"
+_SENTINEL_SECRET = "sentinel-client-secret-9c1e"
+_SENTINEL_TOKEN = "sentinel-access-token-4b8d"
+
+
+class _FakeHttpResponse:
+    def __init__(self, status_code=200, payload=None):
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _real_client_service(client):
+    service, *_ = build_service()
+    service._land_cover_client = client
+    return service
+
+
+@pytest.mark.parametrize(
+    ("token_response", "statistics_response"),
+    [
+        (_FakeHttpResponse(401, None), None),
+        (
+            _FakeHttpResponse(200, {"access_token": _SENTINEL_TOKEN, "expires_in": 3600}),
+            _FakeHttpResponse(403, None),
+        ),
+        (
+            _FakeHttpResponse(200, {"access_token": _SENTINEL_TOKEN, "expires_in": 3600}),
+            _FakeHttpResponse(200, {"data": [{"outputs": {"vegetation": {"bands": ["malformed"]}}}]}),
+        ),
+    ],
+)
+def test_copernicus_failure_logs_never_contain_credentials_or_token(caplog, monkeypatch, token_response, statistics_response):
+    import requests
+
+    def fake_post(url, **kwargs):
+        return token_response if "token" in url else statistics_response
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    client = CopernicusLandCoverClient(
+        client_id=_SENTINEL_CLIENT_ID,
+        client_secret=_SENTINEL_SECRET,
+        token_url="https://token.example.test",
+        statistics_url="https://stats.example.test",
+    )
+
+    with caplog.at_level("DEBUG"):
+        result = _real_client_service(client).prepare_input(10, AS_OF)
+
+    assert result.status is FireSeverityInputStatus.READY
+    assert result.vegetation_data is None
+    assert len(_warnings(caplog)) == 1
+    for sentinel in (_SENTINEL_CLIENT_ID, _SENTINEL_SECRET, _SENTINEL_TOKEN, "Bearer"):
+        assert sentinel not in caplog.text
+
+
+def test_missing_credentials_with_real_client_log_configuration_warning(caplog):
+    client = CopernicusLandCoverClient(client_id="", client_secret="", token_url="t", statistics_url="s")
+
+    with caplog.at_level("INFO", logger=_SERVICE_LOGGER):
+        result = _real_client_service(client).prepare_input(10, AS_OF)
+
+    assert result.status is FireSeverityInputStatus.READY
+    assert result.vegetation_data is None
+    warnings = _warnings(caplog)
+    assert len(warnings) == 1
+    assert "CopernicusConfigurationError" in warnings[0].getMessage()
 
 
 def test_same_inputs_are_deterministic():

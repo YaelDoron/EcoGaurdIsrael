@@ -367,6 +367,65 @@ def test_save_insufficient_data_with_zero_cells(repository, event_id):
     assert stored.weather_observation_id is None
 
 
+def _raw_reason(sqlite_session_factory, prediction_id: int):
+    from src.database.models.fire_spread_prediction_db import FireSpreadPredictionDB
+
+    with sqlite_session_factory() as session:
+        return session.get(FireSpreadPredictionDB, prediction_id).insufficient_data_reason
+
+
+def test_insufficient_data_reason_round_trips_through_every_read_path(repository, event_id, sqlite_session_factory):
+    from src.models import FireSpreadInsufficientDataReason
+
+    reason = FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION
+    stored = repository.save_prediction(
+        prediction=make_prediction(
+            event_id, None, status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, cells=(), insufficient_data_reason=reason
+        ),
+        weather_observation_id=None,
+    )
+
+    assert _raw_reason(sqlite_session_factory, stored.id) == "unsupported_vegetation"
+    assert stored.prediction.insufficient_data_reason is reason
+    assert repository.get_by_id(stored.id).prediction.insufficient_data_reason is reason
+    assert repository.get_latest_for_event_and_horizon(event_id, 30).prediction.insufficient_data_reason is reason
+    assert (
+        repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT).prediction.insufficient_data_reason
+        is reason
+    )
+    assert (
+        repository.get_latest_for_event_and_horizons_as_of(event_id, (30,), PREDICTED_AT)[30].prediction.insufficient_data_reason
+        is reason
+    )
+
+
+def test_legacy_insufficient_data_row_with_null_reason_round_trips_as_none(repository, event_id, sqlite_session_factory):
+    stored = repository.save_prediction(
+        prediction=make_prediction(event_id, None, status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, cells=()),
+        weather_observation_id=None,
+    )
+
+    assert _raw_reason(sqlite_session_factory, stored.id) is None
+    assert repository.get_by_id(stored.id).prediction.insufficient_data_reason is None
+    assert (
+        repository.get_latest_for_event_and_horizon_as_of(event_id, 30, PREDICTED_AT).prediction.insufficient_data_reason
+        is None
+    )
+
+
+def test_valid_prediction_stores_null_reason(
+    repository, event_id, severity_repository, weather_repository, satellite_repository, sqlite_session_factory
+):
+    assessment_id = persist_assessment(severity_repository, weather_repository, satellite_repository, event_id)
+    stored = repository.save_prediction(
+        prediction=make_prediction(event_id, assessment_id),
+        weather_observation_id=persist_weather(weather_repository),
+    )
+
+    assert _raw_reason(sqlite_session_factory, stored.id) is None
+    assert repository.get_by_id(stored.id).prediction.insufficient_data_reason is None
+
+
 def test_save_inactive_event_with_zero_cells(repository, fire_event_repository, satellite_repository):
     # FireEventRepository.create_event only accepts SUSPECTED/CONFIRMED; an
     # event transitions to RESOLVED via update_event, matching its real lifecycle.

@@ -18,6 +18,7 @@ from src.models.fire_spread_fuel_class import FireSpreadFuelClass
 from src.models.fire_spread_input import FireSpreadInput
 from src.models.fire_spread_input_result import FireSpreadInputResult
 from src.models.fire_spread_input_status import FireSpreadInputStatus
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_prediction import SUPPORTED_HORIZON_MINUTES
 from src.models.weather_observation import WeatherObservation
 from src.repositories.fire_event_repository import FireEventRepository, StoredFireEvent
@@ -32,14 +33,9 @@ from src.utils.geo import haversine_distance_km
 _ACTIVE_EVENT_STATUSES = {FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED}
 _INACTIVE_EVENT_STATUSES = {FireEventStatus.RESOLVED, FireEventStatus.DISMISSED}
 
-# IMS's WS channel is documented in meters/second (verified in Task 4A against
-# the official IMS API documentation, Appendix C); WeatherMapper persists it
-# unconverted. FireSpreadCalculator's verified contract requires km/h
-# (fire_spread_prediction.md, Scientific Verification Details). This is the
-# single, explicit conversion point for wildfire-spread prediction -- it does
-# not touch WeatherMapper or the existing Fire Danger/Fire Severity pipelines,
-# which are out of scope for this task.
-_MS_TO_KMH = 3.6
+# WeatherObservation.wind_speed is canonically km/h (IMS m/s is converted once,
+# at ingestion, by WeatherMapper), which is exactly FireSpreadCalculator's
+# `wind_speed_kmh` contract - so it is passed through with no conversion here.
 
 # Verified official PROPAGATOR classes reachable from EcoGuard's exact
 # Copernicus dominant_land_cover labels (backend/src/mappers/vegetation_mapper.py).
@@ -79,6 +75,7 @@ class FireSpreadSharedContext:
     fuel_class: FireSpreadFuelClass | None = None
     severity_assessment_id: int | None = None
     weather_observation_id: int | None = None
+    insufficient_data_reason: FireSpreadInsufficientDataReason | None = None
 
 
 class FireSpreadInputService:
@@ -134,7 +131,11 @@ class FireSpreadInputService:
 
         stored_event = self._fire_event_repository.get_by_id(fire_event_id)
         if stored_event is None:
-            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
+                insufficient_data_reason=FireSpreadInsufficientDataReason.EVENT_UNAVAILABLE,
+            )
         return self.prepare_shared_context_for_event(stored_event, as_of)
 
     def prepare_shared_context_for_event(
@@ -163,7 +164,11 @@ class FireSpreadInputService:
         if stored_event.event.status in _INACTIVE_EVENT_STATUSES:
             return FireSpreadSharedContext(status=FireSpreadInputStatus.INACTIVE_EVENT, fire_event_id=fire_event_id)
         if stored_event.event.status not in _ACTIVE_EVENT_STATUSES:
-            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
+                insufficient_data_reason=FireSpreadInsufficientDataReason.EVENT_UNAVAILABLE,
+            )
 
         latest_assessment = (
             resolved_severity
@@ -171,29 +176,41 @@ class FireSpreadInputService:
             else self._fire_severity_assessment_repository.get_latest_for_event_as_of(fire_event_id, as_of)
         )
         if latest_assessment is None or latest_assessment.assessment.fire_event_id != fire_event_id:
-            return FireSpreadSharedContext(status=FireSpreadInputStatus.INSUFFICIENT_DATA, fire_event_id=fire_event_id)
+            return FireSpreadSharedContext(
+                status=FireSpreadInputStatus.INSUFFICIENT_DATA,
+                fire_event_id=fire_event_id,
+                insufficient_data_reason=FireSpreadInsufficientDataReason.MISSING_SEVERITY,
+            )
         if latest_assessment.assessment.status is not FireSeverityAssessmentStatus.VALID:
             return FireSpreadSharedContext(
                 status=FireSpreadInputStatus.INSUFFICIENT_DATA,
                 fire_event_id=fire_event_id,
                 severity_assessment_id=latest_assessment.assessment_id,
+                insufficient_data_reason=FireSpreadInsufficientDataReason.SEVERITY_NOT_VALID,
             )
 
-        selected_weather = self._select_weather(stored_event, latest_assessment, as_of)
+        selected_weather, weather_reason = self._select_weather(stored_event, latest_assessment, as_of)
         if selected_weather is None:
             return FireSpreadSharedContext(
                 status=FireSpreadInputStatus.INSUFFICIENT_DATA,
                 fire_event_id=fire_event_id,
                 severity_assessment_id=latest_assessment.assessment_id,
+                insufficient_data_reason=weather_reason,
             )
 
-        fuel_class = _map_dominant_land_cover(latest_assessment.assessment.vegetation_dominant_land_cover)
+        dominant_land_cover = latest_assessment.assessment.vegetation_dominant_land_cover
+        fuel_class = _map_dominant_land_cover(dominant_land_cover)
         if fuel_class is None:
             return FireSpreadSharedContext(
                 status=FireSpreadInputStatus.INSUFFICIENT_DATA,
                 fire_event_id=fire_event_id,
                 severity_assessment_id=latest_assessment.assessment_id,
                 weather_observation_id=selected_weather.observation_id,
+                insufficient_data_reason=(
+                    FireSpreadInsufficientDataReason.MISSING_VEGETATION
+                    if dominant_land_cover is None
+                    else FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION
+                ),
             )
 
         return FireSpreadSharedContext(
@@ -201,7 +218,7 @@ class FireSpreadInputService:
             fire_event_id=fire_event_id,
             origin_latitude=stored_event.event.latitude,
             origin_longitude=stored_event.event.longitude,
-            wind_speed_kmh=selected_weather.observation.wind_speed * _MS_TO_KMH,
+            wind_speed_kmh=selected_weather.observation.wind_speed,
             wind_direction_deg=selected_weather.observation.wind_direction,
             fuel_moisture_percent=_equilibrium_moisture_percent(selected_weather.observation),
             fuel_class=fuel_class,
@@ -221,6 +238,7 @@ class FireSpreadInputService:
                 fire_event_id=context.fire_event_id,
                 severity_assessment_id=context.severity_assessment_id,
                 weather_observation_id=context.weather_observation_id,
+                insufficient_data_reason=context.insufficient_data_reason,
             )
 
         input_data = FireSpreadInput(
@@ -245,7 +263,7 @@ class FireSpreadInputService:
         stored_event: StoredFireEvent,
         latest_assessment: StoredFireSeverityAssessment,
         as_of: datetime,
-    ) -> StoredWeatherObservation | None:
+    ) -> tuple[StoredWeatherObservation | None, FireSpreadInsufficientDataReason | None]:
         """Select one internally coherent weather observation from the
         exact observations the latest severity assessment already traced.
 
@@ -255,17 +273,31 @@ class FireSpreadInputService:
         policy relative to `as_of`; among those, pick the station nearest to
         the FireEvent location; ties broken by (distance, newest timestamp,
         observation id).
+
+        Returns (observation, None), or (None, reason) when nothing is
+        eligible, with precedence: no retrievable observation ->
+        MISSING_WEATHER; none has all required fields -> INCOMPLETE_WEATHER;
+        any complete observation older than the freshness window ->
+        STALE_WEATHER; otherwise (all complete ones in the future) ->
+        FUTURE_WEATHER.
         """
         if not latest_assessment.weather_observation_ids:
-            return None
+            return None, FireSpreadInsufficientDataReason.MISSING_WEATHER
 
         records = self._weather_repository.get_observations_by_ids(latest_assessment.weather_observation_ids)
+        if not records:
+            return None, FireSpreadInsufficientDataReason.MISSING_WEATHER
 
+        has_complete = False
+        has_stale = False
         eligible: list[tuple[float, float, int, StoredWeatherObservation]] = []
         for record in records:
             if not _has_required_spread_fields(record.observation):
                 continue
+            has_complete = True
             if not _is_fresh(record.observation.timestamp, as_of):
+                if _ensure_aware(record.observation.timestamp) <= as_of:
+                    has_stale = True
                 continue
             distance_km = haversine_distance_km(
                 stored_event.event.latitude,
@@ -283,9 +315,13 @@ class FireSpreadInputService:
             )
 
         if not eligible:
-            return None
+            if not has_complete:
+                return None, FireSpreadInsufficientDataReason.INCOMPLETE_WEATHER
+            if has_stale:
+                return None, FireSpreadInsufficientDataReason.STALE_WEATHER
+            return None, FireSpreadInsufficientDataReason.FUTURE_WEATHER
         eligible.sort(key=lambda item: item[:3])
-        return eligible[0][3]
+        return eligible[0][3], None
 
 
 def _equilibrium_moisture_percent(observation: WeatherObservation) -> float:

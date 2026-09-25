@@ -320,6 +320,7 @@ def make_not_valid_prediction(
     *,
     horizon_minutes: int = 30,
     status: FireSpreadPredictionStatus = FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+    insufficient_data_reason=None,
 ) -> StoredFireSpreadPrediction:
     return StoredFireSpreadPrediction(
         id=800 + horizon_minutes,
@@ -332,6 +333,7 @@ def make_not_valid_prediction(
             methodology="ca-model",
             methodology_version="1.0",
             cells=(),
+            insufficient_data_reason=insufficient_data_reason,
         ),
     )
 
@@ -814,6 +816,36 @@ def test_non_valid_spread_prediction_returns_empty_cells_never_a_fallback(status
     by_horizon = {item.horizon_minutes: item for item in result.spread_predictions}
     assert by_horizon[30].status is status
     assert by_horizon[30].cells == []
+
+
+def test_spread_prediction_exposes_the_insufficient_data_reason():
+    from src.models import FireSpreadInsufficientDataReason
+
+    stored_event = make_stored_event(1)
+    prediction_30 = make_not_valid_prediction(
+        1, horizon_minutes=30, insufficient_data_reason=FireSpreadInsufficientDataReason.MISSING_VEGETATION
+    )
+    prediction_60 = make_valid_prediction(1, horizon_minutes=60, cell_count=1)
+    service, _ = make_service(
+        events_by_id={1: stored_event}, spread_by_key={(1, 30): prediction_30, (1, 60): prediction_60}
+    )
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    by_horizon = {item.horizon_minutes: item for item in result.spread_predictions}
+    assert by_horizon[30].insufficient_data_reason is FireSpreadInsufficientDataReason.MISSING_VEGETATION
+    assert by_horizon[60].insufficient_data_reason is None
+
+
+def test_legacy_insufficient_data_prediction_without_reason_exposes_none():
+    stored_event = make_stored_event(1)
+    service, _ = make_service(
+        events_by_id={1: stored_event}, spread_by_key={(1, 30): make_not_valid_prediction(1, horizon_minutes=30)}
+    )
+
+    result = service.get_event_details(1, as_of=AS_OF)
+
+    assert result.spread_predictions[0].insufficient_data_reason is None
 
 
 def test_spread_prediction_service_never_asks_for_anything_but_the_latest():

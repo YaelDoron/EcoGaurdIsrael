@@ -13,6 +13,7 @@ from src.models import (
     FireSpreadInput,
     FireSpreadInputResult,
     FireSpreadInputStatus,
+    FireSpreadInsufficientDataReason,
     FireSpreadPrediction,
     FireSpreadPredictionStatus,
     OperationalRefreshTriggerType,
@@ -126,8 +127,18 @@ def ready_result(input_data=None, *, fire_event_id=FIRE_EVENT_ID) -> FireSpreadI
     )
 
 
-def non_ready_result(status: FireSpreadInputStatus) -> FireSpreadInputResult:
-    return FireSpreadInputResult(status=status, input_data=None, fire_event_id=FIRE_EVENT_ID)
+def non_ready_result(
+    status: FireSpreadInputStatus,
+    insufficient_data_reason: FireSpreadInsufficientDataReason = FireSpreadInsufficientDataReason.MISSING_VEGETATION,
+) -> FireSpreadInputResult:
+    return FireSpreadInputResult(
+        status=status,
+        input_data=None,
+        fire_event_id=FIRE_EVENT_ID,
+        insufficient_data_reason=(
+            insufficient_data_reason if status is FireSpreadInputStatus.INSUFFICIENT_DATA else None
+        ),
+    )
 
 
 def make_input(**overrides) -> FireSpreadInput:
@@ -152,6 +163,7 @@ def stored_prediction(
     status=FireSpreadPredictionStatus.VALID,
     fingerprint=None,
     predicted_at=AS_OF,
+    insufficient_data_reason=None,
 ) -> StoredFireSpreadPredictionWithCells:
     return StoredFireSpreadPredictionWithCells(
         id=prediction_id,
@@ -165,6 +177,7 @@ def stored_prediction(
             methodology_version=METHODOLOGY_VERSION,
             cells=(),
             effective_state_fingerprint=fingerprint,
+            insufficient_data_reason=insufficient_data_reason,
         ),
         cells=(),
         weather_observation_id=101 if status is FireSpreadPredictionStatus.VALID else None,
@@ -547,9 +560,17 @@ def test_non_ready_state_persisted_when_latest_was_valid(input_status, predictio
     ],
 )
 def test_repeated_same_non_ready_state_is_no_op(input_status, prediction_status):
+    # Same status AND same reason (missing_vegetation / None for inactive).
+    stored_reason = (
+        FireSpreadInsufficientDataReason.MISSING_VEGETATION
+        if prediction_status is FireSpreadPredictionStatus.INSUFFICIENT_DATA
+        else None
+    )
     input_service = FakeInputService({30: non_ready_result(input_status)})
     agent = FakeAgent()
-    repository = FakeRepository({30: stored_prediction(status=prediction_status)})
+    repository = FakeRepository(
+        {30: stored_prediction(status=prediction_status, insufficient_data_reason=stored_reason)}
+    )
 
     result = make_orchestrator(input_service, agent, repository).refresh(
         fire_event_id=FIRE_EVENT_ID,
@@ -560,6 +581,36 @@ def test_repeated_same_non_ready_state_is_no_op(input_status, prediction_status)
 
     assert result.horizon_results[0].status is FireSpreadRefreshHorizonStatus.NO_OP
     assert agent.calls == []
+
+
+@pytest.mark.parametrize(
+    ("stored_reason", "new_reason"),
+    [
+        # A. historical row without a reason -> known reason
+        (None, FireSpreadInsufficientDataReason.MISSING_VEGETATION),
+        # B. reason changed while the status stayed insufficient_data
+        (FireSpreadInsufficientDataReason.MISSING_VEGETATION, FireSpreadInsufficientDataReason.STALE_WEATHER),
+    ],
+)
+def test_insufficient_data_with_changed_reason_persists_a_new_row(stored_reason, new_reason):
+    input_service = FakeInputService({30: non_ready_result(FireSpreadInputStatus.INSUFFICIENT_DATA, new_reason)})
+    agent = FakeAgent()
+    repository = FakeRepository(
+        {30: stored_prediction(status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, insufficient_data_reason=stored_reason)}
+    )
+
+    result = make_orchestrator(input_service, agent, repository).refresh(
+        fire_event_id=FIRE_EVENT_ID,
+        trigger_type=OperationalRefreshTriggerType.SEVERITY_UPDATE,
+        as_of=AS_OF,
+        horizons=(30,),
+    )
+
+    horizon_result = result.horizon_results[0]
+    assert horizon_result.status is FireSpreadRefreshHorizonStatus.INSUFFICIENT_DATA
+    assert horizon_result.previous_prediction_id == 10
+    assert len(agent.calls) == 1
+    assert agent.calls[0]["input_result"].insufficient_data_reason is new_reason
 
 
 def test_future_prediction_is_not_used_to_suppress_historical_refresh():

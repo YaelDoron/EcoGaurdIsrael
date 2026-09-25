@@ -11,6 +11,11 @@ model's per-cell random draw. See backend/docs/fire_spread_prediction.md
 (Scientific Verification Details) for the full sourcing of every formula and
 constant used here.
 
+`PROPAGATION_THRESHOLD` controls only whether a cell can continue
+propagating (methodology 1.1, fire_spread_prediction.md §8): neighbours of
+spreading cells whose best `p_ij` stays below it are still emitted as
+risk-only cells, but never act as propagation sources.
+
 This module is a pure function of its `FireSpreadInput`: no repository
 access, no database access, no external API calls, no clock access, and no
 random-number generation. Calling `calculate()` twice with identical input
@@ -88,7 +93,7 @@ class FireSpreadCalculator:
 
         horizon_steps = input_data.horizon_minutes // CA_TIME_STEP_MINUTES
         grid = _generate_grid_cells(input_data.origin_latitude, input_data.origin_longitude)
-        reached_step, reached_probability = _run_cellular_automata(
+        reached_step, reached_probability, risk_only = _run_cellular_automata(
             grid=grid,
             fuel_class=input_data.fuel_class,
             wind_speed_kmh=input_data.wind_speed_kmh,
@@ -96,7 +101,7 @@ class FireSpreadCalculator:
             fuel_moisture_percent=input_data.fuel_moisture_percent,
             horizon_steps=horizon_steps,
         )
-        cells = _build_cells(grid, reached_step, reached_probability)
+        cells = _build_cells(grid, reached_step, reached_probability, risk_only)
 
         return FireSpreadCalculation(
             cells=cells,
@@ -254,7 +259,11 @@ def _run_cellular_automata(
     wind_direction_deg: float,
     fuel_moisture_percent: float,
     horizon_steps: int,
-) -> tuple[dict[tuple[int, int], int], dict[tuple[int, int], float]]:
+) -> tuple[
+    dict[tuple[int, int], int],
+    dict[tuple[int, int], float],
+    dict[tuple[int, int], tuple[float, int]],
+]:
     """Run the deterministic Moore-neighborhood CA and return per-cell reach state.
 
     EcoGuard deterministic multi-parent aggregation rule (see
@@ -264,9 +273,16 @@ def _run_cellular_automata(
     PROPAGATION_THRESHOLD, and -- if the target becomes reached -- that
     maximum is stored as its transition probability. This is a deterministic
     conflict-resolution rule, not a new scientific spread formula.
+
+    A target whose maximum stays below PROPAGATION_THRESHOLD (but above 0)
+    is tracked as risk-only: {key: (highest probability, earliest step that
+    probability was recorded)}. Risk-only cells are never propagation
+    sources, and are dropped from risk-only tracking if a later step makes
+    them reached (§8, methodology 1.1).
     """
     reached_step: dict[tuple[int, int], int] = {_ORIGIN_KEY: 0}
     reached_probability: dict[tuple[int, int], float] = {}
+    risk_only: dict[tuple[int, int], tuple[float, int]] = {}
 
     for step in range(1, horizon_steps + 1):
         newly_reached: dict[tuple[int, int], float] = {}
@@ -295,23 +311,36 @@ def _run_cellular_automata(
             max_probability = max(candidate_probabilities)
             if max_probability >= PROPAGATION_THRESHOLD:
                 newly_reached[target_key] = max_probability
+            elif max_probability > 0.0:
+                previous = risk_only.get(target_key)
+                if previous is None or max_probability > previous[0]:
+                    risk_only[target_key] = (max_probability, step)
 
         for target_key, probability in newly_reached.items():
             reached_step[target_key] = step
             reached_probability[target_key] = probability
+            risk_only.pop(target_key, None)
 
-    return reached_step, reached_probability
+    return reached_step, reached_probability, risk_only
 
 
 def _build_cells(
     grid: dict[tuple[int, int], tuple[float, float]],
     reached_step: dict[tuple[int, int], int],
     reached_probability: dict[tuple[int, int], float],
+    risk_only: dict[tuple[int, int], tuple[float, int]],
 ) -> tuple[FireSpreadPredictionCell, ...]:
+    """Emit spreading cells (p >= PROPAGATION_THRESHOLD) and risk-only cells
+    (0 < p < PROPAGATION_THRESHOLD) in one list. For a risk-only cell,
+    `reached_step` is the step at which its stored risk was recorded."""
+    emitted: list[tuple[tuple[int, int], float, int]] = [
+        (key, probability, reached_step[key]) for key, probability in reached_probability.items()
+    ]
+    emitted.extend((key, probability, step) for key, (probability, step) in risk_only.items())
+
     cells = []
-    for key, probability in reached_probability.items():
+    for key, probability, step in emitted:
         latitude, longitude = grid[key]
-        step = reached_step[key]
         cells.append(
             FireSpreadPredictionCell(
                 latitude=latitude,

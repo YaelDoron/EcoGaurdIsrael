@@ -34,6 +34,12 @@ IMS_CHANNEL_MAPPING: dict[str, str] = {
     "Rain": "rainfall",
 }
 
+# IMS reports WS/WSmax in m/s (IMS API documentation, Appendix C); EcoGuard's
+# canonical WeatherObservation wind unit is km/h, so both are converted here,
+# at the ingestion boundary, and nowhere downstream.
+IMS_MS_CHANNELS: frozenset[str] = frozenset({"WS", "WSmax"})
+MS_TO_KMH = 3.6
+
 
 class WeatherMapper:
     """Stateless mapper from raw IMS JSON to EcoGuard's internal weather models."""
@@ -146,6 +152,7 @@ class WeatherMapper:
           failing the rest of the observation.
         - If the same relevant channel appears more than once, the last
           valid, numeric occurrence wins (channels are processed in order).
+        - WS/WSmax are converted from IMS m/s to canonical km/h.
         """
         measurements: dict[str, float | None] = {field: None for field in IMS_CHANNEL_MAPPING.values()}
 
@@ -163,6 +170,8 @@ class WeatherMapper:
             if numeric_value is None:
                 logger.warning("Ignoring unparseable value for IMS channel %s", channel_name)
                 continue
+            if channel_name in IMS_MS_CHANNELS:
+                numeric_value *= MS_TO_KMH
 
             measurements[IMS_CHANNEL_MAPPING[channel_name]] = numeric_value
 

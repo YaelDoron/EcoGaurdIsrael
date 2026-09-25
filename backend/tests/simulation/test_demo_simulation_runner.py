@@ -28,9 +28,22 @@ from src.simulation.demo_simulation_runner import (
     DemoSimulationRunConfig,
     DemoSimulationRunner,
     DemoSimulationStatus,
+    resolve_stale_simulation_events,
 )
 
 STARTED_AT = datetime(2026, 9, 19, 12, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _stub_stale_simulation_event_resolver(monkeypatch):
+    """run() resolves stale simulation FireEvents through real repositories
+    by default; keep these fake-based tests away from any real database.
+    The stale-event tests below inject a SQLite-backed resolver explicitly
+    (the module-level import above still refers to the real function)."""
+    monkeypatch.setattr(
+        "src.simulation.demo_simulation_runner.resolve_stale_simulation_events",
+        lambda as_of: (),
+    )
 
 
 class FakeExecutor:
@@ -383,3 +396,277 @@ def test_should_stop_predicate_ends_the_loop_early():
     result = runner.run(scenario, config, scenario_started_at=STARTED_AT)
 
     assert result.events_executed < len(scenario.events)
+
+
+# ---------------------------------------------------------------------------
+# Stale simulation-only FireEvent cleanup at run start
+# ---------------------------------------------------------------------------
+
+from datetime import timedelta  # noqa: E402
+import itertools  # noqa: E402
+
+from src.calculators.fire_detection.fire_detection_config import (  # noqa: E402
+    FIRE_DETECTION_METHODOLOGY_NAME,
+    FIRE_DETECTION_METHODOLOGY_VERSION,
+)
+from src.database.models.satellite_hotspot_db import SatelliteHotspotDB  # noqa: E402
+from src.database.models.wildfire_report_db import WildfireReportDB  # noqa: E402
+from src.models import FireEvent, FireEventStatus, FireEvidenceRef, FireEvidenceType  # noqa: E402
+from src.repositories.fire_event_config import ACTIVE_EVENT_MATCH_WINDOW_HOURS  # noqa: E402
+from src.repositories.fire_event_repository import FireEventRepository  # noqa: E402
+from src.repositories.resource_commitment_repository import ResourceCommitmentRepository  # noqa: E402
+from src.services.fire_event_lifecycle.fire_event_lifecycle_service import FireEventLifecycleService  # noqa: E402
+from src.simulation.generators.news_data_generator import SIMULATED_NEWS_SOURCE_FEED  # noqa: E402
+from src.simulation.generators.satellite_data_generator import SIMULATED_SATELLITE  # noqa: E402
+
+MATCH_WINDOW = timedelta(hours=ACTIVE_EVENT_MATCH_WINDOW_HOURS)
+STALE_UPDATED_AT = STARTED_AT - MATCH_WINDOW - timedelta(minutes=1)
+RECENT_UPDATED_AT = STARTED_AT - MATCH_WINDOW + timedelta(minutes=1)
+REAL_SATELLITE = "N20"
+REAL_NEWS_FEED = "Ynet"
+_evidence_counter = itertools.count(1)
+
+
+def _persist_event(
+    session_factory,
+    *,
+    updated_at,
+    satellites=(SIMULATED_SATELLITE,),
+    news_feeds=(SIMULATED_NEWS_SOURCE_FEED,),
+    status=FireEventStatus.CONFIRMED,
+) -> int:
+    refs = []
+    with session_factory() as session:
+        for satellite in satellites:
+            hotspot = SatelliteHotspotDB(
+                detection_key=f"test-hotspot-{next(_evidence_counter)}",
+                latitude=32.731,
+                longitude=35.046,
+                detected_at=updated_at,
+                satellite=satellite,
+            )
+            session.add(hotspot)
+            session.flush()
+            refs.append(FireEvidenceRef(FireEvidenceType.SATELLITE, hotspot.id))
+        for feed in news_feeds:
+            report = WildfireReportDB(
+                source_url=f"https://example.test/report/{next(_evidence_counter)}",
+                source_feed=feed,
+                title="Wildfire reported",
+                fetched_at=updated_at,
+            )
+            session.add(report)
+            session.flush()
+            refs.append(FireEvidenceRef(FireEvidenceType.NEWS, report.id))
+        session.commit()
+
+    event = FireEvent(
+        latitude=32.731,
+        longitude=35.046,
+        detected_at=updated_at - timedelta(minutes=10),
+        updated_at=updated_at,
+        status=status,
+        detection_confidence=0.8,
+        methodology=FIRE_DETECTION_METHODOLOGY_NAME,
+        methodology_version=FIRE_DETECTION_METHODOLOGY_VERSION,
+        location_name="Carmel Demo Area",
+    )
+    return FireEventRepository(session_factory=session_factory).create_event(event, tuple(refs)).id
+
+
+def _lifecycle_service(session_factory) -> FireEventLifecycleService:
+    return FireEventLifecycleService(
+        fire_event_repository=FireEventRepository(session_factory=session_factory),
+        resource_commitment_repository=ResourceCommitmentRepository(session_factory),
+        session_factory=session_factory,
+    )
+
+
+def _sqlite_resolver(session_factory):
+    repository = FireEventRepository(session_factory=session_factory)
+    lifecycle_service = _lifecycle_service(session_factory)
+    return lambda as_of: resolve_stale_simulation_events(
+        as_of, fire_event_repository=repository, lifecycle_service=lifecycle_service
+    )
+
+
+def _run_with_resolver(resolver, started_at=STARTED_AT):
+    runner = DemoSimulationRunner(
+        executor=FakeExecutor(),
+        fire_danger_coordinator=NoOpFireDangerCoordinator(),
+        fire_detection_coordinator=NoOpFireDetectionCoordinator(),
+        operational_coordinator=NoOpOperationalCoordinator(),
+        simulation_refresh_coordinator=NoOpRefreshCoordinator(),
+        stale_simulation_event_resolver=resolver,
+    )
+    return runner.run(
+        build_active_fire_scenario(seed=42),
+        DemoSimulationRunConfig(mode=SimulationMode.MANUAL),
+        scenario_started_at=started_at,
+    )
+
+
+def _event(session_factory, fire_event_id):
+    return FireEventRepository(session_factory=session_factory).get_by_id(fire_event_id).event
+
+
+def test_stale_simulation_only_event_is_resolved_at_run_start(sqlite_session_factory):
+    stale_id = _persist_event(sqlite_session_factory, updated_at=STALE_UPDATED_AT)
+
+    _run_with_resolver(_sqlite_resolver(sqlite_session_factory))
+
+    event = _event(sqlite_session_factory, stale_id)
+    assert event.status is FireEventStatus.RESOLVED
+    assert event.updated_at == STARTED_AT
+
+
+def test_recent_simulation_event_inside_match_window_stays_active_and_matchable(sqlite_session_factory):
+    recent_id = _persist_event(sqlite_session_factory, updated_at=RECENT_UPDATED_AT)
+
+    _run_with_resolver(_sqlite_resolver(sqlite_session_factory))
+
+    assert _event(sqlite_session_factory, recent_id).status is FireEventStatus.CONFIRMED
+    match = FireEventRepository(session_factory=sqlite_session_factory).find_matching_active_event(
+        latitude=32.731, longitude=35.046, observed_at=STARTED_AT
+    )
+    assert match is not None and match.id == recent_id
+
+
+def test_real_evidence_event_is_never_resolved(sqlite_session_factory):
+    real_id = _persist_event(
+        sqlite_session_factory, updated_at=STALE_UPDATED_AT, satellites=(REAL_SATELLITE,), news_feeds=(REAL_NEWS_FEED,)
+    )
+
+    _run_with_resolver(_sqlite_resolver(sqlite_session_factory))
+
+    assert _event(sqlite_session_factory, real_id).status is FireEventStatus.CONFIRMED
+
+
+@pytest.mark.parametrize(
+    ("satellites", "news_feeds"),
+    [
+        ((SIMULATED_SATELLITE, REAL_SATELLITE), (SIMULATED_NEWS_SOURCE_FEED,)),
+        ((SIMULATED_SATELLITE,), (SIMULATED_NEWS_SOURCE_FEED, REAL_NEWS_FEED)),
+        ((SIMULATED_SATELLITE,), (REAL_NEWS_FEED,)),
+        ((SIMULATED_SATELLITE, None), ()),
+        ((SIMULATED_SATELLITE,), (None,)),
+    ],
+)
+def test_mixed_or_unclassifiable_evidence_event_is_never_resolved(sqlite_session_factory, satellites, news_feeds):
+    mixed_id = _persist_event(
+        sqlite_session_factory, updated_at=STALE_UPDATED_AT, satellites=satellites, news_feeds=news_feeds
+    )
+
+    _run_with_resolver(_sqlite_resolver(sqlite_session_factory))
+
+    assert _event(sqlite_session_factory, mixed_id).status is FireEventStatus.CONFIRMED
+
+
+@pytest.mark.parametrize("transition", ["resolve_event", "dismiss_event"])
+def test_already_inactive_simulation_event_is_untouched(sqlite_session_factory, transition):
+    event_id = _persist_event(sqlite_session_factory, updated_at=STALE_UPDATED_AT - timedelta(hours=1))
+    closed_at = STALE_UPDATED_AT
+    getattr(_lifecycle_service(sqlite_session_factory), transition)(event_id, as_of=closed_at)
+    before = _event(sqlite_session_factory, event_id)
+
+    _run_with_resolver(_sqlite_resolver(sqlite_session_factory))
+
+    after = _event(sqlite_session_factory, event_id)
+    assert after.status is before.status
+    assert after.updated_at == closed_at
+
+
+def test_no_stale_simulation_events_is_a_no_op(sqlite_session_factory):
+    assert _sqlite_resolver(sqlite_session_factory)(STARTED_AT) == ()
+
+
+def test_repeated_runs_without_reset_do_not_accumulate_obsolete_simulation_events(sqlite_session_factory):
+    resolver = _sqlite_resolver(sqlite_session_factory)
+    # Leftover from an earlier run, plus one created by "run 1" itself.
+    leftover_id = _persist_event(sqlite_session_factory, updated_at=STALE_UPDATED_AT)
+    _run_with_resolver(resolver, started_at=STARTED_AT)
+    run_one_event_id = _persist_event(sqlite_session_factory, updated_at=STARTED_AT + timedelta(minutes=5))
+
+    # Run 2 inside the window: run 1's event stays active for reuse.
+    _run_with_resolver(resolver, started_at=STARTED_AT + timedelta(hours=1))
+    assert _event(sqlite_session_factory, run_one_event_id).status is FireEventStatus.CONFIRMED
+
+    # Run 3 after the window: run 1's event is resolved too; the leftover
+    # (already resolved by run 1) is not modified again.
+    run_three_started_at = STARTED_AT + MATCH_WINDOW + timedelta(hours=1)
+    _run_with_resolver(resolver, started_at=run_three_started_at)
+
+    active_ids = FireEventRepository(session_factory=sqlite_session_factory).get_active_fire_event_ids()
+    assert run_one_event_id not in active_ids and leftover_id not in active_ids
+    assert _event(sqlite_session_factory, leftover_id).updated_at == STARTED_AT
+    assert _event(sqlite_session_factory, run_one_event_id).updated_at == run_three_started_at
+
+
+def test_cleanup_resolves_through_lifecycle_service_with_scenario_start_time():
+    class FakeRepository:
+        def __init__(self):
+            self.queries = []
+
+        def get_active_event_ids_with_only_marked_evidence_updated_before(self, **kwargs):
+            self.queries.append(kwargs)
+            return (7, 9)
+
+    class RecordingLifecycleService:
+        def __init__(self):
+            self.calls = []
+
+        def resolve_event(self, fire_event_id, *, as_of):
+            self.calls.append((fire_event_id, as_of))
+
+    repository = FakeRepository()
+    lifecycle_service = RecordingLifecycleService()
+
+    _run_with_resolver(
+        lambda as_of: resolve_stale_simulation_events(
+            as_of, fire_event_repository=repository, lifecycle_service=lifecycle_service
+        )
+    )
+
+    assert repository.queries == [
+        dict(
+            updated_before=STARTED_AT - MATCH_WINDOW,
+            satellite_name=SIMULATED_SATELLITE,
+            news_source_feed=SIMULATED_NEWS_SOURCE_FEED,
+        )
+    ]
+    assert lifecycle_service.calls == [(7, STARTED_AT), (9, STARTED_AT)]
+
+
+def test_stale_event_cleanup_runs_before_the_scenario_starts():
+    order: list = []
+
+    class RecordingService(FakeAutomaticService):
+        def start(self, scenario, mode):
+            order.append("start")
+            super().start(scenario, mode)
+
+    runner = DemoSimulationRunner(
+        executor=FakeExecutor(),
+        fire_danger_coordinator=NoOpFireDangerCoordinator(),
+        fire_detection_coordinator=NoOpFireDetectionCoordinator(),
+        operational_coordinator=NoOpOperationalCoordinator(),
+        simulation_refresh_coordinator=NoOpRefreshCoordinator(),
+        service=RecordingService(due_batches=[]),
+        stale_simulation_event_resolver=lambda as_of: order.append(("cleanup", as_of)) or (),
+    )
+    runner.run(
+        build_active_fire_scenario(seed=42),
+        DemoSimulationRunConfig(mode=SimulationMode.AUTOMATIC),
+        scenario_started_at=STARTED_AT,
+    )
+
+    assert order[:2] == [("cleanup", STARTED_AT), "start"]
+
+
+def test_stale_event_cleanup_failure_does_not_abort_the_run():
+    def failing_resolver(as_of):
+        raise RuntimeError("database unavailable")
+
+    result = _run_with_resolver(failing_resolver)
+
+    assert result.events_executed == len(build_active_fire_scenario(seed=42).events)

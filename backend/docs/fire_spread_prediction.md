@@ -163,7 +163,7 @@ This limitation is carried into §14 and is not resolved in this task, consisten
 
 ### 4.4 Weather
 
-Weather observations are already persisted in Neon/PostgreSQL (`WeatherObservation` / `weather_observations`), with fields: `temperature`, `relative_humidity`, `wind_speed`, `wind_direction`, `wind_gust`, `rainfall`, `timestamp`.
+Weather observations are already persisted in Neon/PostgreSQL (`WeatherObservation` / `weather_observations`), with fields: `temperature`, `relative_humidity`, `wind_speed`, `wind_direction`, `wind_gust`, `rainfall`, `timestamp`. `wind_speed` and `wind_gust` are stored in **km/h** (canonical unit for every source; IMS `WS`/`WSmax`, reported in m/s, are converted by `WeatherMapper` at ingestion).
 
 Fire Severity already persists the exact `weather_observation_id`s used in its calculation. The preferred V1 approach is to **reuse those same persisted weather observations** where possible, so User Story 4.2 stays traceable to the same environmental state that produced the latest severity assessment, rather than querying a different, potentially inconsistent set of observations.
 
@@ -259,6 +259,15 @@ if p_ij < 0.5:
     but that cell does not propagate further
 ```
 
+**Implemented behavior (methodology version 1.1).** `PROPAGATION_THRESHOLD = 0.5` is a **propagation** threshold only — it decides whether a cell can act as a source in the next CA step, not whether the cell appears in the prediction. Each CA step evaluates every not-yet-spreading cell that has at least one spreading Moore neighbor (the origin counts as spreading), using the maximum `p_ij` over those spreading neighbors (multi-parent rule below):
+
+- `p_ij >= 0.5` → **spreading cell**: emitted with that `p_ij` and the step it was reached, and it acts as a propagation source from the next step on.
+- `0 < p_ij < 0.5` → **risk-only cell**: emitted, but it never acts as a propagation source. It keeps the highest `p_ij` it received from any spreading neighbor within the horizon, with `reached_step` set to the earliest step at which that highest value was recorded (i.e. the step of its recorded risk exposure, not a fire arrival).
+- A risk-only cell becomes a spreading cell if a later step gives it `p_ij >= 0.5` (e.g. from a newly spreading neighbor); it is then emitted once, as a spreading cell with that later step.
+- `p_ij == 0` → not emitted.
+
+Every emitted cell appears exactly once, and the origin is never emitted. Invariant: `spread_probability >= 0.5` ⇔ the cell is propagation-capable; `spread_probability < 0.5` ⇔ risk-only. No new probability formula is introduced — risk-only cells carry the same verified `p_ij` (§3.1) that is compared against the threshold. A `VALID` prediction is therefore empty only when every evaluated `p_ij` is 0 (e.g. fuel moisture at/above the moisture of extinction, §15.4). Methodology version 1.0 emitted spreading cells only, so it produced `VALID` predictions with 0 cells whenever no neighbor reached 0.5.
+
 `0.5` is an **EcoGuard deterministic implementation threshold**. It is not claimed to be an original PROPAGATOR scientific constant. This is now confirmed with direct source evidence, not inference: the official model's actual per-cell ignition test is `p_prob > rand(...)` — a stochastic comparison against an independent random draw, not any fixed threshold — and PROPAGATOR's published `0.5`/`0.75`/`0.9` values are isochrone-visualization contour levels in a separate output step, not the transition rule itself (§3.2).
 
 No random number generation is used in V1. The official model additionally perturbs wind speed and direction randomly at every step before computing `p_ij` (§3.2) — EcoGuard V1 explicitly does not do this either; it uses the persisted, unperturbed `WeatherObservation` values as-is.
@@ -282,6 +291,22 @@ No random number generation is used in V1. The official model additionally pertu
 
 **Missing-data policy:** if a mandatory input is missing, the system must not generate a misleading "valid" prediction. An explicit `INSUFFICIENT_DATA` state must be used instead. This mirrors the existing status-based pattern used by Fire Danger and Fire Severity assessments.
 
+**Insufficient-data reason (implemented).** Every newly produced `INSUFFICIENT_DATA` prediction also records a machine-readable `insufficient_data_reason` (`FireSpreadInsufficientDataReason`, stored as its lowercase value in the nullable `fire_spread_predictions.insufficient_data_reason` column and exposed on the EventDetails spread prediction). It is set by `FireSpreadInputService` at the exact branch that fails:
+
+| Reason | Cause |
+|---|---|
+| `event_unavailable` | FireEvent not found, or not in a usable status |
+| `missing_severity` | no severity assessment for this event at or before `as_of` |
+| `severity_not_valid` | the latest severity assessment is not `VALID` |
+| `missing_weather` | no linked or retrievable weather observation |
+| `incomplete_weather` | observations exist but none has temperature, humidity, wind speed and wind direction |
+| `stale_weather` | complete observations exist but are older than the freshness window |
+| `future_weather` | complete observations exist but are all timestamped after `as_of` |
+| `missing_vegetation` | the severity snapshot has no `vegetation_dominant_land_cover` (Copernicus unavailable **or** no usable Copernicus data — the two are indistinguishable at this layer) |
+| `unsupported_vegetation` | "Tree cover", "Moss and lichen cover", or any unmapped label (§4.3.2); the exact label remains on the linked severity assessment |
+
+Weather reasons follow a fixed precedence: `missing_weather` → `incomplete_weather` → `stale_weather` (if any complete observation is too old) → `future_weather`. `VALID` and `INACTIVE_EVENT` predictions never carry a reason. Rows stored before the reason existed have `NULL` (reason unknown) and are never backfilled. Operational refresh treats an insufficient-data horizon as a no-op only when both the status **and** the reason are unchanged, so a changed reason (including a historical `NULL` → known reason) persists a new append-only row and the latest row always states the current reason. The reason does not affect the spread calculation, so it does not change the methodology version.
+
 A `RESOLVED` or `DISMISSED` `FireEvent` must not produce an active spread prediction.
 
 ## 10. Prediction Horizons
@@ -291,6 +316,8 @@ The same deterministic CA methodology is evaluated across discrete 5-minute step
 - 60-minute prediction → 12 CA steps
 
 The prediction output must preserve the horizon explicitly. The 30-minute and 60-minute predictions are **not** the same record — they must be represented as distinct, separately identifiable prediction results, not conflated or overwritten by one another.
+
+Relationship between the two horizons (methodology 1.1, §8): the 60-minute run repeats the 30-minute run's first 6 steps exactly, so every spreading cell of the 30-minute prediction appears in the 60-minute prediction with the same step and probability, and the 60-minute prediction may extend further. Risk-only cells may differ: steps 7–12 can re-expose a risk-only cell with a higher `p_ij` or upgrade it to spreading. When no cell reaches the propagation threshold, nothing spreads beyond the origin, and both horizons legitimately contain the same first ring of risk-only cells (see §14).
 
 ## 11. Persistence and Traceability
 
@@ -303,6 +330,7 @@ A future persisted `FireSpreadPrediction` should preserve at minimum:
 - methodology name
 - methodology version
 - prediction status
+- for `INSUFFICIENT_DATA`, the insufficient-data reason (§9; `NULL` for historical rows)
 - traceability to important reused input data (e.g. the `FireSeverityAssessment` id used, and the weather observation IDs used)
 
 Predicted cells should preserve at minimum:
@@ -311,6 +339,8 @@ Predicted cells should preserve at minimum:
 - spread probability `p_ij` (or equivalent final cell probability)
 - `spread_risk_score`
 - predicted reach step and/or predicted reach minutes
+
+As implemented (methodology 1.1), spreading and risk-only cells share the same persisted cell fields; no separate flag column exists. Whether a cell is propagation-capable is determined by `spread_probability >= PROPAGATION_THRESHOLD` (§8). For a risk-only cell, `reached_step`/`reached_minutes` record the step at which its stored risk exposure was recorded, not a predicted fire arrival.
 
 Historical predictions must be preserved rather than overwritten, following the existing EcoGuard append-only assessment/history pattern (as already used by `fire_danger_assessments` and `fire_severity_assessments`, where a new row is inserted per assessment run and the "latest" is retrieved via an ordered query) where appropriate.
 
@@ -324,8 +354,10 @@ Planned EcoGuard methodology identity:
 
 ```
 methodology = "ECOGUARD_PROPAGATOR_CA"
-methodology_version = "1.0"
+methodology_version = "1.1"
 ```
+
+Version history: `1.0` emitted spreading cells only; `1.1` additionally emits risk-only cells below the propagation threshold (§8). Because the methodology version is part of the spread effective-state fingerprint (`FireSpreadEffectiveState`), 1.0 predictions are never reused as a no-op for 1.1 — the next refresh recalculates them, while historical 1.0 rows keep their own version for traceability.
 
 This version string identifies EcoGuard's own deterministic adaptation. It does not claim to be, and must not be presented as, the official version identifier of the original PROPAGATOR research model.
 
@@ -361,8 +393,9 @@ Those belong to later features (User Story 4.3 and beyond).
 - Vegetation is treated as spatially homogeneous across the entire 5 km prediction grid, using one event-level snapshot instead of true per-cell vegetation (§4.3.3) — a real EcoGuard V1 simplification relative to PROPAGATOR's per-cell fuel modeling.
 - The model is a deterministic adaptation rather than a fully stochastic PROPAGATOR execution: the official model draws a per-cell random ignition test and randomly perturbs wind every step; EcoGuard V1 does neither (§3.2, §8).
 - `PROPAGATION_THRESHOLD = 0.5` is an EcoGuard implementation decision, not a verified PROPAGATOR scientific constant; the official model's `0.5`/`0.75`/`0.9` values are isochrone visualization contours, not a transition threshold (§3.2).
+- Because the threshold is applied to a single neighbor-to-neighbor `p_ij`, realistic weather/fuel combinations often produce no spreading cell (e.g. shrubs at 35 °C, 25% RH, 30 km/h peak at `p_ij` ≈ 0.33). In that case the prediction contains only the first ring of risk-only cells around the origin, and the 30- and 60-minute predictions are identical (§8, §10). Risk-only cells score below 50, so they never pass User Story 4.3's own `MIN_PREDICTED_TARGET_RISK_SCORE` (60.0) filter.
 - EcoGuard V1 evaluates every cell at fixed 5-minute step boundaries rather than modeling rate-of-spread-based arrival time per cell, unlike the official model (§5).
-- The wind-speed unit expected by the verified `alpha_wh` wind formula could not be confirmed with certainty from the available source material (§15.3); this stays an internal-to-the-calculator assumption. Separately, the EcoGuard-boundary conversion (IMS m/sec → the calculator's `wind_speed_kmh` contract) is resolved — see §15.7 item 2.
+- The wind-speed unit expected by the verified `alpha_wh` wind formula could not be confirmed with certainty from the available source material (§15.3); this stays an internal-to-the-calculator assumption. Separately, the EcoGuard-boundary unit is resolved: `WeatherObservation.wind_speed` is canonically km/h (IMS m/sec is converted by `WeatherMapper` at ingestion), matching the calculator's `wind_speed_kmh` contract — see §15.7 item 2.
 - The IMS `WD` wind-direction convention ("from" vs. another convention) is not explicitly stated in IMS's own API documentation (§15.6); the standard meteorological "from" convention is assumed with high confidence but is not yet explicitly confirmed.
 - Two numeric cells in an earlier draft's `p_n`/`v0` tables did not match the values independently re-verified in this task directly from the official source's default data files; this must be reconciled before implementation (§15.2).
 - Prediction quality depends on the freshness and quality of the persisted weather/severity data being reused.
@@ -498,7 +531,7 @@ This is the entirety of what IMS's own API documentation states about the `WD` c
 ### 15.7 Open items before Task 4B (see also §14)
 
 1. **Vegetation-mapping policy sign-off** — adopt Approach A (§4.3.2): map only unambiguous `dominant_land_cover` values to a PROPAGATOR class; produce `INSUFFICIENT_DATA` for `"Tree cover"` and `"Moss and lichen cover"`. **RESOLVED (Task 5):** implemented exactly as decided, in `src/services/fire_spread/fire_spread_input_service.py` (`_DOMINANT_LAND_COVER_TO_FUEL_CLASS`, `_map_dominant_land_cover`) — the 8 unambiguous EcoGuard labels map to their PROPAGATOR class, `"Tree cover"`/`"Moss and lichen cover"`/any unrecognized or missing label return `None`, which the service turns into `INSUFFICIENT_DATA`.
-2. **Wind-speed unit for `alpha_wh`** — confirm whether `w_h_effect`/`w_h_effect_on_p` expects m/s or km/h (§15.3) before converting EcoGuard's `wind_speed_kmh` into it. **RESOLVED for the EcoGuard boundary (Task 5):** `FireSpreadCalculator`'s own contract (Task 4B) is `wind_speed_kmh`; the internal m/s reasoning from §15.3 is unchanged and stays inside the calculator. Separately, Task 5 confirmed from code (not assumption) that IMS's `WS` channel is persisted in EcoGuard exactly as IMS provides it (`WeatherMapper` performs no conversion), and IMS's own API documentation states `WS` is in `m/sec` (Appendix C, verified in Task 4A). `FireSpreadInputService` therefore converts `wind_speed_kmh = observation.wind_speed * 3.6` once, at the single point EcoGuard's persisted weather enters the spread pipeline — deliberately not touching the existing Fire Danger/Fire Severity pipelines, which do not apply this conversion and are out of scope for this task.
+2. **Wind-speed unit for `alpha_wh`** — confirm whether `w_h_effect`/`w_h_effect_on_p` expects m/s or km/h (§15.3) before converting EcoGuard's `wind_speed_kmh` into it. **RESOLVED for the EcoGuard boundary (Task 5):** `FireSpreadCalculator`'s own contract (Task 4B) is `wind_speed_kmh`; the internal m/s reasoning from §15.3 is unchanged and stays inside the calculator. Separately, IMS's own API documentation states `WS` and `WSmax` are in `m/sec` (Appendix C). **Wind-unit consistency fix:** `WeatherObservation.wind_speed`/`wind_gust` are canonically **km/h** for every source — `WeatherMapper` converts IMS `WS`/`WSmax` from m/s to km/h (× 3.6) at ingestion, and simulated weather is already generated in km/h. `FireSpreadInputService` therefore passes the stored value through unchanged as `wind_speed_kmh` (no conversion), exactly as Fire Danger and Fire Severity already consume it; the calculator's own internal km/h → m/s conversion for `alpha_wh` (§15.3) is unchanged. (Previously `FireSpreadInputService` multiplied the stored value by 3.6, assuming m/s, which over-stated simulated km/h wind 3.6× in spread predictions.)
 3. **Two numeric-table discrepancies** — reconcile `p_n[Conifers(fire-prone)][Grassland]` (0.250 vs. verified 0.100) and `v0[Broadleaves(fire-prone)]` (100 vs. verified 140) against the independently re-fetched official source (§15.2); recommend adopting the freshly re-fetched official values. **RESOLVED (Task 4B):** the verified `p_n` table (including the corrected `0.100` entry) is what `fire_spread_config.py`'s `NOMINAL_SPREAD_PROBABILITY` implements; `v0` is not used by V1's fixed-step CA (§5) and was not implemented.
 4. **IMS wind-direction convention** — obtain explicit confirmation (e.g. from IMS directly, or by cross-checking a live sample against a known wind event) that `WD` is the standard meteorological "from" convention, or determine otherwise (§15.6). **Adopted as the operational contract (Task 5), not independently re-verified beyond Task 4A's research:** `FireSpreadInputService` passes `WeatherObservation.wind_direction` straight through to `FireSpreadInput.wind_direction_deg` with no transformation, treating it as the standard meteorological "from" convention per §15.6's high-confidence assessment. If IMS is later confirmed to use a different convention, only this pass-through assumption (and possibly the calculator's internal `_wind_math_angle_rad` conversion, Task 4B) would need revisiting — no other layer depends on this choice.
 5. **Spatial vegetation homogeneity** — confirm the team accepts the single event-level vegetation snapshot applied uniformly across the 5 km grid (§4.3.3) as the V1 policy, given it deviates from PROPAGATOR's per-cell fuel modeling. **RESOLVED (Task 5):** implemented exactly as decided — `FireSpreadInputService` resolves one `FireSpreadFuelClass` from the severity assessment's vegetation snapshot and `FireSpreadCalculator` (Task 4B) already applies it uniformly as both source and target class for every grid cell.

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import math
 
+from sqlalchemy import or_, select
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
@@ -17,6 +18,8 @@ from src.database.models.fire_event_db import FireEventDB
 from src.database.models.fire_event_ml_assessment_db import FireEventMLAssessmentDB
 from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenceDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
+from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
+from src.database.models.wildfire_report_db import WildfireReportDB
 from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
 from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
 from src.models.fire_detection_status import FireDetectionStatus
@@ -508,6 +511,76 @@ class FireEventRepository:
                 .all()
             )
             return tuple(self._to_stored_event(db_event) for db_event in db_events)
+
+    def get_active_event_ids_with_only_marked_evidence_updated_before(
+        self,
+        *,
+        updated_before: datetime,
+        satellite_name: str,
+        news_source_feed: str,
+    ) -> tuple[int, ...]:
+        """Return ids of active FireEvents last updated strictly before
+        `updated_before` whose supporting evidence ALL carries the given
+        source markers: every satellite hotspot has `satellite ==
+        satellite_name` and every news report has `source_feed ==
+        news_source_feed`.
+
+        Conservative by construction: an event with no evidence, or with any
+        hotspot/report whose marker differs or is NULL, is never returned.
+        The markers are supplied by the caller, so this repository stays
+        agnostic of what they identify (e.g. simulation-generated evidence).
+        Ordered by id.
+        """
+        self._validate_aware_datetime("updated_before", updated_before)
+        for field_name, value in (("satellite_name", satellite_name), ("news_source_feed", news_source_feed)):
+            if not isinstance(value, str) or not value.strip():
+                raise FireEventRepositoryError(f"{field_name} must be a non-empty string, got {value!r}.")
+
+        has_satellite = (
+            select(FireEventSatelliteEvidenceDB.id)
+            .where(FireEventSatelliteEvidenceDB.fire_event_id == FireEventDB.id)
+            .exists()
+        )
+        has_news = (
+            select(FireEventNewsEvidenceDB.id)
+            .where(FireEventNewsEvidenceDB.fire_event_id == FireEventDB.id)
+            .exists()
+        )
+        has_unmarked_satellite = (
+            select(FireEventSatelliteEvidenceDB.id)
+            .join(SatelliteHotspotDB, SatelliteHotspotDB.id == FireEventSatelliteEvidenceDB.satellite_hotspot_id)
+            .where(
+                FireEventSatelliteEvidenceDB.fire_event_id == FireEventDB.id,
+                or_(SatelliteHotspotDB.satellite.is_(None), SatelliteHotspotDB.satellite != satellite_name),
+            )
+            .exists()
+        )
+        has_unmarked_news = (
+            select(FireEventNewsEvidenceDB.id)
+            .join(WildfireReportDB, WildfireReportDB.id == FireEventNewsEvidenceDB.wildfire_report_id)
+            .where(
+                FireEventNewsEvidenceDB.fire_event_id == FireEventDB.id,
+                or_(WildfireReportDB.source_feed.is_(None), WildfireReportDB.source_feed != news_source_feed),
+            )
+            .exists()
+        )
+
+        with self._session_scope() as session:
+            return tuple(
+                session.execute(
+                    select(FireEventDB.id)
+                    .where(
+                        FireEventDB.status.in_(status.value for status in _ACTIVE_STATUSES),
+                        FireEventDB.updated_at < updated_before,
+                        or_(has_satellite, has_news),
+                        ~has_unmarked_satellite,
+                        ~has_unmarked_news,
+                    )
+                    .order_by(FireEventDB.id)
+                )
+                .scalars()
+                .all()
+            )
 
     def get_recent(self, limit: int) -> tuple[StoredFireEvent, ...]:
         """Return the `limit` most recently detected FireEvents, newest first.

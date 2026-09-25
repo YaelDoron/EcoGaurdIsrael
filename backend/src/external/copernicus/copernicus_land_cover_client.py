@@ -289,6 +289,8 @@ class CopernicusLandCoverClient:
             payload = response.json()
         except ValueError as exc:
             raise CopernicusInvalidResponseError("Copernicus token endpoint returned invalid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise CopernicusInvalidResponseError("Copernicus token endpoint returned an unexpected response shape.")
 
         access_token = payload.get("access_token")
         expires_in = payload.get("expires_in")
@@ -344,6 +346,8 @@ def _parse_statistics_payload(payload: dict, radius_km: float) -> CopernicusLand
         bands = intervals[0]["outputs"]["vegetation"]["bands"]
     except (KeyError, TypeError) as exc:
         raise CopernicusInvalidResponseError("Copernicus statistics response is missing vegetation bands.") from exc
+    if not isinstance(bands, dict):
+        raise CopernicusInvalidResponseError("Copernicus statistics response has malformed vegetation bands.")
 
     fractions = []
     for index, category in enumerate(_OUTPUT_BAND_NAMES):

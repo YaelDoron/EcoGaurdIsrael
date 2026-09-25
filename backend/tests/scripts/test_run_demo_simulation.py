@@ -113,6 +113,17 @@ def _stub_fire_spread_coordinator(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _stub_stale_simulation_event_resolver(monkeypatch):
+    """Prevent DemoSimulationRunner.run()'s real (Neon-backed) stale
+    simulation FireEvent cleanup from running during these fake-based
+    unit tests; tests/simulation/test_demo_simulation_runner.py covers it."""
+    monkeypatch.setattr(
+        "src.simulation.demo_simulation_runner.resolve_stale_simulation_events",
+        lambda as_of: (),
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_response_target_coordinator(monkeypatch):
     class _NoOpResponseTargetCoordinator:
         def generate_for_fire_events(self, fire_event_ids, as_of):

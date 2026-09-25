@@ -47,6 +47,7 @@ from src.models.fire_spread_calculation import FireSpreadCalculation
 from src.models.fire_spread_effective_state import FireSpreadEffectiveState
 from src.models.fire_spread_fuel_class import FireSpreadFuelClass
 from src.models.fire_spread_input import FireSpreadInput
+from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_input_result import FireSpreadInputResult
 from src.models.fire_spread_input_status import FireSpreadInputStatus
 from src.models.fire_spread_prediction import FireSpreadPrediction, FireSpreadPredictionCell
@@ -189,6 +190,7 @@ __all__ = [
     "FireSpreadEffectiveState",
     "FireSpreadFuelClass",
     "FireSpreadInput",
+    "FireSpreadInsufficientDataReason",
     "FireSpreadInputResult",
     "FireSpreadInputStatus",
     "FireSpreadPrediction",

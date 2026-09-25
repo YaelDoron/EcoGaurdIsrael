@@ -301,3 +301,49 @@ def test_inactive_event_with_no_cells_accepted():
 
     assert prediction.status is FireSpreadPredictionStatus.INACTIVE_EVENT
     assert prediction.cells == ()
+
+
+# ---------------------------------------------------------------------------
+# insufficient_data_reason
+# ---------------------------------------------------------------------------
+
+from src.models import FireSpreadInsufficientDataReason  # noqa: E402
+
+
+def test_insufficient_data_with_reason_accepted():
+    prediction = make_prediction(
+        status=FireSpreadPredictionStatus.INSUFFICIENT_DATA,
+        cells=(),
+        insufficient_data_reason=FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION,
+    )
+
+    assert prediction.insufficient_data_reason is FireSpreadInsufficientDataReason.UNSUPPORTED_VEGETATION
+
+
+def test_legacy_insufficient_data_without_reason_can_still_be_reconstructed():
+    prediction = make_prediction(status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, cells=())
+
+    assert prediction.insufficient_data_reason is None
+
+
+@pytest.mark.parametrize(
+    ("status", "cells"),
+    [(FireSpreadPredictionStatus.VALID, None), (FireSpreadPredictionStatus.INACTIVE_EVENT, ())],
+)
+def test_reason_rejected_for_valid_and_inactive_event(status, cells):
+    overrides = dict(status=status, insufficient_data_reason=FireSpreadInsufficientDataReason.MISSING_WEATHER)
+    if cells is not None:
+        overrides["cells"] = cells
+    with pytest.raises(ValueError):
+        make_prediction(**overrides)
+
+
+def test_valid_prediction_has_no_reason_by_default():
+    assert make_prediction().insufficient_data_reason is None
+
+
+def test_non_enum_reason_rejected():
+    with pytest.raises(ValueError):
+        make_prediction(
+            status=FireSpreadPredictionStatus.INSUFFICIENT_DATA, cells=(), insufficient_data_reason="stale_weather"
+        )

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
+import logging
 import math
 
 from src.external.copernicus import CopernicusClientError, CopernicusLandCoverClient
@@ -23,6 +24,8 @@ from src.services.fire_severity.fire_severity_input_config import (
     SEVERITY_WEATHER_RADIUS_KM,
     VEGETATION_RADIUS_KM,
 )
+
+logger = logging.getLogger(__name__)
 
 _ACTIVE_EVENT_STATUSES = {FireEventStatus.SUSPECTED, FireEventStatus.CONFIRMED}
 _INACTIVE_EVENT_STATUSES = {FireEventStatus.RESOLVED, FireEventStatus.DISMISSED}
@@ -182,15 +185,42 @@ class FireSeverityInputService:
         return tuple(records)
 
     def _load_vegetation(self, stored_event: StoredFireEvent):
+        """Return the event's vegetation context, or None (vegetation is optional for severity).
+
+        An external Copernicus failure (configuration, auth, network, HTTP,
+        invalid response) is logged as a WARNING; a successful call that
+        simply yields no usable vegetation is only logged at INFO. Only the
+        event id, coordinates and the client's own error class/message are
+        logged - never credentials, tokens or raw payloads.
+        """
+        latitude = stored_event.event.latitude
+        longitude = stored_event.event.longitude
         try:
             statistics = self._land_cover_client.get_land_cover_statistics(
-                latitude=stored_event.event.latitude,
-                longitude=stored_event.event.longitude,
+                latitude=latitude,
+                longitude=longitude,
                 radius_km=VEGETATION_RADIUS_KM,
             )
-        except CopernicusClientError:
+        except CopernicusClientError as exc:
+            logger.warning(
+                "Copernicus vegetation unavailable for FireEvent %s at (%.5f, %.5f): %s: %s",
+                stored_event.id,
+                latitude,
+                longitude,
+                type(exc).__name__,
+                exc,
+            )
             return None
-        return self._vegetation_mapper.map_statistics(statistics)
+
+        vegetation_data = self._vegetation_mapper.map_statistics(statistics)
+        if vegetation_data is None:
+            logger.info(
+                "Copernicus returned no usable vegetation for FireEvent %s at (%.5f, %.5f).",
+                stored_event.id,
+                latitude,
+                longitude,
+            )
+        return vegetation_data
 
 
 def _select_max_frp_hotspot(

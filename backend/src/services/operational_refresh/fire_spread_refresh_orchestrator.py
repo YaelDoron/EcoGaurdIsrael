@@ -254,7 +254,14 @@ class FireSpreadRefreshOrchestrator:
         refresh_status: FireSpreadRefreshHorizonStatus,
         prediction_status: FireSpreadPredictionStatus,
     ) -> FireSpreadRefreshHorizonResult:
-        if latest is not None and latest.prediction.status is prediction_status:
+        # NO_OP only when both the status and the reason are unchanged, so the
+        # latest row always states the current reason (a historical NULL
+        # reason never matches a newly computed one).
+        if (
+            latest is not None
+            and latest.prediction.status is prediction_status
+            and latest.prediction.insufficient_data_reason is input_result.insufficient_data_reason
+        ):
             return FireSpreadRefreshHorizonResult(
                 fire_event_id=input_result.fire_event_id,
                 horizon_minutes=horizon_minutes,

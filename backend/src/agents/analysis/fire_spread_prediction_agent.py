@@ -167,6 +167,8 @@ class FireSpreadPredictionAgent:
             methodology=METHODOLOGY_NAME,
             methodology_version=METHODOLOGY_VERSION,
             cells=(),
+            # None for INACTIVE_EVENT (enforced by FireSpreadInputResult).
+            insufficient_data_reason=input_result.insufficient_data_reason,
         )
 
     @staticmethod
