@@ -5,6 +5,9 @@ import pytest
 
 from src.calculators.routing.haversine_fallback_calculator import (
     DEFAULT_OFF_ROAD_SPEED_KMH,
+    DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH,
+    MAX_DISCONNECTED_GRAPH_FALLBACK_DISTANCE_KM,
+    estimate_disconnected_graph_distance_and_eta,
     estimate_off_road_distance_and_eta,
     is_degenerate_zero_result,
 )
@@ -44,3 +47,31 @@ def test_estimate_off_road_distance_and_eta_is_zero_for_identical_coordinates():
 
     assert distance_meters == pytest.approx(0.0)
     assert travel_time_seconds == pytest.approx(0.0)
+
+
+def test_disconnected_graph_fallback_speed_is_30_kmh_and_slower_than_the_default():
+    assert DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH == 30.0
+    assert DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH < DEFAULT_OFF_ROAD_SPEED_KMH
+
+
+def test_disconnected_graph_estimate_is_haversine_distance_at_30_kmh():
+    # 0.3 degrees of latitude ~ 33.36 km (inside the cap) -> ~1.112 h at 30 km/h.
+    distance_meters, travel_time_seconds = estimate_disconnected_graph_distance_and_eta(32.0, 35.0, 32.3, 35.0)
+
+    assert distance_meters == pytest.approx(33_358.5, rel=1e-3)
+    assert travel_time_seconds == pytest.approx((distance_meters / 1000.0) / 30.0 * 3600.0)
+
+
+def test_disconnected_graph_estimate_for_identical_points_is_zero():
+    assert estimate_disconnected_graph_distance_and_eta(32.0, 35.0, 32.0, 35.0) == (0.0, 0.0)
+
+
+def test_disconnected_graph_estimate_is_none_beyond_the_max_distance():
+    assert MAX_DISCONNECTED_GRAPH_FALLBACK_DISTANCE_KM == 50.0
+    # 1 degree of latitude ~ 111.19 km: well past the cap.
+    assert estimate_disconnected_graph_distance_and_eta(32.0, 35.0, 33.0, 35.0) is None
+
+
+def test_disconnected_graph_estimate_applies_just_inside_the_max_distance():
+    # 0.44 degrees of latitude ~ 48.9 km: just inside the cap.
+    assert estimate_disconnected_graph_distance_and_eta(32.0, 35.0, 32.44, 35.0) is not None

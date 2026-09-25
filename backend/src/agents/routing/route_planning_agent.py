@@ -18,6 +18,7 @@ from src.agents.routing.route_planning_result import RoutePlanningResult, RouteP
 from src.calculators.routing.dijkstra_calculator import DijkstraCalculator
 from src.calculators.routing.haversine_fallback_calculator import (
     MIN_DISTINCT_DISTANCE_METERS,
+    estimate_disconnected_graph_distance_and_eta,
     estimate_off_road_distance_and_eta,
     is_degenerate_zero_result,
 )
@@ -200,6 +201,33 @@ class RoutePlanningAgent:
 
         dijkstra_result = self._dijkstra_calculator.calculate_shortest_path(source_node_id, target_node_id, edges)
         if dijkstra_result.status is RouteStatus.UNREACHABLE:
+            # Disconnected graph: no road path between two mapped nodes. A
+            # straight-line estimate (a two-node path) keeps the pair
+            # assignable instead of leaving the fire with no response actions.
+            estimate = estimate_disconnected_graph_distance_and_eta(
+                resource.latitude, resource.longitude, target.latitude, target.longitude
+            )
+            if estimate is not None:
+                distance_meters, travel_time_seconds = estimate
+                logger.warning(
+                    "Route %s -> target %s: no road path in the fetched graph (disconnected components); "
+                    "using a straight-line estimate of %.2f km.",
+                    resource.resource_id,
+                    target.response_target_id,
+                    distance_meters / 1000.0,
+                )
+                return RouteResult(
+                    resource_id=resource.resource_id,
+                    response_target_id=target.response_target_id,
+                    status=RouteStatus.REACHABLE,
+                    source_node_id=source_node_id,
+                    target_node_id=target_node_id,
+                    node_path=(source_node_id, target_node_id),
+                    distance_meters=distance_meters,
+                    travel_time_seconds=travel_time_seconds,
+                )
+            # Too far apart for a straight line to be a plausible stand-in:
+            # stays UNREACHABLE, exactly as before the fallback existed.
             return RouteResult(
                 resource_id=resource.resource_id,
                 response_target_id=target.response_target_id,

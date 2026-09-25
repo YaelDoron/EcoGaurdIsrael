@@ -226,7 +226,13 @@ export function EventDetailsPage() {
   );
   const [layerVisibility, setLayerVisibility] = useState<LayerVisibility>({});
 
-  const boundsPoints = useMemo(() => (data ? buildBoundsPoints(data) : []), [data]);
+  // useEventDetails polls, so `data` is a new object every few seconds even
+  // when nothing changed. FitBoundsToPoints re-frames the map whenever its
+  // `points` identity changes, which would snap the user's pan/zoom back on
+  // every poll - so key the points by content and only hand the map a new
+  // array when the geometry actually changed.
+  const boundsPointsKey = useMemo(() => JSON.stringify(data ? buildBoundsPoints(data) : []), [data]);
+  const boundsPoints = useMemo(() => JSON.parse(boundsPointsKey) as LatLngPoint[], [boundsPointsKey]);
   const layerToggles = useMemo(() => (data ? buildLayerToggles(data) : []), [data]);
 
   const toggleLayer = (layerId: string) => {

@@ -23,6 +23,12 @@ from src.services.operational.road_network_fetcher import RoadNetworkFetcher, _i
 BBOX = (32.7, 32.8, 35.0, 35.1)
 
 
+@pytest.fixture(autouse=True)
+def _reset_active_overpass_endpoint(monkeypatch):
+    """The active Overpass mirror is process-wide state; start every test on the primary."""
+    monkeypatch.setattr(road_network_fetcher_module, "_active_endpoint_index", 0)
+
+
 def test_fast_successful_fetch_returns_nodes_and_edges(monkeypatch):
     class _FakeGraph:
         def number_of_nodes(self):
@@ -577,3 +583,141 @@ def test_tiled_fetch_forwards_custom_filter_to_every_tile(monkeypatch):
 
     assert len(calls) == 4
     assert all(call.get("custom_filter") == GRAPH_FIDELITY_CUSTOM_FILTER for call in calls)
+
+
+# ---------------------------------------------------------------------------
+# Overpass mirror fallback: an overloaded/unresponsive server must not stall
+# the caller - each transient failure moves straight on to the next mirror.
+# ---------------------------------------------------------------------------
+
+
+class _EmptyFakeGraph:
+    def nodes(self, data=False):
+        return [(1, {"y": 32.75, "x": 35.05})]
+
+    def edges(self, data=False):
+        return []
+
+
+def _stub_travel_times(monkeypatch):
+    monkeypatch.setattr(road_network_fetcher_module.ox, "add_edge_speeds", lambda graph, fallback=None: graph)
+    monkeypatch.setattr(road_network_fetcher_module.ox, "add_edge_travel_times", lambda graph: graph)
+
+
+def _current_overpass_base_url():
+    settings = road_network_fetcher_module.ox.settings
+    return getattr(settings, "overpass_url", None) or settings.overpass_endpoint
+
+
+def test_fetch_falls_back_to_the_next_mirror_on_timeout_without_backoff(monkeypatch, caplog):
+    """The first server times out; the fetch must go to the next endpoint at
+    once (no backoff sleep between different servers) and log one clean line."""
+    endpoints = road_network_fetcher_module.OVERPASS_ENDPOINTS
+    used_urls = []
+
+    def _times_out_on_primary(**_kwargs):
+        used_urls.append(_current_overpass_base_url())
+        if len(used_urls) == 1:
+            raise requests.exceptions.ReadTimeout("read timed out after 15s")
+        return _EmptyFakeGraph()
+
+    sleeps = []
+    monkeypatch.setattr(road_network_fetcher_module.time, "sleep", sleeps.append)
+    monkeypatch.setattr(road_network_fetcher_module.ox, "graph_from_bbox", _times_out_on_primary)
+    _stub_travel_times(monkeypatch)
+
+    with caplog.at_level("INFO", logger=road_network_fetcher_module.logger.name):
+        nodes, _edges = RoadNetworkFetcher().fetch_network_in_bbox(*BBOX)
+
+    assert len(nodes) == 1
+    assert used_urls == [endpoints[0].removesuffix("/interpreter"), endpoints[1].removesuffix("/interpreter")]
+    assert sleeps == []
+    fallback_records = [r for r in caplog.records if "falling back to mirror" in r.getMessage()]
+    assert len(fallback_records) == 1
+    assert fallback_records[0].exc_info is None
+    assert "timed out" in fallback_records[0].getMessage()
+    assert "overpass.kumi.systems" in fallback_records[0].getMessage()
+
+
+def test_fetch_falls_back_through_every_mirror_on_5xx_then_degrades_to_empty(monkeypatch):
+    used_urls = []
+
+    def _always_5xx(**_kwargs):
+        used_urls.append(_current_overpass_base_url())
+        raise ResponseStatusCodeError("HTTP 504")
+
+    monkeypatch.setattr(road_network_fetcher_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(road_network_fetcher_module.ox, "graph_from_bbox", _always_5xx)
+
+    nodes, edges = RoadNetworkFetcher().fetch_network_in_bbox(*BBOX)
+
+    assert (nodes, edges) == ([], [])
+    assert used_urls == [e.removesuffix("/interpreter") for e in road_network_fetcher_module.OVERPASS_ENDPOINTS]
+
+
+def test_working_mirror_stays_active_for_later_fetches(monkeypatch):
+    """Once the primary has failed, later fetches (e.g. the other tiles of a
+    tiled fetch) start on the mirror that worked instead of re-timing-out on the primary."""
+    used_urls = []
+
+    def _primary_down(**_kwargs):
+        used_urls.append(_current_overpass_base_url())
+        if len(used_urls) == 1:
+            raise requests.exceptions.ConnectionError("primary unreachable")
+        return _EmptyFakeGraph()
+
+    monkeypatch.setattr(road_network_fetcher_module.ox, "graph_from_bbox", _primary_down)
+    _stub_travel_times(monkeypatch)
+
+    fetcher = RoadNetworkFetcher()
+    fetcher.fetch_network_in_bbox(*BBOX)
+    fetcher.fetch_network_in_bbox(*BBOX)
+
+    assert len(used_urls) == 3
+    assert used_urls[1] == used_urls[2] != used_urls[0]
+
+
+def test_each_attempt_applies_the_strict_per_request_timeout(monkeypatch):
+    seen_timeouts = []
+
+    def _capture(**_kwargs):
+        seen_timeouts.append(road_network_fetcher_module.ox.settings.requests_timeout)
+        return _EmptyFakeGraph()
+
+    monkeypatch.setattr(road_network_fetcher_module.ox, "graph_from_bbox", _capture)
+    _stub_travel_times(monkeypatch)
+
+    RoadNetworkFetcher().fetch_network_in_bbox(*BBOX)
+
+    assert seen_timeouts == [road_network_fetcher_module.OSM_REQUEST_TIMEOUT_SECONDS]
+
+
+class TestRaiseOnOverpassOverload:
+    @staticmethod
+    def _response(status_code):
+        response = requests.Response()
+        response.status_code = status_code
+        return response
+
+    @pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+    def test_overload_statuses_raise_a_transient_error(self, status_code):
+        from src.services.operational.road_network_fetcher import _raise_on_overpass_overload
+
+        with pytest.raises(ResponseStatusCodeError) as excinfo:
+            _raise_on_overpass_overload(self._response(status_code))
+        assert _is_transient_osm_error(excinfo.value) is True
+
+    @pytest.mark.parametrize("status_code", [200, 400, 404])
+    def test_other_statuses_pass_through_untouched(self, status_code):
+        from src.services.operational.road_network_fetcher import _raise_on_overpass_overload
+
+        response = self._response(status_code)
+        assert _raise_on_overpass_overload(response) is response
+
+    def test_hook_is_registered_on_osmnx_requests(self, monkeypatch):
+        from src.services.operational.road_network_fetcher import _apply_overpass_endpoint, _raise_on_overpass_overload
+
+        _apply_overpass_endpoint(road_network_fetcher_module.OVERPASS_ENDPOINTS[0])
+
+        hooks = road_network_fetcher_module.ox.settings.requests_kwargs["hooks"]["response"]
+        assert hooks == [_raise_on_overpass_overload]

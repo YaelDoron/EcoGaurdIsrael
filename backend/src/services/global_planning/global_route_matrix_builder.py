@@ -14,8 +14,22 @@ source_node_id, so the (source_node_id, target_node_id) DijkstraResult is
 cached and reused across every resource sharing that origin, without
 touching DijkstraCalculator's own algorithm.
 
-Unreachable/unmappable pairs (Task 15) simply produce no GlobalRouteOption
-- never a failure of the whole build.
+Unmappable pairs (Task 15) simply produce no GlobalRouteOption - never a
+failure of the whole build.
+
+Disconnected-graph fallback: a pair whose endpoints both map to a node but
+between which Dijkstra finds NO path (UNREACHABLE - a fetched graph split
+into disconnected components) is no longer dropped, which used to leave
+fires with no response actions. It becomes a GlobalRouteOption whose ETA is
+the station->target straight-line (Haversine) distance at
+DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH and whose node_path is just
+(source_node_id, target_node_id) - a straight segment, never a routed path.
+Only within MAX_DISCONNECTED_GRAPH_FALLBACK_DISTANCE_KM: a station farther
+from the target than that stays infeasible, so a split graph can never turn
+a station in another region into a candidate for a far-away fire.
+`GlobalRouteMatrixBuildResult.fallback_pair_count` reports how many such
+estimated pairs a build contained. UNMAPPABLE pairs still get no option:
+there is no node to build even that two-node path from.
 
 First-Mile Heuristic Fallback (see _first_mile_penalty): even with
 GlobalPlanningInputBuilder's retrying, persistent-cache-backed station-micro
@@ -23,9 +37,7 @@ fetch (Step 4), Overpass can still exhaust every retry for a given station in
 a given cycle, leaving NodeMappingService no choice but to snap that
 resource's origin to whatever real node IS in the fetched graph - which can
 be a real but non-trivial distance from the station's true coordinate. This
-is NOT the banned "Haversine air-distance routing" pattern (see
-test_input_builder_never_imports_the_haversine_route_fallback, which this
-file is also covered by): it never invents a route, never runs when Dijkstra
+first-mile correction never invents a route, never runs when Dijkstra
 found no REACHABLE path, and never replaces a single meter of the real,
 road-network-derived path Dijkstra returns. It only adds a small, bounded
 correction on TOP OF an already-real Dijkstra route, honestly reflecting the
@@ -33,9 +45,10 @@ one un-routable stretch (station door -> nearest fetched road node) that no
 road-network fetch can ever eliminate from ANY routing system, real or
 simulated - the same reason Google/Waze-class routers always add their own
 short "walk/drive to the road" estimate for an origin that isn't already
-sitting on a mapped road. HaversineFallbackCalculator (the per-event route
-SUBSTITUTE for a missing route entirely) is never imported here or anywhere
-in the global planning path - see the same guard test.
+sitting on a mapped road. That penalty is separate from the disconnected-
+graph fallback above, which replaces a MISSING route entirely and therefore
+deliberately does not also add the first-mile penalty (its straight line
+already starts at the station's true coordinate).
 
 FIRST_MILE_PENALTY_THRESHOLD_KM lives in src/utils/geo.py, not here - it is
 shared with ResponsePlanPresenter, which bridges this same gap visually in
@@ -47,8 +60,13 @@ which routes need a correction.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 
 from src.calculators.routing.dijkstra_calculator import DijkstraCalculator, DijkstraResult
+from src.calculators.routing.haversine_fallback_calculator import (
+    DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH,
+    estimate_disconnected_graph_distance_and_eta,
+)
 from src.models.global_planning_resource import GlobalPlanningResource
 from src.models.global_planning_target import GlobalPlanningTarget
 from src.models.global_route_matrix import GlobalRouteMatrix
@@ -67,6 +85,8 @@ from src.utils.geo import FIRST_MILE_PENALTY_THRESHOLD_KM, haversine_distance_km
 # never UNDERSTATES the true cost of a real gap.
 FIRST_MILE_FALLBACK_SPEED_KMH = 30.0
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class GlobalRouteMatrixBuildResult:
@@ -78,6 +98,9 @@ class GlobalRouteMatrixBuildResult:
     potential_pairs: int
     feasible_pairs: int
     dijkstra_call_count: int
+    # Pairs Dijkstra found unreachable that were kept as straight-line
+    # estimates (see this module's docstring) rather than dropped.
+    fallback_pair_count: int = 0
 
 
 class GlobalRouteMatrixBuilder:
@@ -143,6 +166,7 @@ class GlobalRouteMatrixBuilder:
 
         dijkstra_cache: dict[tuple[int, int], DijkstraResult] = {}
         dijkstra_call_count = 0
+        fallback_pair_count = 0
         options: list[GlobalRouteOption] = []
 
         for resource in assignable_resources:
@@ -167,6 +191,12 @@ class GlobalRouteMatrixBuilder:
                     dijkstra_call_count += 1
 
                 if cached_result.status is not RouteStatus.REACHABLE:
+                    fallback_option = self._disconnected_graph_fallback_option(
+                        resource, target, source_node_id, target_node_id
+                    )
+                    if fallback_option is not None:
+                        options.append(fallback_option)
+                        fallback_pair_count += 1
                     continue
 
                 options.append(
@@ -180,6 +210,14 @@ class GlobalRouteMatrixBuilder:
                     )
                 )
 
+        if fallback_pair_count:
+            logger.warning(
+                "Global route matrix: %d resource/target pair(s) had no road path in the fetched graph "
+                "(disconnected components); using straight-line estimates at %.0f km/h for them.",
+                fallback_pair_count,
+                DISCONNECTED_GRAPH_FALLBACK_SPEED_KMH,
+            )
+
         matrix = GlobalRouteMatrix(options=tuple(options))
         return GlobalRouteMatrixBuildResult(
             matrix=matrix,
@@ -188,6 +226,34 @@ class GlobalRouteMatrixBuilder:
             potential_pairs=potential_pairs,
             feasible_pairs=len(matrix),
             dijkstra_call_count=dijkstra_call_count,
+            fallback_pair_count=fallback_pair_count,
+        )
+
+    @staticmethod
+    def _disconnected_graph_fallback_option(
+        resource: GlobalPlanningResource,
+        target: GlobalPlanningTarget,
+        source_node_id: int,
+        target_node_id: int,
+    ) -> GlobalRouteOption | None:
+        """A straight-line stand-in for a pair Dijkstra found no path for:
+        the station->target Haversine distance/ETA, with node_path just the
+        two already-mapped endpoint nodes (a straight segment for the map).
+        None (the pair stays infeasible) when the station and target are
+        farther apart than MAX_DISCONNECTED_GRAPH_FALLBACK_DISTANCE_KM."""
+        estimate = estimate_disconnected_graph_distance_and_eta(
+            resource.station_latitude, resource.station_longitude, target.latitude, target.longitude
+        )
+        if estimate is None:
+            return None
+        distance_meters, eta_seconds = estimate
+        return GlobalRouteOption(
+            resource_id=resource.resource_id,
+            fire_event_id=target.fire_event_id,
+            response_target_id=target.response_target_id,
+            eta_seconds=eta_seconds,
+            route_distance_meters=distance_meters,
+            node_path=(source_node_id, target_node_id),
         )
 
     @staticmethod

@@ -935,14 +935,15 @@ def test_two_nearby_uncovered_anchors_still_dedup_to_one_fetch(sqlite_session_fa
 
 
 def test_input_builder_never_imports_the_haversine_route_fallback():
+    """The input builder only assembles inputs and never routes. The one
+    deliberate use of the straight-line fallback in global planning lives in
+    GlobalRouteMatrixBuilder (disconnected-graph pairs) and is covered by
+    test_global_route_matrix_builder.py."""
     import ast
     from pathlib import Path
 
     forbidden_fragments = ("HaversineFallbackCalculator", "haversine_fallback_calculator")
-    for relative_path in (
-        "src/services/global_planning/global_planning_input_builder.py",
-        "src/services/global_planning/global_route_matrix_builder.py",
-    ):
+    for relative_path in ("src/services/global_planning/global_planning_input_builder.py",):
         path = Path(relative_path)
         tree = ast.parse(path.read_text(encoding="utf-8"))
         violations = []

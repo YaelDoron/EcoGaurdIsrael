@@ -18,6 +18,7 @@ import logging
 import math
 import threading
 import time
+from urllib.parse import urlparse
 
 import networkx as nx
 import osmnx as ox
@@ -114,6 +115,95 @@ OSM_FETCH_TIMEOUT_SECONDS = 30.0
 # first.
 MAX_OSM_FETCH_ATTEMPTS = 3
 _OSM_FETCH_RETRY_BASE_DELAY_SECONDS = 1.0
+
+# Overpass mirror fallback (live incident: the default public server being
+# overloaded stalled the UI). Each retry attempt above goes to the NEXT
+# endpoint in this list rather than hammering the one that just failed, so
+# with MAX_OSM_FETCH_ATTEMPTS == len(OVERPASS_ENDPOINTS) every endpoint gets
+# exactly one try per fetch. Switching to a different server needs no
+# backoff (see fetch_network_in_bbox); the backoff delay only applies when an
+# attempt would land on an endpoint this same fetch already tried.
+# Full ".../interpreter" URLs; _apply_overpass_endpoint adapts them to
+# whichever form the installed osmnx expects.
+OVERPASS_ENDPOINTS: tuple[str, ...] = (
+    "https://overpass-api.de/api/interpreter",  # osmnx's own default
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+)
+
+# Strict per-request bound, applied via ox.settings.requests_timeout: osmnx
+# uses it both as the HTTP timeout of every Overpass request (an overloaded
+# server that accepts the connection but never answers fails after this long
+# instead of osmnx's 180s default) and as the server-side [timeout:] of the
+# query itself. Deliberately shorter than OSM_FETCH_TIMEOUT_SECONDS, which
+# still bounds the whole download+conversion pipeline of one attempt.
+OSM_REQUEST_TIMEOUT_SECONDS = 25.0
+
+# Endpoint currently in use, shared by every fetch in the process: tiled
+# fetches run on a thread pool and osmnx's Overpass settings are global, so
+# per-call endpoint state would let concurrent tiles overwrite one another's
+# setting mid-request. Sharing it also means that once one tile finds the
+# primary overloaded, the remaining tiles go straight to the mirror instead
+# of each spending their own timeout rediscovering it.
+_endpoint_lock = threading.Lock()
+_active_endpoint_index = 0
+
+
+def _get_active_endpoint_index() -> int:
+    with _endpoint_lock:
+        return _active_endpoint_index
+
+
+def _advance_endpoint_after_failure(failed_index: int) -> int:
+    """Move the shared active endpoint past `failed_index` and return the new active index.
+
+    Only advances if `failed_index` is still the active one: if another
+    thread already moved on from that endpoint, this fetch simply adopts
+    that thread's choice instead of skipping a further, untried endpoint.
+    """
+    global _active_endpoint_index
+    with _endpoint_lock:
+        if _active_endpoint_index == failed_index:
+            _active_endpoint_index = (failed_index + 1) % len(OVERPASS_ENDPOINTS)
+        return _active_endpoint_index
+
+
+def _raise_on_overpass_overload(response: requests.Response, *_args, **_kwargs) -> requests.Response:
+    """`requests` response hook: fail fast on a 5xx/429 from Overpass.
+
+    Left alone, osmnx answers a 429/504 by sleeping 55s and retrying the
+    SAME overloaded server - the exact stall the mirror fallback exists to
+    avoid. Raising here (before osmnx sees the response) turns it into an
+    immediate ResponseStatusCodeError, which _is_transient_osm_error already
+    treats as retryable, so the next attempt goes to the next mirror.
+    """
+    if response.status_code >= 500 or response.status_code == 429:
+        raise ResponseStatusCodeError(f"HTTP {response.status_code}")
+    return response
+
+
+def _apply_overpass_endpoint(endpoint: str) -> None:
+    """Point osmnx at `endpoint` with the strict per-request timeout and fail-fast hook."""
+    if hasattr(ox.settings, "overpass_url"):  # osmnx >= 2.0: base URL, "/interpreter" appended by osmnx.
+        ox.settings.overpass_url = endpoint.removesuffix("/interpreter")
+    else:  # osmnx 1.x: full interpreter URL.
+        ox.settings.overpass_endpoint = endpoint
+    ox.settings.requests_timeout = OSM_REQUEST_TIMEOUT_SECONDS
+    ox.settings.requests_kwargs = {
+        **ox.settings.requests_kwargs,
+        "hooks": {"response": [_raise_on_overpass_overload]},
+    }
+
+
+def _describe_osm_failure(exc: Exception) -> str:
+    """Short, single-line reason for a failed fetch attempt (no URLs, no traceback)."""
+    if isinstance(exc, (TimeoutError, requests.exceptions.Timeout)):
+        return "timed out"
+    if isinstance(exc, requests.exceptions.ConnectionError):
+        return "connection error"
+    if isinstance(exc, ResponseStatusCodeError):
+        return str(exc) or "bad HTTP status"
+    return type(exc).__name__
 
 
 def _is_transient_osm_error(exc: Exception) -> bool:
@@ -227,22 +317,37 @@ class RoadNetworkFetcher:
             max_lon,
             " (custom filter)" if custom_filter is not None else "",
         )
+        tried_endpoint_indexes: set[int] = set()
         for attempt in range(MAX_OSM_FETCH_ATTEMPTS):
+            endpoint_index = _get_active_endpoint_index()
+            endpoint = OVERPASS_ENDPOINTS[endpoint_index]
+            tried_endpoint_indexes.add(endpoint_index)
             try:
-                nodes, edges = self._fetch_and_convert_bounded(min_lat, max_lat, min_lon, max_lon, custom_filter)
+                nodes, edges = self._fetch_and_convert_bounded(
+                    min_lat, max_lat, min_lon, max_lon, custom_filter, endpoint
+                )
             except Exception as exc:  # noqa: BLE001 - no network found, timed out, or any Overpass/OSMnx failure, degrades to empty.
                 is_last_attempt = attempt == MAX_OSM_FETCH_ATTEMPTS - 1
                 if not is_last_attempt and _is_transient_osm_error(exc):
-                    delay_seconds = _OSM_FETCH_RETRY_BASE_DELAY_SECONDS * (2**attempt)
+                    next_endpoint_index = _advance_endpoint_after_failure(endpoint_index)
+                    # Backoff only when this fetch is about to reuse an
+                    # endpoint it already tried; a fresh mirror is tried at once.
+                    delay_seconds = (
+                        _OSM_FETCH_RETRY_BASE_DELAY_SECONDS * (2**attempt)
+                        if next_endpoint_index in tried_endpoint_indexes
+                        else 0.0
+                    )
                     logger.warning(
-                        "OSM fetch attempt %d/%d failed transiently for this bbox (%s); retrying in %.1fs.",
+                        "OSM server %s %s (attempt %d/%d); falling back to mirror %s%s.",
+                        urlparse(endpoint).hostname,
+                        _describe_osm_failure(exc),
                         attempt + 1,
                         MAX_OSM_FETCH_ATTEMPTS,
-                        exc,
-                        delay_seconds,
-                        exc_info=False,
+                        urlparse(OVERPASS_ENDPOINTS[next_endpoint_index]).hostname,
+                        f" in {delay_seconds:.1f}s" if delay_seconds else "",
                     )
-                    time.sleep(delay_seconds)
+                    if delay_seconds:
+                        time.sleep(delay_seconds)
                     continue
                 logger.warning(
                     "No OSM road network could be fetched for the requested bounding box (attempt %d/%d): %s",
@@ -342,8 +447,12 @@ class RoadNetworkFetcher:
         min_lon: float,
         max_lon: float,
         custom_filter: str | None,
+        endpoint: str,
     ) -> tuple[list[GraphNode], list[GraphEdge]]:
         """Run the full fetch+convert pipeline on a daemon thread, bounded to OSM_FETCH_TIMEOUT_SECONDS.
+
+        `endpoint` is the Overpass interpreter URL this attempt should use
+        (see OVERPASS_ENDPOINTS).
 
         Deliberately wraps the *entire* pipeline (Overpass download, OSMnx's
         speed/travel-time model, and node/edge conversion) in one bound, not
@@ -363,6 +472,7 @@ class RoadNetworkFetcher:
 
         def _run() -> None:
             try:
+                _apply_overpass_endpoint(endpoint)
                 # osmnx expects bbox as (left, bottom, right, top) =
                 # (min_lon, min_lat, max_lon, max_lat).
                 # custom_filter (when given) overrides network_type entirely
