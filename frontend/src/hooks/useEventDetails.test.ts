@@ -137,3 +137,163 @@ describe("useEventDetails", () => {
     expect(getEventDetailsMock).toHaveBeenNthCalledWith(2, 34);
   });
 });
+
+describe("useEventDetails polling", () => {
+  function makeWithStatus(status: EventDetailsResult["fire_event"]["status"], asOf = "2026-09-17T14:00:00Z") {
+    return makeResult({ as_of: asOf, fire_event: { ...makeResult().fire_event, status } });
+  }
+
+  async function flush(ms = 0) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  beforeEach(() => {
+    getEventDetailsMock.mockReset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-fetches every 5 seconds while the event is active and picks up a status change", async () => {
+    getEventDetailsMock
+      .mockResolvedValueOnce(makeWithStatus("suspected"))
+      .mockResolvedValueOnce(makeWithStatus("confirmed", "2026-09-17T14:00:05Z"));
+
+    const { result } = renderHook(() => useEventDetails(12));
+    await flush();
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+    expect(result.current.data?.fire_event.status).toBe("suspected");
+
+    await flush(4999);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+
+    await flush(1);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(2);
+    expect(result.current.data?.fire_event.status).toBe("confirmed");
+  });
+
+  it("keeps polling a confirmed event", async () => {
+    getEventDetailsMock.mockResolvedValue(makeWithStatus("confirmed"));
+
+    renderHook(() => useEventDetails(12));
+    await flush();
+    await flush(5000);
+    await flush(5000);
+
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["resolved", "dismissed"] as const)("does not poll a %s event", async (status) => {
+    getEventDetailsMock.mockResolvedValue(makeWithStatus(status));
+
+    renderHook(() => useEventDetails(12));
+    await flush();
+    await flush(30000);
+
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops polling once the event becomes resolved", async () => {
+    getEventDetailsMock
+      .mockResolvedValueOnce(makeWithStatus("confirmed"))
+      .mockResolvedValue(makeWithStatus("resolved"));
+
+    renderHook(() => useEventDetails(12));
+    await flush();
+    await flush(5000);
+    await flush(30000);
+
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not poll after a 404", async () => {
+    getEventDetailsMock.mockRejectedValue(new ApiError("not found", 404));
+
+    renderHook(() => useEventDetails(999));
+    await flush();
+    await flush(30000);
+
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps polling through a failed poll and keeps the previous data visible", async () => {
+    getEventDetailsMock
+      .mockResolvedValueOnce(makeWithStatus("confirmed"))
+      .mockRejectedValueOnce(new ApiError("boom", 500))
+      .mockResolvedValueOnce(makeWithStatus("confirmed", "2026-09-17T14:00:10Z"));
+
+    const { result } = renderHook(() => useEventDetails(12));
+    await flush();
+    await flush(5000);
+    expect(result.current.refreshError).toMatch(/unable to refresh/i);
+    expect(result.current.data?.as_of).toBe("2026-09-17T14:00:00Z");
+
+    await flush(5000);
+    expect(result.current.refreshError).toBeNull();
+    expect(result.current.data?.as_of).toBe("2026-09-17T14:00:10Z");
+  });
+
+  it("never has two requests in flight: the next poll is scheduled after the current one settles", async () => {
+    let resolveSlow: (value: EventDetailsResult) => void = () => {};
+    getEventDetailsMock
+      .mockResolvedValueOnce(makeWithStatus("confirmed"))
+      .mockReturnValueOnce(new Promise<EventDetailsResult>((resolve) => (resolveSlow = resolve)))
+      .mockResolvedValue(makeWithStatus("confirmed"));
+
+    renderHook(() => useEventDetails(12));
+    await flush();
+    await flush(5000); // second request starts and stays pending
+    await flush(60000);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(2);
+
+    resolveSlow(makeWithStatus("confirmed"));
+    await flush(5000);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("clears the poll timer on unmount", async () => {
+    getEventDetailsMock.mockResolvedValue(makeWithStatus("confirmed"));
+
+    const { unmount } = renderHook(() => useEventDetails(12));
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await flush(30000);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not update state or reschedule when a request resolves after unmount", async () => {
+    let resolveInFlight: (value: EventDetailsResult) => void = () => {};
+    getEventDetailsMock.mockReturnValueOnce(new Promise<EventDetailsResult>((resolve) => (resolveInFlight = resolve)));
+
+    const { unmount } = renderHook(() => useEventDetails(12));
+    unmount();
+    resolveInFlight(makeWithStatus("confirmed"));
+    await flush();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await flush(30000);
+    expect(getEventDetailsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("switching to another event cancels the old poll and polls the new one", async () => {
+    getEventDetailsMock.mockResolvedValue(makeWithStatus("confirmed"));
+
+    const { rerender } = renderHook(({ id }) => useEventDetails(id), { initialProps: { id: 12 } });
+    await flush();
+
+    rerender({ id: 34 });
+    await flush();
+    await flush(5000);
+
+    const ids = getEventDetailsMock.mock.calls.map((call) => call[0]);
+    expect(ids).toEqual([12, 34, 34]);
+  });
+});

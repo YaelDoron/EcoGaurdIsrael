@@ -15,3 +15,19 @@
  * safeguard).
  */
 export const OPERATIONS_OVERVIEW_POLL_INTERVAL_MS = 5000;
+
+/**
+ * How long useEventDetails waits after one Event Details request settles
+ * before fetching again, while the event is still active (suspected or
+ * confirmed) - so a status change (e.g. "Monitoring" -> "Pending") and a
+ * newly generated response plan show up without navigating away and back.
+ */
+export const EVENT_DETAILS_POLL_INTERVAL_MS = 5000;
+
+/**
+ * How long useGlobalResponsePlan waits after one request settles before
+ * fetching the current Global Response Plan again, so a newly materialized
+ * generation (e.g. after new events are confirmed) shows up without a
+ * manual page reload.
+ */
+export const GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS = 5000;

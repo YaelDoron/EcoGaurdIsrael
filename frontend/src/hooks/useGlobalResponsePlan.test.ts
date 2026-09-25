@@ -1,4 +1,4 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/errors";
 import type { GlobalResponsePlanResponse } from "../types/globalResponsePlan";
@@ -117,5 +117,192 @@ describe("useGlobalResponsePlan", () => {
 
     resolveFirst(makeResponse());
     await waitFor(() => expect(result.current.isLoading).toBe(false));
+  });
+});
+
+describe("useGlobalResponsePlan polling", () => {
+  async function flush(ms = 0) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  function planWith(completedAt: string, runId = 77): GlobalResponsePlanResponse {
+    const base = makeResponse();
+    return { ...base, plan: { ...base.plan!, run_id: runId, completed_at: completedAt } };
+  }
+
+  beforeEach(() => {
+    getCurrentGlobalResponsePlanMock.mockReset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-fetches every 5 seconds and picks up a newly materialized plan", async () => {
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(planWith("2026-09-20T10:03:00Z", 1))
+      .mockResolvedValueOnce(planWith("2026-09-20T10:07:00Z", 2));
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    expect(result.current.response?.plan?.run_id).toBe(1);
+
+    await flush(4999);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(1);
+
+    await flush(1);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(2);
+    expect(result.current.response?.plan?.run_id).toBe(2);
+  });
+
+  it("keeps polling indefinitely, including when there is no plan yet (plan: null)", async () => {
+    getCurrentGlobalResponsePlanMock.mockResolvedValue(makeResponse({ plan: null }));
+
+    renderHook(() => useGlobalResponsePlan());
+    await flush();
+    await flush(5000);
+    await flush(5000);
+
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not report isLoading during a poll - only isRefreshing - and keeps the response visible", async () => {
+    let resolvePoll: (value: GlobalResponsePlanResponse) => void = () => {};
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(makeResponse())
+      .mockReturnValueOnce(new Promise<GlobalResponsePlanResponse>((resolve) => (resolvePoll = resolve)));
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    await flush(5000);
+
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.isRefreshing).toBe(true);
+    expect(result.current.response).not.toBeNull();
+
+    resolvePoll(makeResponse());
+    await flush();
+    expect(result.current.isRefreshing).toBe(false);
+  });
+
+  it("keeps the previous response and keeps polling through a failed poll", async () => {
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(planWith("2026-09-20T10:03:00Z", 1))
+      .mockRejectedValueOnce(new ApiError("boom", 500))
+      .mockResolvedValueOnce(planWith("2026-09-20T10:07:00Z", 2));
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    await flush(5000);
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.refreshError).toMatch(/unable to refresh/i);
+    expect(result.current.response?.plan?.run_id).toBe(1);
+
+    await flush(5000);
+    expect(result.current.refreshError).toBeNull();
+    expect(result.current.response?.plan?.run_id).toBe(2);
+  });
+
+  it("does not poll after a failed first load, and retry() starts a fresh load that then polls", async () => {
+    getCurrentGlobalResponsePlanMock
+      .mockRejectedValueOnce(new ApiError("boom", 500))
+      .mockResolvedValue(makeResponse());
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    await flush(30000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBeTruthy();
+
+    act(() => {
+      result.current.retry();
+    });
+    await flush();
+    expect(result.current.error).toBeNull();
+    expect(result.current.response).not.toBeNull();
+
+    await flush(5000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("never has two requests in flight: the next poll is scheduled after the current one settles", async () => {
+    let resolveSlow: (value: GlobalResponsePlanResponse) => void = () => {};
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(makeResponse())
+      .mockReturnValueOnce(new Promise<GlobalResponsePlanResponse>((resolve) => (resolveSlow = resolve)))
+      .mockResolvedValue(makeResponse());
+
+    renderHook(() => useGlobalResponsePlan());
+    await flush();
+    await flush(5000);
+    await flush(60000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(2);
+
+    resolveSlow(makeResponse());
+    await flush(5000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps the same plan object when a poll returns an identical plan, but still updates as_of", async () => {
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(makeResponse({ as_of: "2026-09-20T09:00:00Z" }))
+      .mockResolvedValueOnce(makeResponse({ as_of: "2026-09-20T09:00:05Z" }));
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    const firstPlan = result.current.response?.plan;
+
+    await flush(5000);
+
+    expect(result.current.response?.as_of).toBe("2026-09-20T09:00:05Z");
+    expect(result.current.response?.plan).toBe(firstPlan);
+  });
+
+  it("uses a new plan object when the plan content changed", async () => {
+    getCurrentGlobalResponsePlanMock
+      .mockResolvedValueOnce(planWith("2026-09-20T10:03:00Z", 1))
+      .mockResolvedValueOnce(planWith("2026-09-20T10:07:00Z", 2));
+
+    const { result } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    const firstPlan = result.current.response?.plan;
+
+    await flush(5000);
+
+    expect(result.current.response?.plan).not.toBe(firstPlan);
+  });
+
+  it("clears the poll timer on unmount", async () => {
+    getCurrentGlobalResponsePlanMock.mockResolvedValue(makeResponse());
+
+    const { unmount } = renderHook(() => useGlobalResponsePlan());
+    await flush();
+    expect(vi.getTimerCount()).toBe(1);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await flush(30000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not update state or reschedule when a request resolves after unmount", async () => {
+    let resolveInFlight: (value: GlobalResponsePlanResponse) => void = () => {};
+    getCurrentGlobalResponsePlanMock.mockReturnValueOnce(
+      new Promise<GlobalResponsePlanResponse>((resolve) => (resolveInFlight = resolve)),
+    );
+
+    const { unmount } = renderHook(() => useGlobalResponsePlan());
+    unmount();
+    resolveInFlight(makeResponse());
+    await flush();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await flush(30000);
+    expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(1);
   });
 });

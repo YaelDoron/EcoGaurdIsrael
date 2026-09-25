@@ -54,7 +54,13 @@ def _target(fire_event_id, response_target_id, lat, lon) -> GlobalPlanningTarget
     )
 
 
-def _nodes_and_edges(include_unreachable_target=False):
+# A disconnected component ~12 km from station A - inside the disconnected-graph
+# fallback's 50 km cap - alongside the default one ~130 km away (beyond it).
+NEAR_ISOLATED_SOURCE_LATLON = (32.80, 35.05)
+NEAR_ISOLATED_TARGET_LATLON = (32.81, 35.06)
+
+
+def _nodes_and_edges(include_unreachable_target=False, isolated_near=False):
     nodes = [
         GraphNode(id=NODE_STATION_A, latitude=32.70, longitude=35.00),
         GraphNode(id=NODE_STATION_B, latitude=32.90, longitude=35.20),
@@ -73,8 +79,10 @@ def _nodes_and_edges(include_unreachable_target=False):
         # connects it to the {1,2,3,4} component at all, so Dijkstra from
         # any real station genuinely finds no path (UNREACHABLE, not just
         # unmapped).
-        nodes.append(GraphNode(id=NODE_ISOLATED_SOURCE, latitude=33.5, longitude=36.0))
-        nodes.append(GraphNode(id=NODE_ISOLATED_TARGET, latitude=33.51, longitude=36.01))
+        source_lat, source_lon = NEAR_ISOLATED_SOURCE_LATLON if isolated_near else (33.5, 36.0)
+        target_lat, target_lon = NEAR_ISOLATED_TARGET_LATLON if isolated_near else (33.51, 36.01)
+        nodes.append(GraphNode(id=NODE_ISOLATED_SOURCE, latitude=source_lat, longitude=source_lon))
+        nodes.append(GraphNode(id=NODE_ISOLATED_TARGET, latitude=target_lat, longitude=target_lon))
         edges.append(
             GraphEdge(
                 source_node_id=NODE_ISOLATED_SOURCE,
@@ -166,18 +174,57 @@ def test_resources_at_the_same_station_reuse_the_cached_dijkstra_result():
 # ---------------------------------------------------------------------------
 
 
-def test_unreachable_pair_does_not_remove_other_feasible_pairs():
+def test_unreachable_pair_falls_back_to_a_straight_line_option_without_changing_the_routed_pair():
+    """A pair Dijkstra finds no path for (disconnected graph) is kept as a
+    straight-line estimate at 30 km/h instead of being dropped - and the
+    ordinary, genuinely routed pair next to it is untouched."""
     resource = _resource("R1", "STATION-A", 32.70, 35.00)
     reachable_target = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
-    unreachable_target = _target(fire_event_id=1, response_target_id=102, lat=33.51, lon=36.01)
-    nodes, edges = _nodes_and_edges(include_unreachable_target=True)
+    unreachable_target = _target(fire_event_id=1, response_target_id=102, lat=32.81, lon=35.06)
+    nodes, edges = _nodes_and_edges(include_unreachable_target=True, isolated_near=True)
 
     result = make_builder().build((resource,), (reachable_target, unreachable_target), nodes, edges)
 
-    assert result.matrix.get("R1", 101) is not None
-    assert result.matrix.get("R1", 102) is None
+    routed = result.matrix.get("R1", 101)
+    assert routed is not None
+    assert routed.eta_seconds == 60.0  # real Dijkstra result, no fallback applied
+    assert routed.node_path == (NODE_STATION_A, NODE_TARGET_A1)
+
+    fallback = result.matrix.get("R1", 102)
+    assert fallback is not None
+    air_km = haversine_distance_km(32.70, 35.00, 32.81, 35.06)
+    assert fallback.route_distance_meters == pytest.approx(air_km * 1000.0)
+    assert fallback.eta_seconds == pytest.approx(air_km / 30.0 * 3600.0)
+    assert fallback.node_path == (NODE_STATION_A, NODE_ISOLATED_TARGET)  # a straight segment, never a routed path
+
     assert result.potential_pairs == 2
-    assert result.feasible_pairs == 1
+    assert result.feasible_pairs == 2
+    assert result.fallback_pair_count == 1
+
+
+def test_unreachable_pair_farther_than_the_max_distance_gets_no_fallback():
+    """A split graph must not turn a station in another region into a
+    candidate for a far-away fire: beyond 50 km an unreachable pair stays
+    infeasible, exactly as before the fallback existed."""
+    resource = _resource("R1", "STATION-A", 32.70, 35.00)
+    far_target = _target(fire_event_id=1, response_target_id=102, lat=33.51, lon=36.01)  # ~130 km away
+    nodes, edges = _nodes_and_edges(include_unreachable_target=True)
+    assert haversine_distance_km(32.70, 35.00, 33.51, 36.01) > 50.0
+
+    result = make_builder().build((resource,), (far_target,), nodes, edges)
+
+    assert result.matrix.get("R1", 102) is None
+    assert result.fallback_pair_count == 0
+
+
+def test_fully_connected_graph_uses_no_fallback():
+    resource = _resource("R1", "STATION-A", 32.70, 35.00)
+    target = _target(fire_event_id=1, response_target_id=101, lat=32.71, lon=35.01)
+    nodes, edges = _nodes_and_edges()
+
+    result = make_builder().build((resource,), (target,), nodes, edges)
+
+    assert result.fallback_pair_count == 0
 
 
 def test_unmappable_resource_produces_no_route_without_failing_the_whole_build():
@@ -303,17 +350,20 @@ def test_no_first_mile_penalty_when_the_snap_gap_is_within_the_ordinary_threshol
     assert option.route_distance_meters == 500.0
 
 
-def test_first_mile_penalty_never_fabricates_a_route_for_an_unreachable_pair():
-    """The penalty only ever corrects an already-REACHABLE route - it must
-    never turn a genuinely UNREACHABLE pair into a feasible one."""
+def test_first_mile_penalty_is_not_stacked_on_top_of_a_disconnected_graph_fallback():
+    """The straight-line fallback already starts at the station's true
+    coordinate, so the first-mile penalty (which would add the station ->
+    snapped-node gap again) must not be applied on top of it."""
     resource = _resource("R1", "STATION-FAR", FAR_STATION_LAT, FAR_STATION_LON)
-    unreachable_target = _target(fire_event_id=1, response_target_id=102, lat=33.51, lon=36.01)
-    nodes, edges = _nodes_and_edges(include_unreachable_target=True)
+    unreachable_target = _target(fire_event_id=1, response_target_id=102, lat=32.81, lon=35.06)
+    nodes, edges = _nodes_and_edges(include_unreachable_target=True, isolated_near=True)
 
     result = make_builder().build((resource,), (unreachable_target,), nodes, edges)
 
-    assert result.matrix.get("R1", 102) is None
-    assert len(result.matrix) == 0
+    option = result.matrix.get("R1", 102)
+    assert option is not None
+    air_km = haversine_distance_km(FAR_STATION_LAT, FAR_STATION_LON, 32.81, 35.06)
+    assert option.eta_seconds == pytest.approx(air_km / 30.0 * 3600.0)
 
 
 def test_first_mile_penalty_is_identical_for_resources_sharing_the_same_far_snapped_station():

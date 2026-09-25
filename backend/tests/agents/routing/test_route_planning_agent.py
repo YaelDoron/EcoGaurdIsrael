@@ -429,7 +429,10 @@ def test_a_genuine_nonzero_reachable_result_is_never_touched_by_the_fallback():
     assert route.travel_time_seconds == 210.0
 
 
-def test_dijkstra_unreachable_result_produces_unreachable_route():
+def test_dijkstra_unreachable_result_falls_back_to_a_straight_line_estimate():
+    """A disconnected graph (Dijkstra: no path between two mapped nodes) must
+    not leave the pair without a route: it becomes a REACHABLE straight-line
+    estimate at the conservative 30 km/h disconnected-graph speed."""
     dijkstra_calculator = FakeDijkstraCalculator(
         results={
             (1001, 1002): DijkstraResult(
@@ -447,12 +450,12 @@ def test_dijkstra_unreachable_result_produces_unreachable_route():
     )
 
     route = route_planning_repository.calls[0].routes[0]
-    assert route.status is RouteStatus.UNREACHABLE
+    assert route.status is RouteStatus.REACHABLE
     assert route.source_node_id == 1001
     assert route.target_node_id == 1002
-    assert route.node_path == ()
-    assert route.distance_meters is None
-    assert route.travel_time_seconds is None
+    assert route.node_path == (1001, 1002)
+    assert route.distance_meters > 0
+    assert route.travel_time_seconds == pytest.approx(route.distance_meters / (30.0 * 1000.0 / 3600.0))
 
 
 def test_unmapped_resource_produces_unmappable_route_without_calling_dijkstra():
@@ -630,3 +633,33 @@ def test_result_model_rejects_inconsistent_status_and_fields():
             run=None,
             route_count=1,
         )
+
+
+def test_dijkstra_unreachable_result_stays_unreachable_when_station_is_beyond_the_fallback_distance():
+    """A straight line is not a plausible stand-in for a route to a station
+    ~130 km away: past MAX_DISCONNECTED_GRAPH_FALLBACK_DISTANCE_KM the pair
+    stays UNREACHABLE, exactly as before the fallback existed."""
+    dijkstra_calculator = FakeDijkstraCalculator(
+        results={
+            (1001, 1002): DijkstraResult(
+                status=RouteStatus.UNREACHABLE,
+                node_path=(),
+                distance_meters=None,
+                travel_time_seconds=None,
+            )
+        }
+    )
+    context = make_context(stations=[make_station("station-1", latitude=33.90, longitude=36.20)])
+    route_planning_repository = FakeRoutePlanningRepository()
+
+    make_agent(
+        operational_context_service=FakeOperationalContextService(context),
+        dijkstra_calculator=dijkstra_calculator,
+        route_planning_repository=route_planning_repository,
+    ).plan(fire_event_id=FIRE_EVENT_ID, as_of=AS_OF)
+
+    route = route_planning_repository.calls[0].routes[0]
+    assert route.status is RouteStatus.UNREACHABLE
+    assert route.node_path == ()
+    assert route.distance_meters is None
+    assert route.travel_time_seconds is None
