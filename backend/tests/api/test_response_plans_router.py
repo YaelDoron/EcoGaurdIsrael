@@ -648,7 +648,7 @@ def test_router_module_does_not_import_forbidden_dependencies():
         "response_planning_refresh",
         "planning_orchestrator",
     )
-    path = Path("src/api/routers/response_plans.py")
+    path = (Path(__file__).resolve().parents[2] / "src/api/routers/response_plans.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

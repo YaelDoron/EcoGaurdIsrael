@@ -632,7 +632,7 @@ def test_service_module_does_not_import_calculation_engines():
         "baseline_plan_calculator",
         "baseline_plan_evaluator",
     )
-    path = Path("backend/src/services/response_planning/response_plan_details_service.py")
+    path = (Path(__file__).resolve().parents[4] / "backend/src/services/response_planning/response_plan_details_service.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

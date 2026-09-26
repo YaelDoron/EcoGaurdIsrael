@@ -333,7 +333,7 @@ def test_router_uses_injected_chatbot_agent_and_imports_no_domain_logic():
         "src.external.news",
         "src.external.geocoding",
     )
-    path = Path("backend/src/api/routers/chatbot.py")
+    path = (Path(__file__).resolve().parents[3] / "backend/src/api/routers/chatbot.py")
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
 

@@ -14,6 +14,10 @@ const { getCurrentGlobalResponsePlanMock, getEventDetailsMock, reverseGeocodeMoc
   }),
 );
 
+// A live demo run, so the demo-session gate (hooks/demoSession.ts) shows the plan.
+vi.mock("../api/simulation", () => ({
+  getCurrentSimulationRun: vi.fn().mockResolvedValue({ run_id: "run-live", state: "running" }),
+}));
 vi.mock("../api/globalResponsePlan", () => ({ getCurrentGlobalResponsePlan: getCurrentGlobalResponsePlanMock }));
 vi.mock("../api/eventDetails", () => ({ getEventDetails: getEventDetailsMock }));
 vi.mock("../api/reverseGeocode", () => ({ reverseGeocode: reverseGeocodeMock }));

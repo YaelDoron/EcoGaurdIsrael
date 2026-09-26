@@ -1,0 +1,12 @@
+# Frozen ML datasets and reports are pinned by their exact byte sha256
+# (e.g. EXPECTED_TRAINING_CSV_SHA256_V5). Keep them LF on every platform so a
+# Windows checkout (core.autocrlf=true) does not rewrite them to CRLF and
+# change their hash. Content is stored LF in the repository already.
+backend/data/** text eol=lf
+
+# Exception: the superseded V4 training CSV's frozen hash (6e14edc5..., in
+# test_fire_detection_model_v4.py and fire_detection_model_comparison_v4.json)
+# was computed from its CRLF Windows checkout, while the committed blob is LF
+# (515836b7...). It is left on the platform default until that historical pin
+# is re-frozen to the canonical LF hash.
+backend/data/fire_detection/training_v4.csv !text !eol

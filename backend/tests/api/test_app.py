@@ -112,7 +112,7 @@ def test_response_plan_and_fire_event_routers_are_each_included_exactly_once() -
     internal, version-specific structure that isn't a stable thing to
     introspect for a "not duplicated" check.
     """
-    source = Path("src/api/routers/__init__.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[2] / "src/api/routers/__init__.py").read_text(encoding="utf-8")
 
     assert source.count("v1_router.include_router(fire_events_router)") == 1
     assert source.count("v1_router.include_router(response_plans_router)") == 1

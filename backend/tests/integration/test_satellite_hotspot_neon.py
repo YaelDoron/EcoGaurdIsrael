@@ -9,7 +9,7 @@ hotspot rows and never prints DATABASE_URL or credentials.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -23,7 +23,8 @@ pytestmark = pytest.mark.integration
 
 TEST_LATITUDE = 31.123456
 TEST_LONGITUDE = 35.654321
-TEST_DETECTED_AT = datetime(2026, 1, 2, 3, 4, 0)
+# UTC-aware: satellite_hotspots.detected_at is TIMESTAMPTZ (scripts/migrate_satellite_and_weather_timestamps.py)
+TEST_DETECTED_AT = datetime(2026, 1, 2, 3, 4, 0, tzinfo=timezone.utc)
 TEST_SATELLITE = "ECOGUARD_INTEGRATION_TEST_SAT"
 TEST_INSTRUMENT = "ECOGUARD_INTEGRATION_TEST"
 

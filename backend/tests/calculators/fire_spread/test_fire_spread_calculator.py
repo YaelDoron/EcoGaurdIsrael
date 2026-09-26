@@ -104,10 +104,19 @@ def test_p_n_source_target_orientation_is_not_symmetric():
 
 
 def test_p_n_matrix_has_exactly_seven_classes():
-    assert len(FC) == 7
-    assert len(NOMINAL_SPREAD_PROBABILITY) == 7
-    for row in NOMINAL_SPREAD_PROBABILITY.values():
+    # The verified PROPAGATOR table stays exactly 7x7; the effective table adds only
+    # the EcoGuard-derived GENERIC_TREE row/column (Task 14, §4.3.2).
+    from src.calculators.fire_spread.fire_spread_config import VERIFIED_PROPAGATOR_P_N
+    from src.models.fire_spread_fuel_class import VERIFIED_PROPAGATOR_FUEL_CLASSES
+
+    assert len(VERIFIED_PROPAGATOR_FUEL_CLASSES) == 7
+    assert len(VERIFIED_PROPAGATOR_P_N) == 7
+    for row in VERIFIED_PROPAGATOR_P_N.values():
         assert len(row) == 7
+    assert set(FC) == VERIFIED_PROPAGATOR_FUEL_CLASSES | {FC.GENERIC_TREE}
+    assert len(NOMINAL_SPREAD_PROBABILITY) == 8
+    for row in NOMINAL_SPREAD_PROBABILITY.values():
+        assert len(row) == 8
 
 
 # ---------------------------------------------------------------------------
@@ -485,7 +494,7 @@ def test_methodology_identity_on_result():
     calculator = FireSpreadCalculator()
     result = calculator.calculate(make_input(horizon_minutes=30))
     assert result.methodology == "ECOGUARD_PROPAGATOR_CA"
-    assert result.methodology_version == "1.1"
+    assert result.methodology_version == "1.4"
 
 
 # ---------------------------------------------------------------------------
@@ -555,10 +564,12 @@ def test_realistic_grass_risk_exceeds_realistic_shrubs():
     shrubs = calculator.calculate(make_realistic_input(fuel_class=FC.SHRUBS))
     grass = calculator.calculate(make_realistic_input(fuel_class=FC.GRASSLAND))
 
-    assert len(grass.cells) == 8
-    assert _spreading(grass.cells) == []
+    # With the verified km/h probability wind factor (Task 12), realistic grass at
+    # 30 km/h propagates a narrow downwind wedge, so only cells both runs emit are compared.
     shrub_by_location = {(cell.latitude, cell.longitude): cell.spread_probability for cell in shrubs.cells}
-    for cell in grass.cells:
+    shared = [cell for cell in grass.cells if (cell.latitude, cell.longitude) in shrub_by_location]
+    assert len(shared) == 8
+    for cell in shared:
         assert cell.spread_probability > shrub_by_location[(cell.latitude, cell.longitude)]
 
 

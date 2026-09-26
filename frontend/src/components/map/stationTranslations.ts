@@ -174,21 +174,40 @@ export function translateStationName(name: string): string {
  * Safety net for dynamic (non-station) text the backend was supposed to
  * translate but didn't - see the module docstring above. Text that is
  * already in English (the normal case, always) passes through completely
- * unchanged; only text that still contains a Hebrew character is run
- * through the same dictionary/romanization fallback the station data uses,
- * so a permanently-failed LLM translation reads as best-effort English
- * instead of raw, untouched Hebrew. Never re-translates or alters text
- * the backend already translated correctly.
+ * unchanged. Text that still contains Hebrew is translated only when the
+ * dictionary covers EVERY Hebrew word (e.g. a known place name such as
+ * "יער ירושלים"); otherwise the original Hebrew is returned as-is. Free
+ * text (news headlines/summaries) is never romanized letter-by-letter -
+ * readable Hebrew beats unreadable transliteration ("Dyvchym Rashvnym...").
+ * Never re-translates or alters text the backend already translated correctly.
  */
 export function translateIfUntranslated(text: string): string;
 export function translateIfUntranslated(text: string | null): string | null;
 export function translateIfUntranslated(text: string | null): string | null {
-  if (text === null || !HEBREW_WORD.test(text)) {
+  if (text === null || !/[֐-׿]/.test(text)) {
     return text;
   }
-  HEBREW_WORD.lastIndex = 0; // stateful global-flag regex - reset after the .test() probe above.
-  return translateFragment(text);
+  const placeName = SIMULATION_PLACE_NAMES[text.trim()];
+  if (placeName !== undefined) {
+    return placeName;
+  }
+  return untranslatedWords(text).length === 0 ? translateFragment(text) : text;
 }
+
+/**
+ * English names of the demo areas, keyed by the exact Hebrew `location_name`
+ * the simulator's news reports carry (backend news_data_generator
+ * _LOCATION_REPORT_NAMES; a backend test keeps both lists in sync). Matched
+ * only as the WHOLE string, so station vocabulary such as "נוף הגליל"
+ * ("Nof HaGalil") or "טירת הכרמל" is unaffected.
+ */
+export const SIMULATION_PLACE_NAMES: Readonly<Record<string, string>> = {
+  הכרמל: "Carmel",
+  "יער ירושלים": "Jerusalem Forest",
+  הגליל: "Galilee",
+  "רמת הגולן": "Golan Heights",
+  "הרי יהודה": "Judean Hills",
+};
 /** House-number suffix letters become Latin (13א -> 13a). */
 function houseNumber(raw: string): string {
   return raw.replace(/[א-ת]/g, (letter) => ROMAN[letter] ?? "");

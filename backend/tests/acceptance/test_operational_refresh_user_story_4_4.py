@@ -676,9 +676,9 @@ def test_at11_transition_to_insufficient_does_not_reuse_stale_predicted_risk_tar
 
 def test_ac1_ac4_ac8_architecture_guardrails_and_documented_trigger_matrix():
     production_files = [
-        Path("backend/src/services/operational_refresh/operational_refresh_orchestrator.py"),
-        Path("backend/src/services/operational_refresh/fire_spread_refresh_orchestrator.py"),
-        Path("backend/src/services/operational_refresh/operational_refresh_policy.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/services/operational_refresh/operational_refresh_orchestrator.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/services/operational_refresh/fire_spread_refresh_orchestrator.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/services/operational_refresh/operational_refresh_policy.py"),
     ]
     forbidden_imports = (
         "FireSpreadCalculator",
@@ -706,7 +706,7 @@ def test_ac1_ac4_ac8_architecture_guardrails_and_documented_trigger_matrix():
                 violations.append((str(path), module))
 
     assert violations == []
-    assert Path("backend/docs/operational_refresh.md").exists()
+    assert (Path(__file__).resolve().parents[3] / "backend/docs/operational_refresh.md").exists()
 
 
 def test_ac5_resource_simulation_timing_and_selection_are_deterministic():

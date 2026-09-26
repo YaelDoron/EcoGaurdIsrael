@@ -997,8 +997,8 @@ def test_orchestrator_does_not_import_calculators_agents_below_boundary_or_roads
         "ResponsePlan",
     )
     production_files = [
-        Path("backend/src/services/operational_refresh/operational_refresh_orchestrator.py"),
-        Path("backend/src/services/operational_refresh/operational_refresh_result.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/operational_refresh_orchestrator.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/operational_refresh_result.py"),
     ]
 
     violations = []

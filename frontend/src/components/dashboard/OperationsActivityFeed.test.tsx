@@ -266,21 +266,19 @@ describe("OperationsActivityFeed final visible-type semantics (news_report/satel
     expect(button).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("falls back to a best-effort romanized headline (dir=auto, never raw Hebrew) when backend translation failed", () => {
-    // A backend LLM translation failure at ingestion is best-effort and can
-    // leave the original Hebrew persisted (see news_client.py's
-    // "TRANSLATION FALLBACK TRIGGERED") - stationTranslations.ts's
-    // translateIfUntranslated is the frontend's own safety net for exactly
-    // that case, so the row never shows raw, untouched Hebrew. dir="auto"
-    // is still set unconditionally (defensive regardless of content).
+  it("keeps the readable Hebrew headline (dir=auto, never romanized) when backend translation failed", () => {
+    // A backend LLM translation failure at ingestion is best-effort and
+    // leaves the original Hebrew persisted (see news_client.py's
+    // "TRANSLATION FALLBACK TRIGGERED"). Readable Hebrew is shown as-is -
+    // never letter-by-letter romanization - and dir="auto" lays it out RTL.
     const hebrewItem = makeItem(7, "news_report", {
       preview: { source: "Ynet", headline: "האש ממשיכה להיראות באזור הכרמל" },
     });
     render(<OperationsActivityFeed items={[hebrewItem]} selectedActivityId={null} onSelectItem={vi.fn()} />);
 
-    expect(screen.queryByText("האש ממשיכה להיראות באזור הכרמל", { exact: false })).not.toBeInTheDocument();
-    const main = screen.getByText(/HaEsh/, { exact: false });
+    const main = screen.getByText("האש ממשיכה להיראות באזור הכרמל", { exact: false });
     expect(main).toHaveAttribute("dir", "auto");
+    expect(screen.queryByText(/HaEsh|Mmshykh/)).not.toBeInTheDocument();
     expect(document.querySelector(".operations-activity-feed")).not.toHaveAttribute("dir", "rtl");
   });
 

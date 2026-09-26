@@ -512,7 +512,7 @@ def test_location_name_never_persisted_read_only_guarantee():
 
 
 def test_trusted_location_name_wins_even_without_any_fire_danger_areas():
-    stored_event = make_stored_event(1, latitude=32.965, longitude=35.381, location_name="Galilee Demo Area")
+    stored_event = make_stored_event(1, latitude=32.915, longitude=35.345, location_name="Galilee Demo Area")
     service, _, _ = make_service(active_events=(stored_event,))
 
     result = service.get_active_events(as_of=AS_OF)
@@ -645,7 +645,7 @@ def test_service_does_not_import_http_agent_or_external_provider_modules():
         "src.simulation",
         "src.calculators",
     )
-    path = Path("backend/src/services/fire_event_read/active_fire_events_service.py")
+    path = (Path(__file__).resolve().parents[4] / "backend/src/services/fire_event_read/active_fire_events_service.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

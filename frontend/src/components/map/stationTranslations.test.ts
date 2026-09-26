@@ -20,12 +20,34 @@ describe("stationTranslations", () => {
     expect(translateIfUntranslated("")).toBe("");
   });
 
-  it("translateIfUntranslated best-effort-translates text that still contains Hebrew (the failed-translation safety net)", () => {
+  it("translateIfUntranslated keeps readable Hebrew free text instead of romanizing it (the failed-translation safety net)", () => {
     // Mirrors the real "TRANSLATION FALLBACK TRIGGERED" case: backend
     // ingestion translation failed and persisted the original Hebrew.
-    const result = translateIfUntranslated("האש ממשיכה להיראות באזור הכרמל");
-    expect(result).not.toMatch(HEBREW);
-    expect(result).not.toBe("האש ממשיכה להיראות באזור הכרמל");
+    // Letter-by-letter romanization ("Dyvchym Rashvnym Al Mvkdy Ash...")
+    // is unreadable, so free text the dictionary cannot fully cover stays Hebrew.
+    const headline = "דיווחים ראשוניים על מוקדי אש באזור הרי יהודה";
+    expect(translateIfUntranslated(headline)).toBe(headline);
+    expect(translateIfUntranslated("דיווח ראשוני על עשן ולהבות באזור יער ירושלים")).toBe(
+      "דיווח ראשוני על עשן ולהבות באזור יער ירושלים",
+    );
+    expect(translateIfUntranslated(headline)).not.toMatch(/Dyvchym|Rashvnym|Mvkdy/);
+  });
+
+  it("translateIfUntranslated gives every simulator demo area its English name, as a whole-string match only", () => {
+    expect(translateIfUntranslated("הכרמל")).toBe("Carmel");
+    expect(translateIfUntranslated("יער ירושלים")).toBe("Jerusalem Forest");
+    expect(translateIfUntranslated("הגליל")).toBe("Galilee");
+    expect(translateIfUntranslated("רמת הגולן")).toBe("Golan Heights");
+    expect(translateIfUntranslated("הרי יהודה")).toBe("Judean Hills");
+    // Station vocabulary containing these words is unaffected.
+    expect(translateStationName("נוף הגליל")).toBe("Nof HaGalil Station");
+    // Free-text headlines are never partially rewritten.
+    expect(translateIfUntranslated("דיווח ראשוני על עשן ולהבות באזור הגליל")).toBe("דיווח ראשוני על עשן ולהבות באזור הגליל");
+  });
+
+  it("translateIfUntranslated still translates a fully dictionary-covered place name", () => {
+    expect(translateIfUntranslated("יער ירושלים")).toBe("Jerusalem Forest");
+    expect(translateIfUntranslated("רמת הגולן")).toBe("Golan Heights");
   });
 
   it("translateIfUntranslated is idempotent - running it twice does not change the result further", () => {

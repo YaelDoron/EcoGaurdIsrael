@@ -15,10 +15,14 @@ JERUSALEM_FOREST_LOCATION = SimulationLocation(
     latitude=31.7740,
     longitude=35.1390,
 )
+# Har Kamon ridge, north-east of Karmiel. Replaces 32.9650, 35.3810, which sat
+# inside the town of Beit Jann (Copernicus: 98% built-up within 0.3 km ->
+# BARE_SOIL, so an ACTIVE_FIRE there could never burn). Validated with
+# scripts/audit_simulation_locations.py: shrub/tree/grass ~92%, built-up ~2%.
 GALILEE_LOCATION = SimulationLocation(
     name="Galilee Demo Area",
-    latitude=32.9650,
-    longitude=35.3810,
+    latitude=32.9150,
+    longitude=35.3450,
 )
 GOLAN_LOCATION = SimulationLocation(
     name="Golan Heights Demo Area",

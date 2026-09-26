@@ -347,7 +347,7 @@ describe("getOperationsActivityDetail", () => {
           entity_id: 1,
           occurred_at: "2026-09-20T11:00:00Z",
           title: "Weather Conditions — Galilee Demo Area",
-          location: { latitude: 32.965, longitude: 35.381 },
+          location: { latitude: 32.915, longitude: 35.345 },
           details: {
             fire_danger_assessment_id: 1,
             area_name: "Galilee Demo Area",

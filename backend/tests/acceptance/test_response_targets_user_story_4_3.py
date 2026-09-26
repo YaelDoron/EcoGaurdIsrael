@@ -400,15 +400,15 @@ def test_ac_static_architecture_guardrail_keeps_response_targets_independent_of_
         "ResponsePlan",
     )
     production_files = [
-        Path("backend/src/models/response_target.py"),
-        Path("backend/src/models/response_target_set.py"),
-        Path("backend/src/models/predicted_risk_target_candidate.py"),
-        Path("backend/src/models/response_target_input.py"),
-        Path("backend/src/calculators/response_target/response_target_calculator.py"),
-        Path("backend/src/services/response_target/response_target_input_service.py"),
-        Path("backend/src/repositories/response_target_repository.py"),
-        Path("backend/src/agents/analysis/response_target_generation_agent.py"),
-        Path("backend/src/agents/analysis/response_target_generation_result.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/response_target.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/response_target_set.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/predicted_risk_target_candidate.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/response_target_input.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/calculators/response_target/response_target_calculator.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/services/response_target/response_target_input_service.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/repositories/response_target_repository.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/agents/analysis/response_target_generation_agent.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/agents/analysis/response_target_generation_result.py"),
     ]
 
     violations = []

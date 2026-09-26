@@ -539,7 +539,7 @@ def test_ambiguous_vegetation_produces_insufficient_data(
         wind_direction_deg=FAVORABLE_WIND_DIRECTION_DEG,
         temperature_c=FAVORABLE_TEMPERATURE_C,
         relative_humidity_pct=FAVORABLE_HUMIDITY_PCT,
-        land_cover="Tree cover",  # ambiguous per Task 4A/5 Approach A
+        land_cover="Moss and lichen cover",  # still ambiguous; "Tree cover" maps to GENERIC_TREE since Task 14
     )
 
     stored = agent.predict(fire_event_id=event_id, as_of=AS_OF, horizon_minutes=30)

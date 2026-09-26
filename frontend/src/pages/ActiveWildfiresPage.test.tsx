@@ -616,13 +616,14 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
     getOperationsOverviewMock.mockResolvedValue(idleSnapshot);
 
     renderPage();
-    await screen.findByText("No active wildfire events");
+    // No run has ever started in this session -> the initial demo state.
+    await screen.findByText("No simulation started");
 
     screen.getByRole("button", { name: "Start Simulation" }).click();
 
     await waitFor(() => expect(startSimulationMock).toHaveBeenCalledTimes(1));
     // Still the same clean empty state - Start does not fabricate anything locally.
-    expect(screen.getByText("No active wildfire events")).toBeInTheDocument();
+    expect(screen.getByText("No simulation started")).toBeInTheDocument();
     expect(screen.getByText("No recent operational activity")).toBeInTheDocument();
     expect(screen.queryByTestId("circle")).not.toBeInTheDocument();
   });
@@ -634,5 +635,115 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
 
     const link = await screen.findByRole("link", { name: "Global Response Plan" });
     expect(link).toHaveAttribute("href", "/response-plan");
+  });
+});
+
+describe("ActiveWildfiresPage initial demo state (stale runtime rows from a previous run)", () => {
+  const baseRun = {
+    run_id: "run-old",
+    state: "completed" as const,
+    preset_id: "operations_demo",
+    seed: 7,
+    mode: "automatic",
+    simulation_duration_seconds: 256,
+    events_total: 18,
+    events_completed: 18,
+    events_succeeded: 18,
+    events_failed: 0,
+    current_event: null,
+    started_at: "2026-09-17T13:00:00Z",
+    completed_at: "2026-09-17T13:05:00Z",
+    wall_clock_elapsed_seconds: 300,
+    last_message: "Simulation run completed.",
+    error: null,
+  };
+  const staleFire = makeEvent({ fire_event_id: 99, location_name: "Jerusalem Forest Demo Area" });
+
+  beforeEach(() => {
+    window.sessionStorage.clear();
+    getOperationsOverviewMock.mockReset();
+    getOperationsActivityDetailMock.mockReset();
+    startSimulationMock.mockReset();
+  });
+
+  afterEach(() => {
+    window.sessionStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it("fresh browser session + a previous run's completed data -> No simulation started, no stale fires/feed", async () => {
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([staleFire], {
+        simulation: { enabled: true, run: baseRun },
+        activity_feed: { items: [FIRE_DANGER_ACTIVITY_ITEM], limit: 30 },
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("No simulation started")).toBeInTheDocument();
+    expect(screen.getByText("Start a simulation to begin monitoring.")).toBeInTheDocument();
+    expect(screen.queryByText("Event #99")).not.toBeInTheDocument();
+    expect(screen.queryByText("Northern District - High fire danger")).not.toBeInTheDocument();
+    expect(screen.getByText("No recent operational activity")).toBeInTheDocument();
+  });
+
+  it("opening the page never starts a run or resets demo state (presentation-only gate)", async () => {
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: true, run: baseRun } }));
+
+    renderPage();
+    await screen.findByText("No simulation started");
+
+    expect(startSimulationMock).not.toHaveBeenCalled();
+  });
+
+  it("a RUNNING simulation is shown even in a fresh session (e.g. browser refresh mid-run)", async () => {
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([staleFire], { simulation: { enabled: true, run: { ...baseRun, run_id: "run-live", state: "running" } } }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("Event #99")).toBeInTheDocument();
+    expect(screen.queryByText("No simulation started")).not.toBeInTheDocument();
+  });
+
+  it("keeps showing a run this session observed after it completes (refresh / return from Event Details)", async () => {
+    const liveRun = { ...baseRun, run_id: "run-live", state: "running" as const };
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: true, run: liveRun } }));
+    const first = renderPage();
+    await screen.findByText("Event #99");
+    first.unmount(); // navigate away (e.g. to Event Details)
+
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([staleFire], { simulation: { enabled: true, run: { ...liveRun, state: "completed" } } }),
+    );
+    renderPage(); // navigate back / refresh in the same tab
+
+    expect(await screen.findByText("Event #99")).toBeInTheDocument();
+    expect(getOperationsOverviewMock).toHaveBeenCalledTimes(2); // refetched on return, never a stale cache
+  });
+
+  it("Start Simulation remembers the new run, so its events appear and stay after completion", async () => {
+    startSimulationMock.mockResolvedValue({ ...baseRun, run_id: "run-new", state: "preparing" });
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: true, run: baseRun } }));
+
+    renderPage();
+    await screen.findByText("No simulation started");
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([staleFire], { simulation: { enabled: true, run: { ...baseRun, run_id: "run-new", state: "completed" } } }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Run Again" }));
+
+    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "operations_demo", reset_demo_state: true });
+    expect(await screen.findByText("Event #99")).toBeInTheDocument();
+  });
+
+  it("never hides data when simulation control is disabled (not a demo deployment)", async () => {
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: false, run: null } }));
+
+    renderPage();
+
+    expect(await screen.findByText("Event #99")).toBeInTheDocument();
   });
 });

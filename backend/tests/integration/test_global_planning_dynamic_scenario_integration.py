@@ -235,6 +235,10 @@ def test_full_five_step_dynamic_multi_incident_scenario(sqlite_session_factory):
     _persist_target_set(session, event_a, 32.70, 35.00, generated_at=T0)
     _persist_station_and_resource(session, "STATION-A", 32.70, 35.001, "R1")
     _persist_station_and_resource(session, "STATION-C", 32.80, 35.10, "R3")  # spare, present from the start
+    # Stations are static reference data (seeded once, preserved by demo resets), and
+    # OperationalContextService caches the station table for its lifetime - so B's
+    # station/R2 exists from the start; only Fire B itself appears at T+40.
+    _persist_station_and_resource(session, "STATION-B", 32.90, 35.201, "R2")
     session.commit()
     session.close()
     _persist_road_network_for_scenario(sqlite_session_factory)
@@ -252,7 +256,6 @@ def test_full_five_step_dynamic_multi_incident_scenario(sqlite_session_factory):
     session = sqlite_session_factory()
     event_b = _persist_fire_event(session, 32.90, 35.20, detected_at=T40)
     _persist_target_set(session, event_b, 32.90, 35.20, generated_at=T40)
-    _persist_station_and_resource(session, "STATION-B", 32.90, 35.201, "R2")
     session.commit()
     session.close()
 

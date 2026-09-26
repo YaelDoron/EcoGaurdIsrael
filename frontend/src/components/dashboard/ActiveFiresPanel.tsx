@@ -5,6 +5,9 @@ import "./ActiveFiresPanel.css";
 
 export interface ActiveFiresPanelProps {
   activeFires: ActiveFireEvent[];
+  /** Empty-state copy override, e.g. the "No simulation started" demo state. */
+  emptyTitle?: string;
+  emptyMessage?: string;
 }
 
 /**
@@ -19,7 +22,11 @@ export interface ActiveFiresPanelProps {
  * (ActiveWildfiresPage) is the one route to it, so this panel does not
  * duplicate that navigation.
  */
-export function ActiveFiresPanel({ activeFires }: ActiveFiresPanelProps) {
+export function ActiveFiresPanel({
+  activeFires,
+  emptyTitle = "No active wildfire events",
+  emptyMessage = "There are currently no suspected or confirmed wildfire events.",
+}: ActiveFiresPanelProps) {
   return (
     <section aria-labelledby="active-fires-panel-heading" className="active-fires-panel">
       <div className="active-fires-panel__header">
@@ -31,10 +38,7 @@ export function ActiveFiresPanel({ activeFires }: ActiveFiresPanelProps) {
         </h2>
       </div>
       {activeFires.length === 0 ? (
-        <EmptyState
-          title="No active wildfire events"
-          message="There are currently no suspected or confirmed wildfire events."
-        />
+        <EmptyState title={emptyTitle} message={emptyMessage} />
       ) : (
         <div className="active-fires-panel__list">
           {activeFires.map((fire) => (

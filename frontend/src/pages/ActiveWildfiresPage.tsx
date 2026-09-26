@@ -8,11 +8,14 @@ import { ErrorState } from "../components/feedback/ErrorState";
 import { LoadingState } from "../components/feedback/LoadingState";
 import { PageHeader } from "../components/layout/PageHeader";
 import { Link } from "react-router-dom";
+import { useDemoDataVisibility } from "../hooks/demoSession";
 import { useOperationsOverview } from "../hooks/useOperationsOverview";
 import type { OperationsActivityFeedItem } from "../types/operationsOverview";
 import "./ActiveWildfiresPage.css";
 
 const PAGE_TITLE = "Operations Overview";
+export const NO_SIMULATION_TITLE = "No simulation started";
+export const NO_SIMULATION_MESSAGE = "Start a simulation to begin monitoring.";
 
 /**
  * The dashboard/Operations screen (US 6.1, wired to A6/A7 in Task A7,
@@ -39,10 +42,16 @@ const PAGE_TITLE = "Operations Overview";
  * for the normal 1-2 fire demo case); the Activity Feed moves to its own
  * full-width row below, since a tall right-hand column made the page feel
  * asymmetric and cramped the feed's preview text.
+ *
+ * Initial demo state: runtime rows from a PREVIOUS demo run stay in Neon
+ * until the next Start Simulation resets them, so `useDemoDataVisibility`
+ * hides them (presentation only - nothing is deleted) until this browser
+ * session starts or observes a run. See hooks/demoSession.ts.
  */
 export function ActiveWildfiresPage() {
   const { data, isLoading, loadError, refreshError, refresh } = useOperationsOverview();
   const [selectedActivity, setSelectedActivity] = useState<OperationsActivityFeedItem | null>(null);
+  const showDemoData = useDemoDataVisibility(data?.simulation ?? null);
 
   if (isLoading) {
     return (
@@ -61,6 +70,10 @@ export function ActiveWildfiresPage() {
       </section>
     );
   }
+
+  const activeFires = showDemoData ? data.active_fires : [];
+  const fireDangerAreas = showDemoData ? data.fire_danger_areas : [];
+  const activityItems = showDemoData ? data.activity_feed.items : [];
 
   return (
     <section>
@@ -82,17 +95,21 @@ export function ActiveWildfiresPage() {
 
       <div className="active-wildfires-page__top-row">
         <div className="active-wildfires-page__map-column">
-          <OperationsMap fireDangerAreas={data.fire_danger_areas} activeFires={data.active_fires} />
+          <OperationsMap fireDangerAreas={fireDangerAreas} activeFires={activeFires} />
         </div>
 
         <div className="active-wildfires-page__fires-column">
-          <ActiveFiresPanel activeFires={data.active_fires} />
+          {showDemoData ? (
+            <ActiveFiresPanel activeFires={activeFires} />
+          ) : (
+            <ActiveFiresPanel activeFires={[]} emptyTitle={NO_SIMULATION_TITLE} emptyMessage={NO_SIMULATION_MESSAGE} />
+          )}
         </div>
       </div>
 
       <div className="active-wildfires-page__feed-row">
         <OperationsActivityFeed
-          items={data.activity_feed.items}
+          items={activityItems}
           selectedActivityId={selectedActivity?.activity_id ?? null}
           onSelectItem={(item) =>
             setSelectedActivity((current) => (current?.activity_id === item.activity_id ? null : item))

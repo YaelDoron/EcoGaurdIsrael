@@ -665,8 +665,8 @@ def test_refresh_modules_do_not_import_out_of_scope_systems():
         "fire_spread_calculator",
     )
     production_files = [
-        Path("backend/src/services/operational_refresh/fire_spread_refresh_orchestrator.py"),
-        Path("backend/src/services/operational_refresh/fire_spread_refresh_result.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/fire_spread_refresh_orchestrator.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/fire_spread_refresh_result.py"),
     ]
 
     violations = []

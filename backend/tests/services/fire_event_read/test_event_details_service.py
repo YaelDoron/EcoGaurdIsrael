@@ -1185,7 +1185,7 @@ def test_service_does_not_import_agent_calculator_or_external_provider_modules()
         "src.simulation",
         "src.calculators",
     )
-    path = Path("backend/src/services/fire_event_read/event_details_service.py")
+    path = (Path(__file__).resolve().parents[4] / "backend/src/services/fire_event_read/event_details_service.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

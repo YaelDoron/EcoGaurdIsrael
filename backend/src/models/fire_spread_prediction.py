@@ -19,6 +19,15 @@ from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 CA_TIME_STEP_MINUTES = 5
 SUPPORTED_HORIZON_MINUTES = (30, 60)
 
+# Single source of truth for the deterministic propagation threshold [C]: a
+# cell whose p_ij reaches it is "spreading"; below it (but > 0) it is
+# risk-only. EcoGuard-calibrated for the current simulator/model (Task 11C,
+# fire_spread_prediction.md §8) - NOT a published PROPAGATOR constant (the
+# official model draws p_prob > rand(...) per cell instead). Lives in this
+# models module so both the calculator (via fire_spread_config) and read-side
+# consumers barred from importing src.calculators (chatbot) share one value.
+PROPAGATION_THRESHOLD = 0.45
+
 
 @dataclass(frozen=True)
 class FireSpreadPredictionCell:

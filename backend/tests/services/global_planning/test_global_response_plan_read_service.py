@@ -573,7 +573,7 @@ def test_service_does_not_import_agent_calculator_or_optimization_modules():
         "GlobalPlanningOrchestrator",
         "genetic",
     )
-    path = Path("src/services/global_planning/global_response_plan_read_service.py")
+    path = (Path(__file__).resolve().parents[3] / "src/services/global_planning/global_response_plan_read_service.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

@@ -110,12 +110,14 @@ export interface SpreadPrediction {
 }
 
 /**
- * US 4.2 methodology 1.1: a cell whose spread_probability reaches this
- * threshold is propagation-capable ("spreading"); below it (but > 0) it is a
- * risk-only cell that the model does not treat as spreading further. Mirrors
- * the backend's PROPAGATION_THRESHOLD.
+ * US 4.2 methodology: a cell whose spread_probability reaches this threshold
+ * is propagation-capable ("spreading"); below it (but > 0) it is a risk-only
+ * cell that the model does not treat as spreading further. Mirrors the
+ * backend's single PROPAGATION_THRESHOLD (backend/src/models/
+ * fire_spread_prediction.py, EcoGuard-calibrated 0.45) - a backend test
+ * (test_frontend_spread_threshold_mirror) fails if this literal drifts.
  */
-export const SPREAD_PROPAGATION_THRESHOLD = 0.5;
+export const SPREAD_PROPAGATION_THRESHOLD = 0.45;
 
 export function isSpreadingCell(cell: SpreadPredictionCell): boolean {
   return cell.spread_probability >= SPREAD_PROPAGATION_THRESHOLD;

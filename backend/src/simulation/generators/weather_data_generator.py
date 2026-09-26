@@ -118,8 +118,14 @@ class WeatherDataGenerator:
         scenario_type: ScenarioType,
         timestamp: datetime,
         location: SimulationLocation = DEFAULT_CARMEL_LOCATION,
+        seed_key: str | None = None,
     ) -> GeneratedWeatherData:
-        """Generate deterministic simulated weather data for one simulation timestamp."""
+        """Generate deterministic simulated weather data for one simulation timestamp.
+
+        `seed_key` (the event's schedule identity, passed by the executor) replaces
+        the absolute timestamp in the RNG seed, so values reproduce for the same
+        seed regardless of when the run starts; `timestamp` still stamps the data.
+        """
         if not isinstance(scenario_type, ScenarioType):
             raise ValueError(f"scenario_type must be a ScenarioType, got {scenario_type!r}")
         if not isinstance(timestamp, datetime):
@@ -135,6 +141,7 @@ class WeatherDataGenerator:
                 location=location,
                 station_index=station_index,
                 profile=profile,
+                seed_key=seed_key,
             )
             for station_index in range(1, SIMULATED_WEATHER_STATIONS_PER_LOCATION + 1)
         )
@@ -147,6 +154,7 @@ class WeatherDataGenerator:
         location: SimulationLocation,
         station_index: int,
         profile: WeatherScenarioProfile,
+        seed_key: str | None = None,
     ) -> GeneratedStationWeather:
         station = self._build_station(location=location, station_index=station_index)
         rng = random.Random(
@@ -155,6 +163,7 @@ class WeatherDataGenerator:
                 timestamp=timestamp,
                 location=location,
                 station_external_id=station.external_station_id,
+                seed_key=seed_key,
             )
         )
         wind_speed = self._round_measurement(self._uniform(rng, profile.wind_speed_kmh))
@@ -192,12 +201,13 @@ class WeatherDataGenerator:
         timestamp: datetime,
         location: SimulationLocation,
         station_external_id: int,
+        seed_key: str | None = None,
     ) -> int:
         seed_material = "|".join(
             [
                 str(self._seed),
                 scenario_type.value,
-                timestamp.isoformat(),
+                seed_key if seed_key is not None else timestamp.isoformat(),
                 location.name,
                 f"{location.latitude:.6f}",
                 f"{location.longitude:.6f}",

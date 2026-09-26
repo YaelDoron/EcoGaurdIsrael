@@ -1,7 +1,9 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { SpreadLayer } from "./SpreadLayer";
-import type { SpreadPrediction } from "../../types/eventDetails";
+import { SPREAD_PROPAGATION_THRESHOLD, type SpreadPrediction } from "../../types/eventDetails";
+
+const BELOW_THRESHOLD = SPREAD_PROPAGATION_THRESHOLD - 0.01;
 
 vi.mock("react-leaflet", async () => import("../../test/reactLeafletStub"));
 
@@ -120,8 +122,9 @@ describe("SpreadLayer", () => {
         status: "valid",
         predicted_at: "2026-09-17T13:25:00Z",
         cells: [
-          makeCell({ spread_probability: 0.49, latitude: 32.7 }),
-          makeCell({ spread_probability: 0.5, latitude: 32.8 }),
+          // Just below / exactly at the propagation threshold.
+          makeCell({ spread_probability: BELOW_THRESHOLD, latitude: 32.7 }),
+          makeCell({ spread_probability: SPREAD_PROPAGATION_THRESHOLD, latitude: 32.8 }),
         ],
       },
     ];
@@ -131,7 +134,7 @@ describe("SpreadLayer", () => {
     expect(riskOnly.getAttribute("data-dash-array")).toBeTruthy();
     expect(spreading.getAttribute("data-dash-array")).toBeNull();
     // Spreading keeps the original opacity formula; risk-only is reduced below its own base value.
-    expect(Number(spreading.getAttribute("data-fill-opacity"))).toBeCloseTo(0.35 + 0.5 * 0.4);
-    expect(Number(riskOnly.getAttribute("data-fill-opacity"))).toBeLessThan(0.35 + 0.49 * 0.4);
+    expect(Number(spreading.getAttribute("data-fill-opacity"))).toBeCloseTo(0.35 + SPREAD_PROPAGATION_THRESHOLD * 0.4);
+    expect(Number(riskOnly.getAttribute("data-fill-opacity"))).toBeLessThan(0.35 + BELOW_THRESHOLD * 0.4);
   });
 });

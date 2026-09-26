@@ -11,6 +11,7 @@ import { PageHeader } from "../components/layout/PageHeader";
 import type { LatLngPoint } from "../components/map/mapTypes";
 import { MapView } from "../components/map/MapView";
 import { useEventLocationNames } from "../hooks/useEventLocationNames";
+import { useCurrentDemoSimulation, useDemoDataVisibility } from "../hooks/demoSession";
 import { useGlobalResponsePlan } from "../hooks/useGlobalResponsePlan";
 import { useTargetLocationNames, type GeocodeTarget } from "../hooks/useTargetLocationNames";
 import type { GlobalEventPlan, GlobalPlanningRunStatus } from "../types/globalResponsePlan";
@@ -57,7 +58,11 @@ const EMPTY_EVENTS: GlobalEventPlan[] = [];
  */
 export function GlobalResponsePlanPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { response, isLoading, error, retry } = useGlobalResponsePlan();
+  const { response: planResponse, isLoading, error, retry } = useGlobalResponsePlan();
+  // A plan left over from a previous demo run is not shown until this browser
+  // session starts/observes a run (hooks/demoSession.ts) - presentation only.
+  const showDemoData = useDemoDataVisibility(useCurrentDemoSimulation());
+  const response = showDemoData ? planResponse : null;
 
   const focusEventId = parseFocusEventId(searchParams.get(FOCUS_EVENT_ID_PARAM));
 

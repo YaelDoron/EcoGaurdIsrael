@@ -75,9 +75,9 @@ function NewsEvidenceCard({ item }: { item: NewsEvidence }) {
   return (
     <article className="detection-evidence-panel__card">
       <div className="detection-evidence-panel__card-header">
-        <span className="detection-evidence-panel__card-title">{translateIfUntranslated(item.title)}</span>
+        <span className="detection-evidence-panel__card-title" dir="auto">{translateIfUntranslated(item.title)}</span>
       </div>
-      <p className="detection-evidence-panel__summary">{translateIfUntranslated(item.summary)}</p>
+      <p className="detection-evidence-panel__summary" dir="auto">{translateIfUntranslated(item.summary)}</p>
       <dl className="detection-evidence-panel__facts">
         <div className="detection-evidence-panel__fact">
           <dt>Source</dt>
@@ -92,7 +92,7 @@ function NewsEvidenceCard({ item }: { item: NewsEvidence }) {
         {item.location_name !== null ? (
           <div className="detection-evidence-panel__fact">
             <dt>Location</dt>
-            <dd>{translateIfUntranslated(item.location_name)}</dd>
+            <dd dir="auto">{translateIfUntranslated(item.location_name)}</dd>
           </div>
         ) : null}
       </dl>

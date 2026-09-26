@@ -25,7 +25,6 @@ from src.repositories.resource_commitment_repository import ResourceCommitmentRe
 from src.repositories.response_plan_planning_state_repository import ResponsePlanPlanningStateRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
 from src.repositories.response_target_repository import ResponseTargetRepository
-from src.repositories.road_network_repository import RoadNetworkRepository
 from src.services.global_planning.current_global_assignment_loader import CurrentGlobalAssignmentLoader
 from src.services.global_planning.global_candidate_collector import GlobalCandidateCollector
 from src.services.global_planning.global_incident_demand_builder import GlobalIncidentDemandBuilder
@@ -278,7 +277,11 @@ def test_failure_causes_no_db_mutation(sqlite_session_factory):
             resource_commitment_repository=ResourceCommitmentRepository(sqlite_session_factory),
         ),
         route_matrix_builder=GlobalRouteMatrixBuilder(),
-        road_network_repository=RoadNetworkRepository(),
+        # In-memory test: the road network is irrelevant to "failure causes no DB
+        # mutation", so it uses the module's fakes - never the real Neon road cache
+        # or a live OpenStreetMap/Overpass fetch (which previously hung this test).
+        road_network_repository=FakeRoadNetworkRepository(),
+        road_network_fetcher=FakeRoadNetworkFetcher(),
         session_factory=sqlite_session_factory,
     )
 
