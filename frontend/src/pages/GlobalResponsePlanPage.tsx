@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { EmptyState } from "../components/feedback/EmptyState";
 import { ErrorState } from "../components/feedback/ErrorState";
@@ -11,7 +11,8 @@ import { PageHeader } from "../components/layout/PageHeader";
 import type { LatLngPoint } from "../components/map/mapTypes";
 import { MapView } from "../components/map/MapView";
 import { useEventLocationNames } from "../hooks/useEventLocationNames";
-import { useCurrentDemoSimulation, useDemoDataVisibility } from "../hooks/demoSession";
+import { isDemoRunLive, useCurrentDemoSimulation, useDemoDataVisibility } from "../hooks/demoSession";
+import { GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS } from "../config/polling";
 import { useGlobalResponsePlan } from "../hooks/useGlobalResponsePlan";
 import { useTargetLocationNames, type GeocodeTarget } from "../hooks/useTargetLocationNames";
 import type { GlobalEventPlan, GlobalPlanningRunStatus } from "../types/globalResponsePlan";
@@ -20,9 +21,23 @@ import "./GlobalResponsePlanPage.css";
 const PAGE_TITLE = "Global Response Plan";
 const PAGE_DESCRIPTION = "The latest materialized global generation across every active wildfire event.";
 const LOAD_ERROR_TITLE = "Unable to load the global response plan.";
-const NO_GENERATION_TITLE = "No materialized generation yet";
+const NO_GENERATION_TITLE = "No response plan available";
 const NO_GENERATION_MESSAGE =
-  "No global planning run has materialized a response plan yet. Check back once a generation completes.";
+  "No global response plan has been generated yet. One appears here once a confirmed fire has been planned.";
+
+const GENERATING_TITLE = "Generating response plan...";
+// After the run ends, a plan still being generated/updated is re-checked at
+// most this many more times (~1 minute) - never forever.
+const MAX_POLLS_AFTER_RUN_ENDED = 12;
+const UPDATING_TITLE = "Updating response plan...";
+
+function joinNames(names: string[]): string {
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+function confirmedFires(count: number): string {
+  return `${count} confirmed fire${count === 1 ? "" : "s"}`;
+}
 
 const FOCUS_EVENT_ID_PARAM = "focusEventId";
 
@@ -58,11 +73,65 @@ const EMPTY_EVENTS: GlobalEventPlan[] = [];
  */
 export function GlobalResponsePlanPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { response: planResponse, isLoading, error, retry } = useGlobalResponsePlan();
   // A plan left over from a previous demo run is not shown until this browser
   // session starts/observes a run (hooks/demoSession.ts) - presentation only.
-  const showDemoData = useDemoDataVisibility(useCurrentDemoSimulation());
+  // The (instant) current-run check settles first: when the gate hides the
+  // plan, the page renders its empty state at once and never waits for, or
+  // even requests, the multi-second plan read.
+  //
+  // Live refresh: the run state is re-read every poll interval (a stale
+  // one-shot read taken at mount used to gate a page opened before a run went
+  // live forever), and the plan/lifecycle is re-read every interval while the
+  // run is PREPARING/RUNNING/STOPPING - in EVERY lifecycle state, so a page
+  // sitting on "No response plan available" discovers a newly confirmed fire.
+  // After the run ends, polling continues only while a plan is still
+  // generating/updating, for at most MAX_POLLS_AFTER_RUN_ENDED checks.
+  const simulation = useCurrentDemoSimulation(GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS);
+  const showDemoData = useDemoDataVisibility(simulation);
+  const runLive = isDemoRunLive(simulation);
+  // While PREPARING, the mandatory reset has not committed yet: the database
+  // still holds the PREVIOUS run's fires and plans. Nothing is read (or shown)
+  // until the new run is RUNNING.
+  const preparing = simulation?.run?.state === "preparing";
+  const [keepPolling, setKeepPolling] = useState(true);
+  const { response: planResponse, isLoading: isPlanLoading, error, retry } = useGlobalResponsePlan({
+    enabled: simulation !== null && showDemoData && !preparing,
+    polling: keepPolling,
+  });
+  // Until the first plan response arrives the page is loading - never a
+  // transient "No response plan available" in the render between the gate
+  // opening and the fetch starting.
+  const isLoading =
+    simulation === null || preparing || (showDemoData && (isPlanLoading || (planResponse === null && !error)));
   const response = showDemoData ? planResponse : null;
+
+  // Lifecycle, derived by the backend from persisted state (GlobalPlanCoverage)
+  // strictly from CONFIRMED (response-eligible) fires: a confirmed fire is
+  // planned asynchronously by the confirmed-fire pipeline, so "no plan yet" /
+  // "plan not covering every confirmed fire" are generating / updating; a
+  // SUSPECTED fire is monitoring-only and never counts.
+  const coverage = response?.coverage ?? null;
+  const lifecycleBuilding = coverage?.state === "generating" || coverage?.state === "updating";
+  const pollsAfterRunEndedRef = useRef(0);
+  useEffect(() => {
+    if (simulation === null) {
+      return; // run state not known yet - keep the default (polling on)
+    }
+    if (runLive) {
+      pollsAfterRunEndedRef.current = 0;
+      setKeepPolling(true);
+      return;
+    }
+    if (planResponse !== null) {
+      pollsAfterRunEndedRef.current += 1;
+    }
+    setKeepPolling(lifecycleBuilding && pollsAfterRunEndedRef.current <= MAX_POLLS_AFTER_RUN_ENDED);
+  }, [simulation, runLive, planResponse, lifecycleBuilding]);
+
+  const pendingIds = useMemo(() => coverage?.pending_fire_event_ids ?? [], [coverage]);
+  const pendingNames = useEventLocationNames(pendingIds);
+  const pendingLabels = pendingIds.map((id) => pendingNames[id] ?? `Event #${id}`);
+  const monitoringCount = coverage?.monitoring_fire_event_ids?.length ?? 0;
 
   const focusEventId = parseFocusEventId(searchParams.get(FOCUS_EVENT_ID_PARAM));
 
@@ -123,12 +192,12 @@ export function GlobalResponsePlanPage() {
           <BackToActiveFires />
           <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
         </>
-        <LoadingState message="Loading global response plan…" />
+        <LoadingState message={preparing ? "Preparing simulation..." : "Loading global response plan…"} />
       </section>
     );
   }
 
-  if (error) {
+  if (error && showDemoData) {
     return (
       <section>
         <>
@@ -141,6 +210,7 @@ export function GlobalResponsePlanPage() {
   }
 
   const plan = response?.plan ?? null;
+  const pendingCount = pendingIds.length;
 
   if (plan === null) {
     return (
@@ -149,7 +219,24 @@ export function GlobalResponsePlanPage() {
           <BackToActiveFires />
           <PageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
         </>
-        <EmptyState title={NO_GENERATION_TITLE} message={NO_GENERATION_MESSAGE} />
+        {coverage?.state === "generating" ? (
+          <div className="global-response-plan-page__lifecycle">
+            <LoadingState message={GENERATING_TITLE} />
+            <p className="global-response-plan-page__lifecycle-detail">
+              {confirmedFires(pendingCount)} {pendingCount === 1 ? "is" : "are"} being processed:{" "}
+              {joinNames(pendingLabels)}.
+            </p>
+          </div>
+        ) : (
+          <EmptyState
+            title={NO_GENERATION_TITLE}
+            message={
+              monitoringCount > 0
+                ? `No fire is confirmed yet. ${monitoringCount} suspected fire${monitoringCount === 1 ? " is" : "s are"} being monitored - response plans are generated only for confirmed fires.`
+                : NO_GENERATION_MESSAGE
+            }
+          />
+        )}
       </section>
     );
   }
@@ -172,6 +259,16 @@ export function GlobalResponsePlanPage() {
             <span className="badge badge--warning">{RUN_STATUS_LABEL[plan.status]}</span>
           ) : null}
         </div>
+
+        {coverage?.state === "updating" ? (
+          <div className="global-response-plan-page__lifecycle global-response-plan-page__lifecycle--updating" role="status" aria-live="polite">
+            <strong>{UPDATING_TITLE}</strong>{" "}
+            <span className="global-response-plan-page__lifecycle-detail">
+              Currently covers {coverage.covered_count} of {confirmedFires(coverage.eligible_count)}. Still being
+              planned: {joinNames(pendingLabels)}.
+            </span>
+          </div>
+        ) : null}
 
         <GlobalMetricsPanel metrics={plan.metrics} shortage={plan.shortage} />
 

@@ -32,7 +32,7 @@ older supported Python runtime.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -121,6 +121,35 @@ class GlobalPlanResponse(BaseModel):
     events: list[GlobalEventPlan]
 
 
+class GlobalPlanCoverage(BaseModel):
+    """How far the latest Global Response Plan covers the CURRENTLY response-eligible fires.
+
+    Derived on every read from persisted state - never a stored counter:
+    `eligible` = CONFIRMED (response-eligible) FireEvents now; `covered` =
+    those with a ResponsePlan in the latest materialized generation;
+    `unplannable` = eligible, uncovered fires the latest finished planning
+    cycle explicitly could not plan (FAILED / INSUFFICIENT_DATA); `pending` =
+    the rest, i.e. still being planned. `state`:
+
+    - `none`: no eligible fire and no plan -> "No response plan available"
+    - `generating`: eligible fires are pending and no plan covers any of them yet
+    - `updating`: a plan exists, but at least one eligible fire is still pending
+    - `current`: every eligible fire is covered (or explicitly unplannable)
+    """
+
+    state: Literal["none", "generating", "updating", "current"]
+    eligible_fire_event_ids: list[int]
+    covered_fire_event_ids: list[int]
+    pending_fire_event_ids: list[int]
+    unplannable_fire_event_ids: list[int]
+    # Active but NOT response-eligible (SUSPECTED, monitoring-only) fires. They
+    # never count towards eligible/pending; reported so the UI can say why no
+    # plan is being generated for them.
+    monitoring_fire_event_ids: list[int] = []
+    eligible_count: int
+    covered_count: int
+
+
 class GlobalResponsePlanResponse(BaseModel):
     """Response body for `GET /api/v1/global-response-plan/current`.
 
@@ -132,3 +161,6 @@ class GlobalResponsePlanResponse(BaseModel):
 
     as_of: datetime
     plan: Optional[GlobalPlanResponse]
+    # None only when the read service was built without a FireEvent repository
+    # (unit tests); the API always reports it.
+    coverage: Optional[GlobalPlanCoverage] = None

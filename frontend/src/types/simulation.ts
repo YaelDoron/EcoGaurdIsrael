@@ -14,9 +14,13 @@ export type SimulationRunState =
   | "idle"
   | "preparing"
   | "running"
+  /** Stop acknowledged: no new event starts; the event in progress finishes, then -> stopped. */
+  | "stopping"
   | "completed"
   | "completed_with_errors"
-  | "failed";
+  | "failed"
+  /** The operator pressed Stop: no further events ran; generated data is kept. */
+  | "stopped";
 
 export interface SimulationPreset {
   id: string;

@@ -461,6 +461,7 @@ def test_the_response_plan_endpoint_reports_no_plan_for_a_not_response_eligible_
     from fastapi.testclient import TestClient
 
     from src.api.routers.response_plans import (
+        get_response_eligibility_reader,
         get_response_plan_details_service,
         get_response_plan_presenter,
         response_plans_router,
@@ -474,10 +475,15 @@ def test_the_response_plan_endpoint_reports_no_plan_for_a_not_response_eligible_
     app.include_router(response_plans_router, prefix="/api/v1")
     app.dependency_overrides[get_response_plan_details_service] = lambda: NoPlanService()
     app.dependency_overrides[get_response_plan_presenter] = lambda: SimpleNamespace(present=lambda details: details)
+    # Event 7 is SUSPECTED -> not response-eligible.
+    app.dependency_overrides[get_response_eligibility_reader] = lambda: SimpleNamespace(
+        is_response_eligible=lambda fire_event_id: False
+    )
 
     response = TestClient(app).get("/api/v1/fire-events/7/response-plan")
 
-    assert response.status_code == 200 and response.json() == {"plan": None}  # truthful: no plan yet, none manufactured
+    # Truthful: no plan, none manufactured, and no "generating" promise for a monitoring-only event.
+    assert response.status_code == 200 and response.json() == {"plan": None, "plan_status": "not_applicable"}
 
 
 def test_suspected_events_remain_in_the_active_fire_events_service(stack):

@@ -37,6 +37,7 @@ from src.api.schemas.simulation_control import (
 )
 from src.services.simulation_control.simulation_run_manager import (
     SimulationAlreadyRunningError,
+    SimulationNotRunningError,
     SimulationPresetNotFoundError,
     SimulationResetDisabledError,
     SimulationResetRequiredError,
@@ -53,6 +54,7 @@ SIMULATION_PRESET_NOT_FOUND_CODE = "SIMULATION_PRESET_NOT_FOUND"
 SIMULATION_RESET_DISABLED_CODE = "SIMULATION_RESET_DISABLED"
 SIMULATION_RESET_REQUIRED_CODE = "SIMULATION_RESET_REQUIRED"
 SIMULATION_START_FAILED_CODE = "SIMULATION_START_FAILED"
+SIMULATION_NOT_RUNNING_CODE = "SIMULATION_NOT_RUNNING"
 
 
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
@@ -154,4 +156,27 @@ def start_simulation_run(
             "Failed to start the simulation run.",
         )
 
+    return to_simulation_run_status_response(snapshot)
+
+
+@simulation_router.post(
+    "/runs/current/stop",
+    response_model=SimulationRunStatusResponse,
+    status_code=202,
+    summary="Stop the active simulation run before its next scheduled event",
+)
+def stop_simulation_run(
+    manager: SimulationRunManager = Depends(get_simulation_run_manager),
+) -> SimulationRunStatusResponse | JSONResponse:
+    """Request a cooperative stop (202): the event in progress finishes, no further events run.
+
+    Already generated data is kept (no reset); poll GET /runs/current until
+    state=stopped. 409 when no run is PREPARING/RUNNING.
+    """
+    if not _is_simulation_control_enabled():
+        return _disabled_response()
+    try:
+        snapshot = manager.stop_run()
+    except SimulationNotRunningError as exc:
+        return _error_response(409, SIMULATION_NOT_RUNNING_CODE, str(exc))
     return to_simulation_run_status_response(snapshot)

@@ -18,13 +18,19 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-5);
+  /* Compact, single-line pill: the label never wraps (a fixed element's
+     shrink-to-fit width can otherwise break "ASK AI" onto two lines when
+     little horizontal room is left, e.g. after being dragged). */
+  width: max-content;
+  white-space: nowrap;
+  padding: var(--space-2) var(--space-4);
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: var(--color-surface);
   color: var(--color-text);
   font-weight: 700;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
+  line-height: 1.2;
   letter-spacing: var(--letter-spacing-caps);
   text-transform: uppercase;
   box-shadow: var(--shadow-card);

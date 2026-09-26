@@ -56,7 +56,7 @@ describe("useEventDetails", () => {
 
     expect(result.current.isLoading).toBe(true);
     expect(result.current.data).toBeNull();
-    await waitFor(() => expect(getEventDetailsMock).toHaveBeenCalledWith(12));
+    await waitFor(() => expect(getEventDetailsMock).toHaveBeenCalledWith(12, expect.any(AbortSignal)));
   });
 
   it("stores the data and clears loading on success", async () => {
@@ -134,7 +134,7 @@ describe("useEventDetails", () => {
 
     expect(result.current.isLoading).toBe(true);
     await waitFor(() => expect(result.current.data?.fire_event.fire_event_id).toBe(34));
-    expect(getEventDetailsMock).toHaveBeenNthCalledWith(2, 34);
+    expect(getEventDetailsMock).toHaveBeenNthCalledWith(2, 34, expect.any(AbortSignal));
   });
 });
 

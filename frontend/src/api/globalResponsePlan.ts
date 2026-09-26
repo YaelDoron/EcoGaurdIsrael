@@ -10,6 +10,6 @@ import { apiGet } from "./client";
  * backend/src/services/global_planning/global_response_plan_read_service.py
  * for where that already happened.
  */
-export function getCurrentGlobalResponsePlan(): Promise<GlobalResponsePlanResponse> {
-  return apiGet<GlobalResponsePlanResponse>("/api/v1/global-response-plan/current");
+export function getCurrentGlobalResponsePlan(signal?: AbortSignal): Promise<GlobalResponsePlanResponse> {
+  return apiGet<GlobalResponsePlanResponse>("/api/v1/global-response-plan/current", { signal });
 }

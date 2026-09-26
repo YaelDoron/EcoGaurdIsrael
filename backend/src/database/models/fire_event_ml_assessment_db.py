@@ -15,6 +15,9 @@ from sqlalchemy.orm import Mapped, deferred, mapped_column
 
 from src.database.base import Base
 
+# Deferred-load group of the Task 9B ai_hybrid_v5 audit columns (see FireEventMLAssessmentDB).
+AI_HYBRID_V5_COLUMN_GROUP = "ai_hybrid_v5_audit"
+
 
 class FireEventMLAssessmentDB(Base):
     """The single latest ML/decision trace row for one FireEvent."""
@@ -48,8 +51,20 @@ class FireEventMLAssessmentDB(Base):
     # they are read, and the repository writes them only for ai_hybrid_v5 rows - so RULE_ONLY / SHADOW / HYBRID never touch
     # these columns and keep working on a database that has not been migrated yet
     # (scripts/migrate_add_fire_event_ml_assessment_ai_columns.py adds them; only ai_hybrid_v5 needs it).
-    policy_version: Mapped[Optional[str]] = deferred(mapped_column(String, nullable=True))
-    policy_status: Mapped[Optional[str]] = deferred(mapped_column(String, nullable=True))
-    history_available: Mapped[Optional[bool]] = deferred(mapped_column(Boolean, nullable=True))
-    satellite_pass_count: Mapped[Optional[int]] = deferred(mapped_column(Integer, nullable=True))
-    current_satellite_pixel_count: Mapped[Optional[int]] = deferred(mapped_column(Integer, nullable=True))
+    # One deferred GROUP, so an ai_hybrid_v5 read loads all five with the row (undefer_group) instead of one
+    # lazy round trip per column per row.
+    policy_version: Mapped[Optional[str]] = deferred(
+        mapped_column(String, nullable=True), group=AI_HYBRID_V5_COLUMN_GROUP
+    )
+    policy_status: Mapped[Optional[str]] = deferred(
+        mapped_column(String, nullable=True), group=AI_HYBRID_V5_COLUMN_GROUP
+    )
+    history_available: Mapped[Optional[bool]] = deferred(
+        mapped_column(Boolean, nullable=True), group=AI_HYBRID_V5_COLUMN_GROUP
+    )
+    satellite_pass_count: Mapped[Optional[int]] = deferred(
+        mapped_column(Integer, nullable=True), group=AI_HYBRID_V5_COLUMN_GROUP
+    )
+    current_satellite_pixel_count: Mapped[Optional[int]] = deferred(
+        mapped_column(Integer, nullable=True), group=AI_HYBRID_V5_COLUMN_GROUP
+    )

@@ -8,6 +8,6 @@ import { apiGet } from "./client";
  * surfaces as a rejected promise carrying an `ApiError` with `status === 404`
  * - callers (see useEventDetails) distinguish that from other failures.
  */
-export function getEventDetails(fireEventId: number): Promise<EventDetailsResult> {
-  return apiGet<EventDetailsResult>(`/api/v1/fire-events/${fireEventId}/details`);
+export function getEventDetails(fireEventId: number, signal?: AbortSignal): Promise<EventDetailsResult> {
+  return apiGet<EventDetailsResult>(`/api/v1/fire-events/${fireEventId}/details`, { signal });
 }

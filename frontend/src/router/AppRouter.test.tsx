@@ -59,14 +59,14 @@ describe("AppRouter", () => {
     renderAt("/events/123/plan");
 
     expect(screen.getByRole("heading", { name: "Loading Response Plan…" })).toBeInTheDocument();
-    expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(123);
+    expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(123, expect.any(AbortSignal));
   });
 
   it("renders ResponsePlanPage at /plans/:planId", () => {
     renderAt("/plans/42");
 
     expect(screen.getByRole("heading", { name: "Loading Response Plan…" })).toBeInTheDocument();
-    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(42);
+    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(42, expect.any(AbortSignal));
   });
 
   it("renders Not Found for an unknown route", () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getOperationsOverview } from "../api/operations";
 import { OPERATIONS_OVERVIEW_POLL_INTERVAL_MS } from "../config/polling";
 import type { OperationsOverviewResponse } from "../types/operationsOverview";
+import { readOverviewSnapshot, saveOverviewSnapshot } from "./operationsOverviewSnapshot";
 
 const LOAD_ERROR_MESSAGE = "Unable to load the operations overview. Please try again.";
 const REFRESH_ERROR_MESSAGE = "Unable to refresh the operations overview. Showing previously loaded data.";
@@ -56,13 +57,16 @@ export interface UseOperationsOverviewResult {
 export function useOperationsOverview(options: UseOperationsOverviewOptions = {}): UseOperationsOverviewResult {
   const { activityLimit, pollingEnabled = true } = options;
 
-  const [data, setData] = useState<OperationsOverviewResponse | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // A recent snapshot from an earlier mount (operationsOverviewSnapshot) is
+  // shown immediately and the first fetch then runs as a background refresh.
+  const [initialSnapshot] = useState(() => readOverviewSnapshot(activityLimit));
+  const [data, setData] = useState<OperationsOverviewResponse | null>(initialSnapshot);
+  const [isLoading, setIsLoading] = useState(initialSnapshot === null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  const hasDataRef = useRef(false);
+  const hasDataRef = useRef(initialSnapshot !== null);
   const isFetchingRef = useRef(false);
   const timeoutIdRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -122,6 +126,7 @@ export function useOperationsOverview(options: UseOperationsOverviewOptions = {}
           return;
         }
         setData(response);
+        saveOverviewSnapshot(activityLimit, response);
         hasDataRef.current = true;
         setLoadError(null);
         setRefreshError(null);

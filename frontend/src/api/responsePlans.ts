@@ -12,10 +12,10 @@ import { apiGet } from "./client";
  * that enrichment already happened.
  */
 
-export function getCurrentResponsePlan(fireEventId: number): Promise<ResponsePlanEnvelopeResponse> {
-  return apiGet<ResponsePlanEnvelopeResponse>(`/api/v1/fire-events/${fireEventId}/response-plan`);
+export function getCurrentResponsePlan(fireEventId: number, signal?: AbortSignal): Promise<ResponsePlanEnvelopeResponse> {
+  return apiGet<ResponsePlanEnvelopeResponse>(`/api/v1/fire-events/${fireEventId}/response-plan`, { signal });
 }
 
-export function getResponsePlanById(planId: number): Promise<ResponsePlanEnvelopeResponse> {
-  return apiGet<ResponsePlanEnvelopeResponse>(`/api/v1/response-plans/${planId}`);
+export function getResponsePlanById(planId: number, signal?: AbortSignal): Promise<ResponsePlanEnvelopeResponse> {
+  return apiGet<ResponsePlanEnvelopeResponse>(`/api/v1/response-plans/${planId}`, { signal });
 }

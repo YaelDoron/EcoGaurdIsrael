@@ -66,7 +66,20 @@ function keepPlanIdentityIfUnchanged(
  * timer, and a `generationRef` makes any request still in flight a no-op,
  * so nothing updates state or reschedules afterwards.
  */
-export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
+export interface UseGlobalResponsePlanOptions {
+  /** When false nothing is fetched or polled (e.g. the demo-session gate
+   * already knows the plan will not be shown). Defaults to true. */
+  enabled?: boolean;
+  /** Whether to keep re-fetching every GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS
+   * after the first load. Defaults to true. Switching it back on re-fetches at
+   * once and resumes polling. */
+  polling?: boolean;
+}
+
+export function useGlobalResponsePlan(options: UseGlobalResponsePlanOptions = {}): UseGlobalResponsePlanResult {
+  const { enabled = true, polling = true } = options;
+  const pollingRef = useRef(polling);
+  pollingRef.current = polling;
   const [response, setResponse] = useState<GlobalResponsePlanResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -79,6 +92,9 @@ export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
   // Bumped on unmount, so a request started before it can tell it has been
   // superseded and skip both its state updates and its poll rescheduling.
   const generationRef = useRef(0);
+  // The in-flight request, aborted on unmount so navigating away frees the
+  // browser connection instead of waiting out a slow read in the background.
+  const abortRef = useRef<AbortController | null>(null);
 
   const clearScheduled = useCallback(() => {
     if (timeoutIdRef.current !== null) {
@@ -94,6 +110,7 @@ export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
         return;
       }
       isFetchingRef.current = true;
+      timeoutIdRef.current = null; // a fired (or cleared) poll timer is no longer pending
       const generation = generationRef.current;
 
       const isRefresh = hasDataRef.current;
@@ -105,7 +122,9 @@ export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
         setError(null);
       }
 
-      getCurrentGlobalResponsePlan()
+      const controller = new AbortController();
+      abortRef.current = controller;
+      getCurrentGlobalResponsePlan(controller.signal)
         .then((result) => {
           if (generation !== generationRef.current) {
             return;
@@ -134,7 +153,7 @@ export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
           isFetchingRef.current = false;
           setIsLoading(false);
           setIsRefreshing(false);
-          if (hasDataRef.current) {
+          if (hasDataRef.current && pollingRef.current) {
             timeoutIdRef.current = setTimeout(runFetch, GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS);
           }
         });
@@ -147,14 +166,35 @@ export function useGlobalResponsePlan(): UseGlobalResponsePlanResult {
     clearScheduled();
     isFetchingRef.current = false;
     hasDataRef.current = false;
+    if (!enabled) {
+      setIsLoading(false);
+      return undefined;
+    }
     runFetch();
 
     return () => {
       generationRef.current += 1;
       clearScheduled();
       isFetchingRef.current = false;
+      abortRef.current?.abort();
     };
-  }, [runFetch, clearScheduled]);
+  }, [runFetch, clearScheduled, enabled]);
+
+  // Polling switched OFF: cancel the pending re-check. Switched back ON (e.g. a
+  // new run went live): refresh now and resume. Only real off->on transitions
+  // re-fetch - never the initial mount or an `enabled` change.
+  const previousPollingRef = useRef(polling);
+  useEffect(() => {
+    const wasPolling = previousPollingRef.current;
+    previousPollingRef.current = polling;
+    if (!polling) {
+      clearScheduled();
+      return;
+    }
+    if (!wasPolling && enabled && hasDataRef.current && timeoutIdRef.current === null && !isFetchingRef.current) {
+      runFetch();
+    }
+  }, [enabled, polling, runFetch, clearScheduled]);
 
   const retry = useCallback(() => {
     clearScheduled();

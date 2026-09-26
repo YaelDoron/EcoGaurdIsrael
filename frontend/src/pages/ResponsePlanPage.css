@@ -85,3 +85,10 @@
     height: 400px;
   }
 }
+
+.response-plan-page__lifecycle-detail {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}

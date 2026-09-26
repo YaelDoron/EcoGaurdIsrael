@@ -26,6 +26,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.api.routers.response_plans import (
+    get_response_eligibility_reader,
     get_response_plan_details_service,
     get_response_plan_presenter,
     response_plans_router,
@@ -197,10 +198,19 @@ def make_app() -> FastAPI:
     return app
 
 
-def client_for(service, presenter, *, raise_server_exceptions: bool = True) -> TestClient:
+class FakeEligibilityReader:
+    def __init__(self, eligible_ids=()):
+        self.eligible_ids = set(eligible_ids)
+
+    def is_response_eligible(self, fire_event_id):
+        return fire_event_id in self.eligible_ids
+
+
+def client_for(service, presenter, *, raise_server_exceptions: bool = True, eligible_ids=()) -> TestClient:
     app = make_app()
     app.dependency_overrides[get_response_plan_details_service] = lambda: service
     app.dependency_overrides[get_response_plan_presenter] = lambda: presenter
+    app.dependency_overrides[get_response_eligibility_reader] = lambda: FakeEligibilityReader(eligible_ids)
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
@@ -226,7 +236,8 @@ def test_current_plan_endpoint_returns_enriched_plan():
 
     assert response.status_code == 200
     body = response.json()
-    assert set(body.keys()) == {"plan"}
+    assert set(body.keys()) == {"plan", "plan_status"}
+    assert body["plan_status"] == "available"
     assert body["plan"]["plan_id"] == 7
 
 
@@ -447,7 +458,16 @@ def test_current_endpoint_with_no_plan_returns_null_plan():
     response = client.get(endpoint(3))
 
     assert response.status_code == 200
-    assert response.json() == {"plan": None}
+    assert response.json() == {"plan": None, "plan_status": "not_applicable"}
+
+
+def test_confirmed_event_without_a_plan_yet_is_reported_as_generating():
+    client = client_for(FakeResponsePlanDetailsService(None), FakeResponsePlanPresenter(), eligible_ids=[3])
+
+    response = client.get(endpoint(3))
+
+    assert response.status_code == 200
+    assert response.json() == {"plan": None, "plan_status": "generating"}
 
 
 def test_plan_by_id_missing_plan_returns_safe_404():

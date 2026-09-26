@@ -387,7 +387,7 @@ describe("ActiveWildfiresPage (Task A8 Operations Overview)", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("button", { name: "Running…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Stop Simulation" })).toBeEnabled();
     expect(screen.queryByText(/Event \d+ of \d+/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /start simulation/i })).not.toBeInTheDocument();
     expect(screen.queryByText("No Simulation Running")).not.toBeInTheDocument();
@@ -590,13 +590,13 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
     screen.getByRole("button", { name: "Start Simulation" }).click();
 
     await waitFor(() => expect(startSimulationMock).toHaveBeenCalledTimes(1));
-    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "operations_demo", reset_demo_state: true });
+    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "presentation_demo", reset_demo_state: true });
     await waitFor(() => expect(getOperationsOverviewMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByRole("button", { name: "Preparing…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Stop Simulation" })).toBeEnabled();
 
     await vi.advanceTimersByTimeAsync(5000);
     expect(await screen.findByTestId("circle")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Running…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop Simulation" })).toBeEnabled();
 
     await vi.advanceTimersByTimeAsync(5000);
     expect(await screen.findByText("Event #18")).toBeInTheDocument();
@@ -605,9 +605,9 @@ describe("ActiveWildfiresPage Start Simulation end-to-end flow (Task A9, Part 37
     await waitFor(() => expect(screen.getByText("Event #18").closest("article")).toHaveAttribute("data-emphasized", "true"));
 
     await vi.advanceTimersByTimeAsync(5000);
-    // "Run Again" only appears once the run reaches a terminal state - no
-    // separate "Completed" status badge to check (production polish pass).
-    expect(await screen.findByRole("button", { name: "Run Again" })).toBeEnabled();
+    // Start Simulation only comes back once the run reaches a terminal state.
+    expect(await screen.findByRole("button", { name: "Start Simulation" })).toBeEnabled();
+    expect(screen.getByRole("status")).toHaveTextContent("Simulation completed");
   });
 
   it("does not insert any local fake activity/fire/danger data when Start is clicked", async () => {
@@ -733,9 +733,9 @@ describe("ActiveWildfiresPage initial demo state (stale runtime rows from a prev
     getOperationsOverviewMock.mockResolvedValue(
       makeOverview([staleFire], { simulation: { enabled: true, run: { ...baseRun, run_id: "run-new", state: "completed" } } }),
     );
-    await userEvent.click(screen.getByRole("button", { name: "Run Again" }));
+    await userEvent.click(screen.getByRole("button", { name: "Start Simulation" }));
 
-    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "operations_demo", reset_demo_state: true });
+    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "presentation_demo", reset_demo_state: true });
     expect(await screen.findByText("Event #99")).toBeInTheDocument();
   });
 

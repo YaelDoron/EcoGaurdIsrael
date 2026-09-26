@@ -56,7 +56,7 @@ describe("useResponsePlan", () => {
 
     renderHook(() => useResponsePlan({ kind: "current", fireEventId: 42 }));
 
-    await waitFor(() => expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(42, expect.any(AbortSignal)));
     expect(getResponsePlanByIdMock).not.toHaveBeenCalled();
   });
 
@@ -65,7 +65,7 @@ describe("useResponsePlan", () => {
 
     renderHook(() => useResponsePlan({ kind: "by-id", planId: 99 }));
 
-    await waitFor(() => expect(getResponsePlanByIdMock).toHaveBeenCalledWith(99));
+    await waitFor(() => expect(getResponsePlanByIdMock).toHaveBeenCalledWith(99, expect.any(AbortSignal)));
     expect(getCurrentResponsePlanMock).not.toHaveBeenCalled();
   });
 
@@ -114,7 +114,7 @@ describe("useResponsePlan", () => {
 
     await waitFor(() => expect(result.current.plan).not.toBeNull());
     expect(getResponsePlanByIdMock).toHaveBeenCalledTimes(2);
-    expect(getResponsePlanByIdMock).toHaveBeenNthCalledWith(2, 7);
+    expect(getResponsePlanByIdMock).toHaveBeenNthCalledWith(2, 7, expect.any(AbortSignal));
   });
 
   it("loads the new plan when the source changes", async () => {
@@ -130,7 +130,7 @@ describe("useResponsePlan", () => {
     rerender({ source: { kind: "by-id", planId: 2 } as ResponsePlanSource });
 
     await waitFor(() => expect(result.current.plan?.plan_id).toBe(2));
-    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(2);
+    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(2, expect.any(AbortSignal));
   });
 
   it("does not retain the previous plan when the new source's request fails", async () => {

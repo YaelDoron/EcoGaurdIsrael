@@ -33,6 +33,11 @@ export function getCurrentSimulationRun(signal?: AbortSignal): Promise<Simulatio
  * with `status === 403`/`code === "SIMULATION_CONTROL_DISABLED"` - both are
  * preserved on the thrown `ApiError`, not collapsed into a generic message.
  */
+/** Ask the active run to stop before its next scheduled event (202). Generated data is kept. */
+export function stopSimulation(signal?: AbortSignal): Promise<SimulationRunStatus> {
+  return apiPost<SimulationRunStatus>(`${SIMULATION_RUNS_PATH}/current/stop`, {}, { signal });
+}
+
 export function startSimulation(request: StartSimulationRequest, signal?: AbortSignal): Promise<SimulationRunStatus> {
   return apiPost<SimulationRunStatus>(SIMULATION_RUNS_PATH, request, { signal });
 }

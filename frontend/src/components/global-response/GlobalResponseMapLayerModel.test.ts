@@ -105,6 +105,26 @@ describe("buildGlobalResponseMapLayer", () => {
     expect(layer.originMarkers[0].fireEventId).toBe(202);
   });
 
+  it("draws a target once even when several resources are assigned to it (unique marker keys)", () => {
+    const fire = makeTarget({ response_target_id: 7341, target_type: "active_fire" });
+    const risk = makeTarget({ response_target_id: 7342, target_type: "predicted_risk" });
+    const action = (resourceId: string, target: ResponsePlanTarget) =>
+      makeAction({ target, resource: { ...makeAction().resource, resource_id: resourceId } });
+    const layer = buildGlobalResponseMapLayer(
+      [
+        makeEvent({
+          actions: [action("engine-1", fire), action("engine-2", fire), action("engine-3", fire), action("engine-4", risk)],
+          uncovered_targets: [risk],
+        }),
+      ],
+      null,
+    );
+
+    expect(layer.fireMarkers.map((marker) => marker.key)).toEqual(["101-7341"]);
+    expect(layer.targetMarkers.map((marker) => marker.key)).toEqual(["101-7342"]);
+    expect(layer.routes).toHaveLength(4); // every resource still gets its own route
+  });
+
   it("splits active_fire targets into fireMarkers and other types into targetMarkers", () => {
     const fireAction = makeAction({
       target: makeTarget({ target_type: "active_fire", response_target_id: 10 }),

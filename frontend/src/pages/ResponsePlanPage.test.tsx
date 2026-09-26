@@ -79,7 +79,7 @@ describe("ResponsePlanPage", () => {
     renderAtPath("/events/3/plan");
 
     await screen.findByText("Generated:");
-    expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(3);
+    expect(getCurrentResponsePlanMock).toHaveBeenCalledWith(3, expect.any(AbortSignal));
     expect(getResponsePlanByIdMock).not.toHaveBeenCalled();
   });
 
@@ -89,7 +89,7 @@ describe("ResponsePlanPage", () => {
     renderAtPath("/plans/55");
 
     await screen.findByText("Generated:");
-    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(55);
+    expect(getResponsePlanByIdMock).toHaveBeenCalledWith(55, expect.any(AbortSignal));
     expect(getCurrentResponsePlanMock).not.toHaveBeenCalled();
   });
 

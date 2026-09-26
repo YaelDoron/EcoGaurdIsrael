@@ -91,15 +91,16 @@ describe("OperationsStatusHeader", () => {
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("disables the action while PREPARING/RUNNING", () => {
+  it("offers Stop Simulation (instead of Start) while PREPARING/RUNNING", () => {
     renderHeader({ enabled: true, run: makeRun({ state: "preparing" }) });
-    expect(screen.getByRole("button", { name: "Preparing…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop Simulation" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Start Simulation" })).not.toBeInTheDocument();
   });
 
-  it("offers Run Again in every terminal state", () => {
-    for (const state of ["completed", "completed_with_errors", "failed"] as const) {
+  it("offers Start Simulation again in every terminal state", () => {
+    for (const state of ["completed", "completed_with_errors", "failed", "stopped"] as const) {
       const { unmount } = renderHeader({ enabled: true, run: makeRun({ state }) });
-      expect(screen.getByRole("button", { name: "Run Again" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Start Simulation" })).toBeEnabled();
       unmount();
     }
   });
@@ -119,10 +120,10 @@ describe("OperationsStatusHeader", () => {
     }
   });
 
-  it("never renders a Stop/Cancel/Pause/Reset control", () => {
+  it("never renders a Cancel/Pause/Reset control (Stop exists only while a run is active)", () => {
     renderHeader({ enabled: true, run: makeRun({ state: "running" }) });
 
-    for (const forbidden of [/stop/i, /cancel/i, /pause/i, /reset demo/i]) {
+    for (const forbidden of [/cancel/i, /pause/i, /reset demo/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
   });

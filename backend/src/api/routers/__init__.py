@@ -4,7 +4,9 @@
 endpoints attach to it via `v1_router.include_router(...)` rather than
 being wired individually into the FastAPI app in `src.api.app`.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from src.api.read_only_request import read_only_request
 
 from src.api.routers.chatbot import chatbot_router
 from src.api.routers.fire_danger import fire_danger_router
@@ -16,12 +18,15 @@ from src.api.routers.response_plans import response_plans_router
 from src.api.routers.simulation import simulation_router
 
 v1_router = APIRouter(prefix="/api/v1")
-v1_router.include_router(fire_events_router)
-v1_router.include_router(fire_danger_router)
-v1_router.include_router(operations_activity_router)
-v1_router.include_router(operations_overview_router)
-v1_router.include_router(response_plans_router)
-v1_router.include_router(global_response_plan_router)
+# Pure GET read routers (their services never write) read on AUTOCOMMIT
+# connections - see src/api/read_only_request.py.
+_READ_ONLY = [Depends(read_only_request)]
+v1_router.include_router(fire_events_router, dependencies=_READ_ONLY)
+v1_router.include_router(fire_danger_router, dependencies=_READ_ONLY)
+v1_router.include_router(operations_activity_router, dependencies=_READ_ONLY)
+v1_router.include_router(operations_overview_router, dependencies=_READ_ONLY)
+v1_router.include_router(response_plans_router, dependencies=_READ_ONLY)
+v1_router.include_router(global_response_plan_router, dependencies=_READ_ONLY)
 v1_router.include_router(simulation_router)
 v1_router.include_router(chatbot_router)
 

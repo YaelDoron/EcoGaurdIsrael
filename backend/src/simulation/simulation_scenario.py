@@ -32,7 +32,10 @@ from src.simulation.simulation_locations import (
 # continues to request its own unchanged, literal
 # LEGACY_FIXED_SCENARIO_DURATION_SECONDS value, so raising this ceiling has
 # zero effect on their reported/validated duration.
-MAX_SCENARIO_DURATION_SECONDS = 900
+# Raised again (900 -> 1800) for the 30-minute, manually stoppable
+# `presentation_demo` timeline (src/simulation/presentation_scenario.py);
+# still only a ceiling - no other builder's duration changes.
+MAX_SCENARIO_DURATION_SECONDS = 1800
 
 # The exact, unchanged duration every non-operations_demo builder below has
 # always used - kept as its own named constant (rather than reusing the

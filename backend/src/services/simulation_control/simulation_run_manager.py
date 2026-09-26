@@ -67,6 +67,10 @@ class SimulationAlreadyRunningError(RuntimeError):
     """Raised by start_run() when a run is already PREPARING or RUNNING."""
 
 
+class SimulationNotRunningError(RuntimeError):
+    """Raised by stop_run() when no run is PREPARING or RUNNING."""
+
+
 class SimulationPresetNotFoundError(ValueError):
     """Raised by start_run() when the requested preset id is not registered."""
 
@@ -92,12 +96,18 @@ class SimulationRunState(Enum):
     IDLE = "idle"
     PREPARING = "preparing"
     RUNNING = "running"
+    # Stop was requested and acknowledged: no new scheduled event will start;
+    # the event already executing (if any) finishes safely, then -> STOPPED.
+    STOPPING = "stopping"
     COMPLETED = "completed"
     COMPLETED_WITH_ERRORS = "completed_with_errors"
     FAILED = "failed"
+    # The operator pressed Stop: no further scheduled events were executed;
+    # everything already generated stays in the database for inspection.
+    STOPPED = "stopped"
 
 
-_ACTIVE_STATES = (SimulationRunState.PREPARING, SimulationRunState.RUNNING)
+_ACTIVE_STATES = (SimulationRunState.PREPARING, SimulationRunState.RUNNING, SimulationRunState.STOPPING)
 
 # Range for auto-generated seeds (Part L) - any positive int the existing
 # seeded generators/scenario builder can consume; comfortably below the
@@ -208,6 +218,9 @@ class SimulationRunManager:
         # (process-local, like everything else here) only to avoid
         # immediately repeating the same auto-generated seed twice in a row.
         self._last_auto_generated_seed: int | None = None
+        # Stop request of the CURRENT run only (a fresh Event per run, so a
+        # stale stop can never leak into the next run).
+        self._stop_requested = threading.Event()
 
     def get_current_snapshot(self) -> SimulationRunSnapshot:
         """Return the latest known snapshot - IDLE if no run has ever started,
@@ -264,8 +277,15 @@ class SimulationRunManager:
                 raise SimulationAlreadyRunningError(
                     f"A simulation run is already {self._snapshot.state.value}."
                 )
-            resolved_seed = seed if seed is not None else self._generate_seed()
+            if seed is not None:
+                resolved_seed = seed
+            elif preset.default_seed is not None:
+                resolved_seed = preset.default_seed
+            else:
+                resolved_seed = self._generate_seed()
             run_id = str(uuid4())
+            self._stop_requested = threading.Event()
+            stop_requested = self._stop_requested
             self._snapshot = SimulationRunSnapshot(
                 run_id=run_id,
                 state=SimulationRunState.PREPARING,
@@ -286,8 +306,34 @@ class SimulationRunManager:
             )
             snapshot_to_return = self._snapshot
 
-        self._executor.submit(self._execute, run_id, preset, resolved_seed)
+        self._executor.submit(self._execute, run_id, preset, resolved_seed, stop_requested)
         return snapshot_to_return
+
+    def stop_run(self) -> SimulationRunSnapshot:
+        """Acknowledge a stop request immediately; the run then ends in STOPPED.
+
+        Returns at once (it only sets a flag and moves the snapshot to
+        STOPPING) - it never waits for the background worker. Cooperative and
+        non-destructive: no NEW scheduled event starts after this call; the
+        event already executing (persistence -> detection -> severity/spread/
+        targets/planning, the atomic unit) finishes, then the run ends in
+        STOPPED. Nothing is reset or deleted - generated fire events, evidence
+        and plans remain for inspection; the mandatory reset still happens when
+        the NEXT run starts. A repeated stop while STOPPING is a no-op that
+        returns the same snapshot. Raises SimulationNotRunningError when no run
+        is active.
+        """
+        with self._lock:
+            if self._snapshot.state not in _ACTIVE_STATES:
+                raise SimulationNotRunningError("No simulation run is active.")
+            self._stop_requested.set()
+            if self._snapshot.state is not SimulationRunState.STOPPING:
+                self._snapshot = replace(
+                    self._snapshot,
+                    state=SimulationRunState.STOPPING,
+                    last_message="Stopping simulation - finishing the current event.",
+                )
+            return self._snapshot
 
     def _generate_seed(self) -> int:
         """Pick a fresh integer seed for a run that omitted one explicitly.
@@ -306,7 +352,14 @@ class SimulationRunManager:
 
     # -- background worker (never runs on the calling/request thread) ------
 
-    def _execute(self, run_id: str, preset: SimulationPreset, seed: int) -> None:
+    def _execute(
+        self,
+        run_id: str,
+        preset: SimulationPreset,
+        seed: int,
+        stop_requested: threading.Event | None = None,
+    ) -> None:
+        stop_requested = stop_requested or threading.Event()
         try:
             # Mandatory (Task 9A): nothing is generated or run until the reset has succeeded; a failed reset fails the run.
             self._replace_if_current(run_id, last_message="Resetting demo state.")
@@ -314,24 +367,29 @@ class SimulationRunManager:
 
             scenario = preset.build(seed)
             started_at = self._clock_fn()
-            self._replace_if_current(
-                run_id,
-                state=SimulationRunState.RUNNING,
-                simulation_duration_seconds=scenario.duration_seconds,
-                events_total=len(scenario.events),
-                started_at=started_at,
-                last_message="Simulation running.",
-            )
+            with self._lock:
+                if self._snapshot.run_id != run_id:
+                    return
+                stopping = stop_requested.is_set()
+                self._snapshot = replace(
+                    self._snapshot,
+                    # A stop requested during PREPARING keeps the run STOPPING.
+                    state=SimulationRunState.STOPPING if stopping else SimulationRunState.RUNNING,
+                    simulation_duration_seconds=scenario.duration_seconds,
+                    events_total=len(scenario.events),
+                    started_at=started_at,
+                    last_message=self._snapshot.last_message if stopping else "Simulation running.",
+                )
 
             runner = self._runner_factory()
-            config = DemoSimulationRunConfig(mode=SimulationMode.AUTOMATIC)
+            config = DemoSimulationRunConfig(mode=SimulationMode.AUTOMATIC, should_stop=stop_requested.is_set)
             result = runner.run(
                 scenario,
                 config,
                 scenario_started_at=started_at,
                 on_progress=lambda progress: self._apply_progress(run_id, progress),
             )
-            self._apply_result(run_id, result)
+            self._apply_result(run_id, result, stopped=stop_requested.is_set())
         except Exception as exc:  # noqa: BLE001 - background worker boundary: never let this escape unlogged.
             logger.exception("Simulation run %s failed", run_id)
             self._apply_failure(run_id, exc)
@@ -371,12 +429,15 @@ class SimulationRunManager:
                 ),
             )
 
-    def _apply_result(self, run_id: str, result: DemoSimulationRunResult) -> None:
+    def _apply_result(self, run_id: str, result: DemoSimulationRunResult, *, stopped: bool = False) -> None:
         state = _RUNNER_STATUS_TO_STATE[result.status]
+        if stopped and result.events_executed < result.events_total and state is not SimulationRunState.FAILED:
+            state = SimulationRunState.STOPPED
         message = {
             SimulationRunState.COMPLETED: "Simulation run completed.",
             SimulationRunState.COMPLETED_WITH_ERRORS: "Simulation run completed with errors.",
             SimulationRunState.FAILED: "Simulation run failed.",
+            SimulationRunState.STOPPED: "Simulation stopped by the operator.",
         }[state]
         self._replace_if_current(
             run_id,

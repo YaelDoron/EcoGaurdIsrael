@@ -126,4 +126,6 @@ export interface ResponsePlan {
 /** The shared Epic 6 envelope: `{ plan: ... }`, or `{ plan: null }` when none exists. */
 export interface ResponsePlanEnvelopeResponse {
   plan: ResponsePlan | null;
+  /** Current-plan endpoint only: `generating` = CONFIRMED event whose plan is still being produced. */
+  plan_status?: "available" | "generating" | "not_applicable" | null;
 }

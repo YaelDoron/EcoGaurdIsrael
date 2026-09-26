@@ -670,3 +670,47 @@ def test_stale_event_cleanup_failure_does_not_abort_the_run():
     result = _run_with_resolver(failing_resolver)
 
     assert result.events_executed == len(build_active_fire_scenario(seed=42).events)
+
+
+# ---------------------------------------------------------------------------
+# Stop Simulation: no new event starts after a stop request, even when several
+# events became due at once; the event already executing (including its
+# downstream refresh) completes.
+# ---------------------------------------------------------------------------
+
+
+def test_stop_request_prevents_the_remaining_due_events_of_the_same_batch():
+    scenario = build_active_fire_scenario(seed=42)
+    batch = list(scenario.events[:3])
+    stop = {"requested": False}
+    downstream_calls: list[object] = []
+
+    class StoppingExecutor(FakeExecutor):
+        def execute(self, scenario, event, event_timestamp):
+            result = super().execute(scenario, event, event_timestamp)
+            stop["requested"] = True  # the operator presses Stop while this event runs
+            return result
+
+    class RecordingRefreshCoordinator(NoOpRefreshCoordinator):
+        def handle_event(self, **kwargs):
+            downstream_calls.append(kwargs["event"])
+            return super().handle_event(**kwargs)
+
+    executor = StoppingExecutor()
+    runner = DemoSimulationRunner(
+        executor=executor,
+        fire_danger_coordinator=NoOpFireDangerCoordinator(),
+        fire_detection_coordinator=NoOpFireDetectionCoordinator(),
+        operational_coordinator=NoOpOperationalCoordinator(),
+        simulation_refresh_coordinator=RecordingRefreshCoordinator(),
+        service=FakeAutomaticService([batch, list(scenario.events[3:])]),
+    )
+    config = DemoSimulationRunConfig(
+        mode=SimulationMode.AUTOMATIC, sleep_fn=lambda seconds: None, should_stop=lambda: stop["requested"]
+    )
+
+    result = runner.run(scenario, config, scenario_started_at=STARTED_AT)
+
+    assert [call[0] for call in executor.calls] == [batch[0]]  # nothing after the stop request started
+    assert downstream_calls == [batch[0]]  # ...but the running event's downstream work completed
+    assert result.events_executed == 1
