@@ -31,3 +31,10 @@ export const EVENT_DETAILS_POLL_INTERVAL_MS = 5000;
  * manual page reload.
  */
 export const GLOBAL_RESPONSE_PLAN_POLL_INTERVAL_MS = 5000;
+
+/**
+ * While a CONFIRMED event's response plan is still being generated
+ * (`plan_status: "generating"`), useResponsePlan re-fetches it this long
+ * after the previous request settles, so the plan appears on its own.
+ */
+export const RESPONSE_PLAN_PENDING_POLL_INTERVAL_MS = 5000;

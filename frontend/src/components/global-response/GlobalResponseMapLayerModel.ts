@@ -103,6 +103,13 @@ function pushTargetMarker(
   const key = `${fireEventId}-${target.response_target_id}`;
   const coordinate: Coordinate = { latitude: target.latitude, longitude: target.longitude };
 
+  // Several resources are often assigned to the same target: draw each
+  // target once (a repeated marker is visually identical and duplicated its
+  // React key).
+  if (fireMarkers.some((marker) => marker.key === key) || targetMarkers.some((marker) => marker.key === key)) {
+    return;
+  }
+
   if (target.target_type === "active_fire") {
     fireMarkers.push({ key, fireEventId, targetId: target.response_target_id, coordinate, isFocused });
     return;

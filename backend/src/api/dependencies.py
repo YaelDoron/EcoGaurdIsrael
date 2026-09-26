@@ -21,6 +21,9 @@ from src.services.operations.operations_overview_query_service import Operations
 from src.services.simulation_control.simulation_run_manager import SimulationRunManager
 
 
+# Worker threads for one Event Details snapshot's independent section reads.
+EVENT_DETAILS_PARALLEL_LOADS = 4
+
 def get_db_session() -> Iterator[Session]:
     """FastAPI dependency yielding a database session, closed after the request.
 
@@ -68,7 +71,8 @@ def get_event_details_service() -> EventDetailsService:
     does not need - and does not compose with - get_db_session's single
     request-scoped Session.
     """
-    return EventDetailsService()
+    # Independent snapshot sections are read concurrently (see EventDetailsService).
+    return EventDetailsService(max_parallel_loads=EVENT_DETAILS_PARALLEL_LOADS)
 
 
 def get_chatbot_agent() -> ChatbotAgent:

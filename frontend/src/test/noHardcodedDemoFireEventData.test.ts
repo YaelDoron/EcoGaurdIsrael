@@ -154,8 +154,11 @@ describe("Task A9 architecture guards", () => {
     }
   });
 
-  it("never renders a Stop/Cancel/Pause simulation control", () => {
-    for (const forbidden of ["Stop Simulation", "Cancel Simulation", "Pause Simulation"]) {
+  // Stop Simulation is now a deliberate operator action (presentation pacing:
+  // the 30-minute presentation run ends when the presenter stops it); a
+  // cancel/pause control still does not exist.
+  it("never renders a Cancel/Pause simulation control", () => {
+    for (const forbidden of ["Cancel Simulation", "Pause Simulation"]) {
       expect(combinedSource).not.toContain(forbidden);
     }
   });
@@ -190,7 +193,7 @@ describe("Task A9 architecture guards", () => {
   it("centralizes the demo request in one config constant, never duplicated inline", () => {
     // Every occurrence of the three demo-request literals together must be
     // the one DEMO_SIMULATION_REQUEST declaration - not re-typed elsewhere.
-    const occurrences = combinedSource.match(/preset:\s*"operations_demo"/g) ?? [];
+    const occurrences = combinedSource.match(/preset:\s*"(operations_demo|presentation_demo)"/g) ?? [];
     expect(occurrences).toHaveLength(1);
   });
 });

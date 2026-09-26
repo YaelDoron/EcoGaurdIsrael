@@ -33,6 +33,9 @@ const INVALID_REQUEST_MESSAGE = "The requested identifier is not valid.";
 const LOAD_ERROR_TITLE = "Unable to load the response plan.";
 const NO_PLAN_TITLE = "No response plan available";
 const NO_PLAN_MESSAGE = "There is currently no response plan available for this wildfire event.";
+const GENERATING_PLAN_MESSAGE = "Generating response plan...";
+const GENERATING_PLAN_DETAIL =
+  "This fire is confirmed; routing and resource allocation are running. The plan appears here automatically.";
 
 type StatusTone = "success" | "warning" | "danger";
 
@@ -136,7 +139,7 @@ function collectGeocodeTargets(plan: ResponsePlan): GeocodeTarget[] {
 }
 
 function ResponsePlanContent({ source }: { source: ResponsePlanSource }) {
-  const { plan, isLoading, error, retry } = useResponsePlan(source);
+  const { plan, planStatus, isLoading, error, retry } = useResponsePlan(source);
   // UI-only highlight state (Task 11): selecting an action never reorders
   // plan.actions, changes the assignment, or recalculates anything - it
   // only marks which action's card/route should be visually emphasized.
@@ -184,10 +187,21 @@ function ResponsePlanContent({ source }: { source: ResponsePlanSource }) {
   if (plan === null) {
     // Only reachable for the "current" source - a missing plan-by-id
     // surfaces as an ApiError (404), not a successful `plan: null`.
+    // A CONFIRMED event's plan is produced by the confirmed-fire pipeline
+    // (severity -> spread -> targets -> routing -> allocation); until it is
+    // persisted the backend reports `generating` and the hook keeps polling.
+    // A SUSPECTED (monitoring-only) event never implies a plan is coming.
     return (
       <section>
         <PageHeader title={PAGE_TITLE} />
-        <EmptyState title={NO_PLAN_TITLE} message={NO_PLAN_MESSAGE} />
+        {planStatus === "generating" ? (
+          <>
+            <LoadingState message={GENERATING_PLAN_MESSAGE} />
+            <p className="response-plan-page__lifecycle-detail">{GENERATING_PLAN_DETAIL}</p>
+          </>
+        ) : (
+          <EmptyState title={NO_PLAN_TITLE} message={NO_PLAN_MESSAGE} />
+        )}
       </section>
     );
   }

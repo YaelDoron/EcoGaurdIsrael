@@ -18,6 +18,8 @@ function makeLayer(overrides: Partial<GlobalResponseMapLayerData> = {}): GlobalR
           { latitude: 32.0, longitude: 35.0 },
           { latitude: 32.5, longitude: 35.5 },
         ],
+        // The path ends on the target itself - no unrouted last-mile segment.
+        lastMileGap: null,
         isFocused: false,
       },
     ],

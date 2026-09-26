@@ -72,6 +72,10 @@ export function useEventDetails(fireEventId: number): UseEventDetailsResult {
   // Bumped on unmount and whenever fireEventId changes, so a request started
   // for a previous event (or before unmount) can tell it has been superseded.
   const generationRef = useRef(0);
+  // The in-flight request, aborted when superseded or on unmount so leaving
+  // the page frees the browser connection instead of letting a slow read
+  // finish in the background (it would only be ignored anyway).
+  const abortRef = useRef<AbortController | null>(null);
 
   const clearScheduled = useCallback(() => {
     if (timeoutIdRef.current !== null) {
@@ -98,7 +102,9 @@ export function useEventDetails(fireEventId: number): UseEventDetailsResult {
       setNotFound(false);
     }
 
-    getEventDetails(fireEventId)
+    const controller = new AbortController();
+    abortRef.current = controller;
+    getEventDetails(fireEventId, controller.signal)
       .then((response) => {
         if (generation !== generationRef.current) {
           return;
@@ -161,6 +167,7 @@ export function useEventDetails(fireEventId: number): UseEventDetailsResult {
       generationRef.current += 1;
       clearScheduled();
       isFetchingRef.current = false;
+      abortRef.current?.abort();
     };
   }, [load, clearScheduled]);
 

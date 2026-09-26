@@ -149,7 +149,7 @@ describe("GlobalResponsePlanPage", () => {
 
     renderAtPath("/global-response-plan");
 
-    expect(await screen.findByText("No materialized generation yet")).toBeInTheDocument();
+    expect(await screen.findByText("No response plan available")).toBeInTheDocument();
   });
 
   it("shows only a clean 'Last updated' line - no run id, algorithm time, or success badge", async () => {

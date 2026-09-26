@@ -7,15 +7,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import math
+import weakref
 
 from sqlalchemy import or_, select
-from sqlalchemy import insert, select
+from sqlalchemy import insert, inspect, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session, selectinload, sessionmaker
+from sqlalchemy.orm import Session, selectinload, sessionmaker, undefer_group
 
 from src.database.connection import get_session_factory
 from src.database.models.fire_event_db import FireEventDB
-from src.database.models.fire_event_ml_assessment_db import FireEventMLAssessmentDB
+from src.database.models.fire_event_ml_assessment_db import AI_HYBRID_V5_COLUMN_GROUP, FireEventMLAssessmentDB
 from src.database.models.fire_event_news_evidence_db import FireEventNewsEvidenceDB
 from src.database.models.fire_event_satellite_evidence_db import FireEventSatelliteEvidenceDB
 from src.database.models.satellite_hotspot_db import SatelliteHotspotDB
@@ -58,6 +59,30 @@ class StoredFireEvent:
     event: FireEvent
     supporting_evidence: tuple[FireEvidenceRef, ...] = ()
     created_at: datetime | None = None
+
+
+# Per database pool (weakly held): whether fire_event_ml_assessments already has
+# the ai_hybrid_v5 audit columns. Checked once per engine; the migration only
+# adds columns, so a positive answer never goes stale while the process runs.
+_ML_AI_COLUMNS_BY_POOL: "weakref.WeakKeyDictionary[object, bool]" = weakref.WeakKeyDictionary()
+_ML_AI_COLUMN_NAMES = frozenset(
+    ("policy_version", "policy_status", "history_available", "satellite_pass_count", "current_satellite_pixel_count")
+)
+
+
+def _ml_assessment_ai_columns_exist(session: Session) -> bool:
+    bind = session.get_bind()
+    pool = getattr(bind, "pool", None)
+    if pool is not None and pool in _ML_AI_COLUMNS_BY_POOL:
+        return _ML_AI_COLUMNS_BY_POOL[pool]
+    try:
+        columns = {column["name"] for column in inspect(session.connection()).get_columns("fire_event_ml_assessments")}
+    except SQLAlchemyError:
+        columns = set()
+    available = _ML_AI_COLUMN_NAMES <= columns
+    if pool is not None:
+        _ML_AI_COLUMNS_BY_POOL[pool] = available
+    return available
 
 
 class FireEventRepository:
@@ -344,7 +369,9 @@ class FireEventRepository:
             return {}
         with self._session_scope() as session:
             db_assessments = (
-                session.execute(select(FireEventMLAssessmentDB).where(FireEventMLAssessmentDB.fire_event_id.in_(ids)))
+                session.execute(
+                    self._select_ml_assessments(session).where(FireEventMLAssessmentDB.fire_event_id.in_(ids))
+                )
                 .scalars()
                 .all()
             )
@@ -713,8 +740,26 @@ class FireEventRepository:
     @staticmethod
     def _get_db_ml_assessment(session: Session, fire_event_id: int) -> FireEventMLAssessmentDB | None:
         return session.execute(
-            select(FireEventMLAssessmentDB).where(FireEventMLAssessmentDB.fire_event_id == fire_event_id)
+            FireEventRepository._select_ml_assessments(session).where(
+                FireEventMLAssessmentDB.fire_event_id == fire_event_id
+            )
         ).scalar_one_or_none()
+
+    @staticmethod
+    def _select_ml_assessments(session: Session):  # type: ignore[no-untyped-def]
+        """SELECT of ML assessment rows; the deferred ai_hybrid_v5 audit columns load WITH the row when they exist.
+
+        Those columns stay deferred so a database that has not run the
+        ai_hybrid_v5 migration keeps working (legacy modes never reference
+        them, and ai_hybrid_v5 fails with its actionable migration message).
+        On a migrated database, reading them lazily cost one extra round trip
+        per column per row, so they are loaded with the row instead - decided
+        by whether the columns exist, never by the configured decision mode.
+        """
+        statement = select(FireEventMLAssessmentDB)
+        if _ml_assessment_ai_columns_exist(session):
+            statement = statement.options(undefer_group(AI_HYBRID_V5_COLUMN_GROUP))
+        return statement
 
     @classmethod
     def _to_domain_ml_assessment(cls, db_assessment: FireEventMLAssessmentDB) -> FireEventMLAssessment:

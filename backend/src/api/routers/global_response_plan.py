@@ -32,9 +32,19 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from src.api.schemas.global_response_plan import GlobalResponsePlanResponse
-from src.services.global_planning.global_response_plan_read_service import GlobalResponsePlanReadService
+from src.repositories.fire_event_repository import FireEventRepository
+from src.services.global_planning.global_response_plan_read_service import (
+    GlobalResponsePlanReadService,
+    PersistedPlanPartsCache,
+)
 
 global_response_plan_router = APIRouter(tags=["global-response-plan"])
+
+# Immutable per-plan presentation parts, shared across requests (see
+# PersistedPlanPartsCache): re-opening the Global Response Plan page reads the
+# run header and membership rows fresh but never re-hydrates a persisted plan.
+_PLAN_PARTS_CACHE = PersistedPlanPartsCache()
+_MAX_PARALLEL_PLAN_LOADS = 4
 
 
 def get_global_response_plan_read_service() -> GlobalResponsePlanReadService:
@@ -45,7 +55,11 @@ def get_global_response_plan_read_service() -> GlobalResponsePlanReadService:
     using each one's own default sessionmaker, so no request-scoped Session
     is passed in here.
     """
-    return GlobalResponsePlanReadService()
+    return GlobalResponsePlanReadService(
+        plan_parts_cache=_PLAN_PARTS_CACHE,
+        max_parallel_plan_loads=_MAX_PARALLEL_PLAN_LOADS,
+        fire_event_repository=FireEventRepository(),
+    )
 
 
 @global_response_plan_router.get(

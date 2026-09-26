@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from src.simulation.presentation_scenario import PRESENTATION_DEFAULT_SEED, build_presentation_demo_scenario
 from src.simulation.simulation_scenario import (
     SimulationScenario,
     build_active_fire_resource_refresh_scenario,
@@ -34,6 +35,10 @@ class SimulationPreset:
     id: str
     display_name: str
     build: Callable[[int], SimulationScenario]
+    # Used when a start request omits `seed`. None (every exploratory preset)
+    # means "pick a fresh random seed"; the presentation preset pins its
+    # approved seed so the dashboard's Start Presentation is reproducible.
+    default_seed: int | None = None
 
     @property
     def simulation_duration_seconds(self) -> int:
@@ -53,6 +58,12 @@ SIMULATION_PRESETS: tuple[SimulationPreset, ...] = (
         id="operations_demo",
         display_name="Operations Demo",
         build=lambda seed: build_operations_demo_scenario(seed=seed),
+    ),
+    SimulationPreset(
+        id="presentation_demo",
+        display_name="Presentation Demo",
+        build=lambda seed: build_presentation_demo_scenario(seed=seed),
+        default_seed=PRESENTATION_DEFAULT_SEED,
     ),
     SimulationPreset(
         id="carmel_golan_active_fire",

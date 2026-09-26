@@ -21,7 +21,11 @@ from datetime import datetime, timezone
 
 from src.api.app import create_app
 from src.api.dependencies import get_active_fire_events_service
-from src.api.routers.response_plans import get_response_plan_details_service, get_response_plan_presenter
+from src.api.routers.response_plans import (
+    get_response_eligibility_reader,
+    get_response_plan_details_service,
+    get_response_plan_presenter,
+)
 from src.models.active_fire_events import ActiveFireEventsResult
 from src.models.response_plan_details import ResponsePlanDetails
 
@@ -83,6 +87,12 @@ def _override_response_plan_dependencies(app: FastAPI) -> None:
     # presenter is never actually invoked - it just needs to construct
     # without touching the database.
     app.dependency_overrides[get_response_plan_presenter] = lambda: None
+    app.dependency_overrides[get_response_eligibility_reader] = lambda: _NotEligible()
+
+
+class _NotEligible:
+    def is_response_eligible(self, fire_event_id: int) -> bool:
+        return False
 
 
 def test_response_plan_current_plan_endpoint_is_exposed_on_the_app() -> None:
@@ -92,7 +102,7 @@ def test_response_plan_current_plan_endpoint_is_exposed_on_the_app() -> None:
     response = TestClient(app).get("/api/v1/fire-events/3/response-plan")
 
     assert response.status_code == 200
-    assert response.json() == {"plan": None}
+    assert response.json() == {"plan": None, "plan_status": "not_applicable"}
 
 
 def test_response_plan_by_id_endpoint_is_exposed_on_the_app() -> None:
@@ -114,8 +124,10 @@ def test_response_plan_and_fire_event_routers_are_each_included_exactly_once() -
     """
     source = (Path(__file__).resolve().parents[2] / "src/api/routers/__init__.py").read_text(encoding="utf-8")
 
-    assert source.count("v1_router.include_router(fire_events_router)") == 1
-    assert source.count("v1_router.include_router(response_plans_router)") == 1
+    # Prefix match: the include may carry keyword arguments (e.g. the
+    # read-only request dependency), but must still appear exactly once.
+    assert source.count("v1_router.include_router(fire_events_router") == 1
+    assert source.count("v1_router.include_router(response_plans_router") == 1
 
 
 def test_existing_active_fire_events_route_still_works_after_integration() -> None:

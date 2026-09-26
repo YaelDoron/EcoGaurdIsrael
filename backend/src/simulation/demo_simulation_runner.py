@@ -831,6 +831,15 @@ class DemoSimulationRunner:
                     break
                 due_events = service.get_due_events()
                 for event in due_events:
+                    # A stop request is honoured before EVERY event, not only once
+                    # per batch: after a long event several events can be due at
+                    # once, and none of them may start once Stop was requested.
+                    # The event already executing is never interrupted - one event
+                    # (persistence -> detection -> severity/spread/targets/planning)
+                    # is the atomic unit, so a CONFIRMED fire always gets its
+                    # downstream outputs.
+                    if config.should_stop is not None and config.should_stop():
+                        break
                     handle_event(event, event_index)
                     event_index += 1
                 if not service.is_finished:

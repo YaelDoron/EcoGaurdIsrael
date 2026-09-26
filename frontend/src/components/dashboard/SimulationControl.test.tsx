@@ -63,46 +63,27 @@ describe("SimulationControl", () => {
     expect(screen.getByRole("button", { name: "Start Simulation" })).toBeEnabled();
   });
 
-  it("disables the action while PREPARING", () => {
-    render(<SimulationControl run={makeRun({ state: "preparing" })} enabled onRequestOverviewRefresh={vi.fn()} />);
+  it.each(["preparing", "running"] as const)("replaces Start with Stop Simulation while %s", (state) => {
+    render(<SimulationControl run={makeRun({ state })} enabled onRequestOverviewRefresh={vi.fn()} />);
 
-    const button = screen.getByRole("button", { name: "Preparing…" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Stop Simulation" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Start Simulation" })).not.toBeInTheDocument();
   });
 
-  it("disables the action while RUNNING", () => {
+  it.each(["completed", "completed_with_errors", "failed", "stopped"] as const)(
+    "offers Start Simulation again after %s",
+    (state) => {
+      render(<SimulationControl run={makeRun({ state })} enabled onRequestOverviewRefresh={vi.fn()} />);
+
+      expect(screen.getByRole("button", { name: "Start Simulation" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument();
+    },
+  );
+
+  it("never renders a Cancel/Pause control", () => {
     render(<SimulationControl run={makeRun({ state: "running" })} enabled onRequestOverviewRefresh={vi.fn()} />);
 
-    const button = screen.getByRole("button", { name: "Running…" });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute("aria-busy", "true");
-  });
-
-  it("offers Run Again after COMPLETED", () => {
-    render(<SimulationControl run={makeRun({ state: "completed" })} enabled onRequestOverviewRefresh={vi.fn()} />);
-
-    expect(screen.getByRole("button", { name: "Run Again" })).toBeEnabled();
-  });
-
-  it("offers Run Again after COMPLETED_WITH_ERRORS", () => {
-    render(
-      <SimulationControl run={makeRun({ state: "completed_with_errors" })} enabled onRequestOverviewRefresh={vi.fn()} />,
-    );
-
-    expect(screen.getByRole("button", { name: "Run Again" })).toBeEnabled();
-  });
-
-  it("offers Run Again after FAILED", () => {
-    render(<SimulationControl run={makeRun({ state: "failed" })} enabled onRequestOverviewRefresh={vi.fn()} />);
-
-    expect(screen.getByRole("button", { name: "Run Again" })).toBeEnabled();
-  });
-
-  it("never renders a Stop/Cancel/Pause control", () => {
-    render(<SimulationControl run={makeRun({ state: "running" })} enabled onRequestOverviewRefresh={vi.fn()} />);
-
-    for (const forbidden of [/stop/i, /cancel/i, /pause/i]) {
+    for (const forbidden of [/cancel/i, /pause/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
   });
@@ -115,7 +96,7 @@ describe("SimulationControl", () => {
     await user.click(screen.getByRole("button", { name: "Start Simulation" }));
 
     await waitFor(() => expect(startSimulationMock).toHaveBeenCalledTimes(1));
-    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "operations_demo", reset_demo_state: true });
+    expect(startSimulationMock).toHaveBeenCalledWith({ preset: "presentation_demo", reset_demo_state: true });
   });
 
   it("a rapid double click issues only one POST", async () => {
@@ -147,15 +128,15 @@ describe("SimulationControl", () => {
     await waitFor(() => expect(onRequestOverviewRefresh).toHaveBeenCalledTimes(1));
   });
 
-  it("Run Again sends the same fixed demo request", async () => {
+  it("starting again after a finished run sends the same fixed demo request (with its reset)", async () => {
     const user = userEvent.setup();
     startSimulationMock.mockResolvedValue(makeRun({ state: "preparing" }));
     render(<SimulationControl run={makeRun({ state: "completed" })} enabled onRequestOverviewRefresh={vi.fn()} />);
 
-    await user.click(screen.getByRole("button", { name: "Run Again" }));
+    await user.click(screen.getByRole("button", { name: "Start Simulation" }));
 
     await waitFor(() =>
-      expect(startSimulationMock).toHaveBeenCalledWith({ preset: "operations_demo", reset_demo_state: true }),
+      expect(startSimulationMock).toHaveBeenCalledWith({ preset: "presentation_demo", reset_demo_state: true }),
     );
     expect(startSimulationMock).toHaveBeenCalledTimes(1);
   });
@@ -223,8 +204,9 @@ describe("SimulationControl", () => {
     await user.click(screen.getByRole("button", { name: "Start Simulation" }));
 
     await waitFor(() => expect(startSimulationMock).toHaveBeenCalledTimes(1));
-    // No "Run Again"/"Completed" label appears merely from the 202 response -
-    // only a change to the `run` prop (a fresh A6 poll) would produce that.
-    expect(screen.queryByRole("button", { name: "Run Again" })).not.toBeInTheDocument();
+    // No Stop/"Completed" state appears merely from the 202 response - only
+    // a change to the `run` prop (a fresh A6 poll) would produce that.
+    expect(screen.queryByRole("button", { name: "Stop Simulation" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

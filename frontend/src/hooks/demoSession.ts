@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { getCurrentSimulationRun } from "../api/simulation";
-import { ApiError } from "../api/errors";
 import type { SimulationRunStatus } from "../types/simulation";
 
 /**
@@ -25,7 +24,7 @@ import type { SimulationRunStatus } from "../types/simulation";
  */
 const DEMO_RUN_STORAGE_KEY = "ecoguard.demoSession.runId";
 
-const LIVE_STATES: ReadonlySet<SimulationRunStatus["state"]> = new Set(["preparing", "running"]);
+const LIVE_STATES: ReadonlySet<SimulationRunStatus["state"]> = new Set(["preparing", "running", "stopping"]);
 
 export interface DemoSimulationSummary {
   enabled: boolean;
@@ -82,27 +81,68 @@ export function useDemoDataVisibility(simulation: DemoSimulationSummary | null):
   return simulation === null ? true : isDemoDataVisible(simulation);
 }
 
+/** Whether the run is PREPARING/RUNNING/STOPPING (work may still produce new data). */
+export function isDemoRunLive(simulation: DemoSimulationSummary | null): boolean {
+  return isLiveRun(simulation?.run ?? null);
+}
+
 /**
- * One-shot read of the current simulation run for pages that do not get it
- * from the Operations Overview (e.g. the Global Response Plan page). A 403
- * means simulation control is disabled (never hide data); any other failure,
- * or still loading, yields `null`, which `useDemoDataVisibility` treats as
- * "show" - the gate fails open rather than hiding real data.
+ * Read of the current simulation run for pages that do not get it from the
+ * Operations Overview (e.g. the Global Response Plan page). `null` only while
+ * the first request is in flight (which `useDemoDataVisibility` treats as
+ * "show"). A 403 means simulation control is disabled, and any other failure
+ * is treated the same way ({ enabled: false } - never hide data): the gate
+ * fails open rather than hiding real data, and a caller can rely on a
+ * non-null result meaning "settled".
+ *
+ * With `pollIntervalMs`, the run state is re-read that long after each
+ * request settles (an in-memory endpoint, a few ms), so a page left open
+ * notices a run starting, running and ending - a one-shot read taken at
+ * mount would keep a page gated on a stale state forever. A failed re-read
+ * keeps the last known state.
  */
-export function useCurrentDemoSimulation(): DemoSimulationSummary | null {
+export function useCurrentDemoSimulation(pollIntervalMs?: number): DemoSimulationSummary | null {
   const [summary, setSummary] = useState<DemoSimulationSummary | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
-    getCurrentSimulationRun(controller.signal)
-      .then((run) => setSummary({ enabled: true, run }))
-      .catch((error: unknown) => {
-        if (error instanceof ApiError && error.status === 403) {
-          setSummary({ enabled: false, run: null });
-        }
-      });
-    return () => controller.abort();
-  }, []);
+    let controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+    let settled = false;
+
+    const read = () => {
+      controller = new AbortController();
+      getCurrentSimulationRun(controller.signal)
+        .then((run) => {
+          settled = true;
+          setSummary((previous) =>
+            previous !== null && previous.enabled && JSON.stringify(previous.run) === JSON.stringify(run)
+              ? previous
+              : { enabled: true, run },
+          );
+        })
+        .catch(() => {
+          if (!controller.signal.aborted && !settled) {
+            // 403 (control disabled) or an unknown state - fail open either way.
+            settled = true;
+            setSummary({ enabled: false, run: null });
+          }
+        })
+        .finally(() => {
+          if (!disposed && pollIntervalMs !== undefined) {
+            timer = setTimeout(read, pollIntervalMs);
+          }
+        });
+    };
+    read();
+    return () => {
+      disposed = true;
+      controller.abort();
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+    };
+  }, [pollIntervalMs]);
 
   return summary;
 }

@@ -85,3 +85,23 @@
     height: 450px;
   }
 }
+
+/* Plan lifecycle (GlobalPlanCoverage): generating / updating notices. */
+.global-response-plan-page__lifecycle-detail {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.global-response-plan-page__lifecycle--updating {
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.global-response-plan-page__lifecycle--updating .global-response-plan-page__lifecycle-detail {
+  text-align: left;
+}

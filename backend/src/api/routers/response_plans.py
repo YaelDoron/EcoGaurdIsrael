@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse
 
 from src.api.response_plan_presenter import ResponsePlanPresenter
 from src.api.schemas.response_plans import ResponsePlanEnvelopeResponse
+from src.repositories.fire_event_repository import FireEventRepository
 from src.repositories.fire_station_repository import FireStationRepository
 from src.repositories.graph_node_read_repository import GraphNodeReadRepository
 from src.repositories.response_plan_repository import ResponsePlanRepository
@@ -97,6 +98,20 @@ def get_response_plan_presenter() -> ResponsePlanPresenter:
     )
 
 
+class ResponseEligibilityReader:
+    """Whether a FireEvent is currently response-eligible (CONFIRMED) - one cheap read."""
+
+    def __init__(self, fire_event_repository: FireEventRepository | None = None) -> None:
+        self._fire_event_repository = fire_event_repository or FireEventRepository()
+
+    def is_response_eligible(self, fire_event_id: int) -> bool:
+        return fire_event_id in self._fire_event_repository.get_response_eligible_fire_event_ids()
+
+
+def get_response_eligibility_reader() -> ResponseEligibilityReader:
+    return ResponseEligibilityReader()
+
+
 @response_plans_router.get(
     "/fire-events/{fire_event_id}/response-plan",
     response_model=ResponsePlanEnvelopeResponse,
@@ -106,12 +121,19 @@ def get_current_response_plan(
     fire_event_id: int = Path(..., gt=0),
     service: ResponsePlanDetailsService = Depends(get_response_plan_details_service),
     presenter: ResponsePlanPresenter = Depends(get_response_plan_presenter),
+    eligibility: ResponseEligibilityReader = Depends(get_response_eligibility_reader),
 ) -> ResponsePlanEnvelopeResponse:
-    """Return the FireEvent's current planning-safe plan, fully enriched, or `{"plan": null}` if none exists."""
+    """Return the FireEvent's current planning-safe plan, fully enriched, or `{"plan": null}` if none exists.
+
+    A missing plan for a CONFIRMED (response-eligible) event is reported as
+    `plan_status="generating"` - the confirmed-fire pipeline produces it -
+    never as "no plan"; anything else is `not_applicable`.
+    """
     details = service.get_current_plan_details(fire_event_id)
     if details is None:
-        return ResponsePlanEnvelopeResponse(plan=None)
-    return ResponsePlanEnvelopeResponse(plan=presenter.present(details))
+        status = "generating" if eligibility.is_response_eligible(fire_event_id) else "not_applicable"
+        return ResponsePlanEnvelopeResponse(plan=None, plan_status=status)
+    return ResponsePlanEnvelopeResponse(plan=presenter.present(details), plan_status="available")
 
 
 @response_plans_router.get(

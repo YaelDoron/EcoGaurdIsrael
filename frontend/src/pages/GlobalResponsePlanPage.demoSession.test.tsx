@@ -53,7 +53,50 @@ describe("GlobalResponsePlanPage demo-session gate", () => {
 
     renderPage();
 
-    expect(await screen.findByText("No materialized generation yet")).toBeInTheDocument();
+    expect(await screen.findByText("No response plan available")).toBeInTheDocument();
+  });
+
+  it("renders the empty state without waiting for, or even requesting, the slow plan read", async () => {
+    getCurrentSimulationRunMock.mockResolvedValue({ run_id: "run-old", state: "completed" });
+    // A plan read that would never finish must not keep the page loading.
+    getCurrentGlobalResponsePlanMock.mockReturnValue(new Promise(() => {}));
+
+    renderPage();
+
+    expect(await screen.findByText("No response plan available")).toBeInTheDocument();
+    expect(screen.queryByText(/Loading global response plan/)).not.toBeInTheDocument();
+    expect(getCurrentGlobalResponsePlanMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the empty state when no simulation has ever run (idle backend)", async () => {
+    getCurrentSimulationRunMock.mockResolvedValue({ run_id: null, state: "idle" });
+
+    renderPage();
+
+    expect(await screen.findByText("No response plan available")).toBeInTheDocument();
+    expect(getCurrentGlobalResponsePlanMock).not.toHaveBeenCalled();
+  });
+
+  it("fails open: an unknown simulation state still loads and shows the plan", async () => {
+    getCurrentSimulationRunMock.mockRejectedValue(new Error("network"));
+
+    renderPage();
+
+    expect(await screen.findByText(/Last updated/)).toBeInTheDocument();
+  });
+
+  it("aborts the in-flight plan read when the user navigates away", async () => {
+    getCurrentSimulationRunMock.mockResolvedValue({ run_id: "run-live", state: "running" });
+    getCurrentGlobalResponsePlanMock.mockReturnValue(new Promise(() => {}));
+
+    const { unmount } = renderPage();
+    await vi.waitFor(() => expect(getCurrentGlobalResponsePlanMock).toHaveBeenCalledTimes(1));
+    const signal = getCurrentGlobalResponsePlanMock.mock.calls[0][0] as AbortSignal;
+    expect(signal.aborted).toBe(false);
+
+    unmount();
+
+    expect(signal.aborted).toBe(true);
   });
 
   it("shows the plan while a simulation is running", async () => {
@@ -62,7 +105,7 @@ describe("GlobalResponsePlanPage demo-session gate", () => {
     renderPage();
 
     expect(await screen.findByText(/Last updated/)).toBeInTheDocument();
-    expect(screen.queryByText("No materialized generation yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("No response plan available")).not.toBeInTheDocument();
   });
 
   it("shows the plan of a completed run this session started", async () => {

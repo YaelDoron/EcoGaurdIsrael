@@ -167,7 +167,7 @@ def test_envelope_wraps_plan_response():
 def test_envelope_allows_null_plan():
     envelope = ResponsePlanEnvelopeResponse(plan=None)
 
-    assert envelope.model_dump(mode="json") == {"plan": None}
+    assert envelope.model_dump(mode="json") == {"plan": None, "plan_status": None}
 
 
 def test_path_coordinates_preserve_order():

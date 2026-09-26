@@ -25,7 +25,7 @@ resolved at runtime).
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -145,6 +145,14 @@ class ResponsePlanDetailResponse(BaseModel):
 
 
 class ResponsePlanEnvelopeResponse(BaseModel):
-    """Shared Epic 6 top-level envelope: `{"plan": ...}`, or `{"plan": null}` when none exists."""
+    """Shared Epic 6 top-level envelope: `{"plan": ...}`, or `{"plan": null}` when none exists.
+
+    `plan_status` (current-plan endpoint only) tells a missing plan apart:
+    `generating` - the FireEvent is CONFIRMED/response-eligible, so its plan
+    is being produced by the confirmed-fire pipeline; `not_applicable` - no
+    plan is expected (e.g. a SUSPECTED, monitoring-only event);
+    `available` - `plan` is set. None on the plan-by-id endpoint.
+    """
 
     plan: Optional[ResponsePlanDetailResponse]
+    plan_status: Optional[Literal["available", "generating", "not_applicable"]] = None

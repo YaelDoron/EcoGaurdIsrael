@@ -101,39 +101,65 @@ npm test
 ```
 ## Demo simulation and presentation mode
 
-The dashboard's **Start Simulation / Run Again** button runs the `operations_demo` preset with a new
-backend-chosen seed every time (mandatory demo-state reset first), so normal runs vary.
+The dashboard has one simulation control:
 
-For a rehearsable presentation, start the same preset with an explicit seed through the API:
+* **Start Simulation** (shown when no run is active, including after a completed or stopped run)
+  runs the `presentation_demo` preset: the mandatory demo-state reset, then a fixed, paced
+  30-minute timeline with the approved seed **594** (pinned by the backend), so every run replays
+  the same story.
+* **Stop Simulation** (shown while a run is active) is acknowledged immediately (the run becomes
+  `stopping`, the button shows "Stopping..."): no new scheduled event starts, the event already
+  executing finishes as one unit (evidence -> detection -> severity -> spread -> targets -> routing
+  -> allocation -> plans, so a CONFIRMED fire never loses its downstream outputs), then the run is
+  `stopped`. Everything generated stays available for inspection (nothing is deleted; the next
+  start resets as usual).
+
+Response plans are produced asynchronously after a fire is CONFIRMED, so the plan pages report the
+lifecycle derived from persisted data: "Generating response plan..." (a confirmed fire has no plan
+yet), "Updating response plan... Currently covers X of Y confirmed fires" (the shown plan does not
+yet include every confirmed fire), and "No response plan available" only when no fire is confirmed.
+Only CONFIRMED (response-eligible) fires count; SUSPECTED fires are monitoring-only and are listed as
+such, never as pending. The Global Response Plan re-checks every 5 s while a run is live (in every
+state, so an open page picks up a newly confirmed fire), shows nothing from the previous run while the
+new one is still preparing, and after the run ends keeps checking only while a plan is still being
+completed (at most ~1 minute).
+
+The same through the API (the randomized `operations_demo` preset remains available here for
+exploratory runs):
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/v1/simulation/runs \
   -H "Content-Type: application/json" \
-  -d '{"preset":"operations_demo","seed":893,"reset_demo_state":true}'
+  -d '{"preset":"presentation_demo","reset_demo_state":true}'
+curl -X POST http://127.0.0.1:8000/api/v1/simulation/runs/current/stop
 ```
 
-Same preset + same seed reproduces the incidents, schedule, weather values, hotspot properties,
-news text and therefore the AI feature values and statuses; only absolute timestamps follow the run
-start. Two conditions: rehearse and present in the same satellite day/night window (the day/night
-flag uses the event's UTC hour, day = 06:00-18:00 UTC, and is an AI feature), and with the same
-News-LLM (Groq) availability.
+Only the schedule is designed; the seed drives every generated value (weather, hotspots, news), so the
+same seed reproduces the values, AI feature values and statuses - for a daytime or a night-time start
+(checked offline with the real model: `python -m scripts.select_presentation_seed`). Absolute
+timestamps follow the run start.
 
-Recorded seed-893 run (T+ = seconds after the run starts; a few seconds of processing lag):
+Recorded run (T+ = seconds after the run starts; each confirmation's severity/spread/planning work
+takes ~25-35 s and delays the following event):
 
-| T+ | Galilee (Har Kamon) | Judean Hills | Golan Heights |
-|---|---|---|---|
-| ~55 | | | 1st satellite pass: AI 0.32, below SUSPECTED threshold, no event |
-| ~95 | 1st pass: **SUSPECTED**, AI 0.58 | | |
-| ~115 | | 1st pass: **SUSPECTED**, AI 0.58 | |
-| ~175 | | News (Hebrew): AI 0.61 | |
-| ~215 | | 2nd pass: **CONFIRMED**, AI 0.97 | |
-| ~225 | | Severity critical; spread **propagates** (grassland): 48 cells at 30 min, 168 at 60 min | |
-| ~240 | | Response targets + response plan | |
-| ~250 | News: AI 0.61 | | |
-| ~310 | | | 2nd pass: **SUSPECTED**, AI 0.77 (stays monitoring-only) |
-| ~355 | 2nd pass: **CONFIRMED**, AI 0.81 | | |
-| ~370 | Severity critical; spread **risk only** (Tree cover → GENERIC_TREE): 8 cells, 0 propagated | | |
-| ~395 | Response plan; Global Response Plan covers Galilee + Judean Hills only | | |
+| T+ | What happens |
+|---|---|
+| 4-19 | Quiet start: fire-danger updates for Carmel, Judean Hills, Galilee |
+| ~24 | Judean Hills 1st satellite pass: **SUSPECTED**, AI 0.53 |
+| ~32 | Galilee 1st pass: **SUSPECTED**, AI 0.63 |
+| ~39 | Judean Hills news report (Hebrew): AI 0.57 |
+| ~49 | Judean Hills 2nd pass: **CONFIRMED**, AI 0.95 |
+| ~56-75 | Judean Hills severity critical; spread **propagates** (grassland): 48 cells at 30 min, 168 at 60 min; response plan |
+| ~84 | Galilee 2nd pass: **CONFIRMED**, AI 0.98 |
+| ~91-121 | Galilee severity critical; spread **risk only** (Tree cover -> GENERIC_TREE: 8 cells, 0 propagated); response plan |
+| ~130 | Galilee news report |
+| ~175+ | Golan Heights appears (**SUSPECTED**, monitoring only); Carmel escalates into a fire at ~7-8 min |
+| until 1800 | One update every 26-36 s: weather, satellite passes and news for every fire, fire-danger updates |
+
+Spread wording: under the current homogeneous-fuel PROPAGATOR model, tree-dominant land cover
+(GENERIC_TREE) stays below the 0.45 propagation threshold at the simulated fuel moisture even in
+strong wind, so forest fires show "risk only" cells, while grassland reaches the threshold with
+~13 km/h of aligned wind.
 
 ## Known limitations
 
@@ -144,3 +170,4 @@ Recorded seed-893 run (T+ = seconds after the run starts; a few seconds of proce
 5. Copernicus reports generic tree cover only, so tree-dominant areas use the EcoGuard-derived **GENERIC_TREE** fuel (no tree-species identification).
 6. News translation uses a Groq LLM that may be **unavailable** (e.g. HTTP 401); readable Hebrew is then shown as-is.
 7. Road networks come from a Neon cache with live OpenStreetMap/Overpass fallback; an Overpass outage slows planning for uncached areas.
+8. Simulation events are processed one at a time: after a confirmation, downstream severity/spread/planning work delays the following scheduled updates by up to ~40 s, and a delayed update can arrive shortly after the previous one.

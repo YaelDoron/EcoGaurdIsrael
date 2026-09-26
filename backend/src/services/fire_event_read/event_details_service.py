@@ -25,7 +25,10 @@ persisted prediction at all is simply omitted from `spread_predictions`.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import datetime, timezone
+from typing import Callable
 
 from src.api.schemas.event_details import (
     BaselineComparisonResponse,
@@ -108,7 +111,13 @@ class EventDetailsService:
         satellite_hotspot_repository: SatelliteHotspotRepository | None = None,
         news_repository: NewsRepository | None = None,
         response_plan_details_service: ResponsePlanDetailsService | None = None,
+        max_parallel_loads: int = 1,
     ) -> None:
+        """`max_parallel_loads` > 1 (opt-in, used by the API dependency) runs the
+        snapshot's independent section reads concurrently: each is its own chain
+        of remote database round trips, so a sequential snapshot costs their sum.
+        The default keeps the plain sequential read."""
+        self._max_parallel_loads = max(1, max_parallel_loads)
         self._fire_event_repository = fire_event_repository or FireEventRepository()
         self._fire_severity_assessment_repository = (
             fire_severity_assessment_repository or FireSeverityAssessmentRepository()
@@ -146,20 +155,29 @@ class EventDetailsService:
         if stored_event is None:
             return None
 
-        db_stations = self._fire_station_repository.get_all_stations()
-        station_ids = [str(db_station.id) for db_station in db_stations]
-        db_resources = self._firefighting_resource_repository.get_resources_for_stations(station_ids)
-        plan_details = self._response_plan_details_service.get_current_plan_details(fire_event_id)
+        sections = self._load_sections(
+            {
+                "stations_and_resources": self._load_stations_and_resources,
+                "plan_details": lambda: self._response_plan_details_service.get_current_plan_details(fire_event_id),
+                "severity": lambda: self._load_severity(fire_event_id),
+                "ml_assessment": lambda: self._load_ml_assessment(fire_event_id),
+                "detection_evidence": lambda: self._load_detection_evidence(stored_event.supporting_evidence),
+                "spread_predictions": lambda: self._load_spread_predictions(fire_event_id),
+                "targets": lambda: self._load_targets(fire_event_id, snapshot_time),
+            }
+        )
+        db_stations, db_resources = sections["stations_and_resources"]
+        plan_details = sections["plan_details"]
 
         return EventDetailsResult(
             as_of=snapshot_time,
             fire_event=self._to_fire_event_response(stored_event.id, stored_event.event),
-            severity=self._load_severity(fire_event_id),
-            ml_assessment=self._load_ml_assessment(fire_event_id),
+            severity=sections["severity"],
+            ml_assessment=sections["ml_assessment"],
             danger=None,
-            detection_evidence=self._load_detection_evidence(stored_event.supporting_evidence),
-            spread_predictions=self._load_spread_predictions(fire_event_id),
-            targets=self._load_targets(fire_event_id, snapshot_time),
+            detection_evidence=sections["detection_evidence"],
+            spread_predictions=sections["spread_predictions"],
+            targets=sections["targets"],
             stations=self._to_station_responses(db_stations),
             resources=self._to_resource_responses(db_resources),
             station_summaries=self._build_station_summaries(fire_event_id, db_stations, db_resources, plan_details),
@@ -167,6 +185,23 @@ class EventDetailsService:
                 self._to_current_response_plan_response(plan_details) if plan_details is not None else None
             ),
         )
+
+    def _load_sections(self, loaders: dict[str, Callable[[], object]]) -> dict[str, object]:
+        """Run independent read-only section loaders, concurrently when enabled.
+
+        Each worker runs in a copy of the caller's context, so a request's
+        read-only database scope (src.api.read_only_request) still applies.
+        """
+        if self._max_parallel_loads == 1:
+            return {name: loader() for name, loader in loaders.items()}
+        with ThreadPoolExecutor(max_workers=min(self._max_parallel_loads, len(loaders))) as executor:
+            futures = {name: executor.submit(copy_context().run, loader) for name, loader in loaders.items()}
+            return {name: future.result() for name, future in futures.items()}
+
+    def _load_stations_and_resources(self) -> tuple[tuple, tuple]:
+        db_stations = self._fire_station_repository.get_all_stations()
+        station_ids = [str(db_station.id) for db_station in db_stations]
+        return db_stations, self._firefighting_resource_repository.get_resources_for_stations(station_ids)
 
     def _load_severity(self, fire_event_id: int) -> SeverityAssessmentResponse | None:
         stored_severity = self._fire_severity_assessment_repository.get_latest_for_event(fire_event_id)

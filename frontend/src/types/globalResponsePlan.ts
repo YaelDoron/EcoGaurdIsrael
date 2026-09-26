@@ -85,7 +85,29 @@ export interface GlobalPlanResponse {
  * is `null` only when no GlobalPlanningRun has ever materialized a
  * ResponsePlan yet - never an error.
  */
+/**
+ * How far the latest plan covers the CURRENTLY confirmed (response-eligible)
+ * fires - derived by the backend from persisted state on every read.
+ * - `none`: no confirmed fire and no plan
+ * - `generating`: confirmed fire(s) pending, no plan covers any yet
+ * - `updating`: a plan exists, but some confirmed fire is still pending
+ * - `current`: every confirmed fire is covered (or explicitly unplannable)
+ */
+export interface GlobalPlanCoverage {
+  state: "none" | "generating" | "updating" | "current";
+  eligible_fire_event_ids: number[];
+  covered_fire_event_ids: number[];
+  pending_fire_event_ids: number[];
+  unplannable_fire_event_ids: number[];
+  /** Active SUSPECTED (monitoring-only) fires - never response-eligible, never counted. */
+  monitoring_fire_event_ids?: number[];
+  eligible_count: number;
+  covered_count: number;
+}
+
 export interface GlobalResponsePlanResponse {
   as_of: string;
   plan: GlobalPlanResponse | null;
+  /** Absent only from older/partial responses; treated as "no lifecycle information". */
+  coverage?: GlobalPlanCoverage | null;
 }

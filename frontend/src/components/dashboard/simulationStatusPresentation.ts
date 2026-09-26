@@ -7,7 +7,7 @@ export interface SimulationControlPresentation {
 }
 
 /**
- * Task A9, Part 7/20: the Start/Run Again control's label + disabled/busy
+ * Task A9, Part 7/20: the Start Simulation control's label + disabled/busy
  * state, derived only from the backend's own run state (+ the mutation's
  * local `isStarting` flag) - never a frontend-invented progress guess.
  * PREPARING/RUNNING (or an in-flight start POST) always disable the
@@ -24,13 +24,36 @@ export function describeSimulationControl(run: SimulationRunStatus | null, isSta
   }
 
   switch (run.state) {
+    // While a run is active the control shows Stop Simulation instead
+    // (SimulationControl); this start state is never clickable then.
     case "preparing":
-      return { label: "Preparing…", disabled: true, busy: true };
     case "running":
-      return { label: "Running…", disabled: true, busy: true };
+    case "stopping":
+      return { label: "Start Simulation", disabled: true, busy: true };
     case "completed":
     case "completed_with_errors":
     case "failed":
-      return { label: "Run Again", disabled: false, busy: false };
+    case "stopped":
+      return { label: "Start Simulation", disabled: false, busy: false };
+  }
+}
+
+/** Whether the backend run is PREPARING/RUNNING (Stop is offered only then). */
+export function isSimulationActive(run: SimulationRunStatus | null): boolean {
+  return run !== null && (run.state === "preparing" || run.state === "running" || run.state === "stopping");
+}
+
+/** A short, factual outcome line for a finished run (none while idle/active). */
+export function describeSimulationOutcome(run: SimulationRunStatus | null): string | null {
+  switch (run?.state) {
+    case "stopping":
+      return "Stopping simulation...";
+    case "stopped":
+      return "Simulation stopped";
+    case "completed":
+    case "completed_with_errors":
+      return "Simulation completed";
+    default:
+      return null;
   }
 }
