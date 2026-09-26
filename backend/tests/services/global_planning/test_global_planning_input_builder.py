@@ -944,7 +944,7 @@ def test_input_builder_never_imports_the_haversine_route_fallback():
 
     forbidden_fragments = ("HaversineFallbackCalculator", "haversine_fallback_calculator")
     for relative_path in ("src/services/global_planning/global_planning_input_builder.py",):
-        path = Path(relative_path)
+        path = Path(__file__).resolve().parents[3] / relative_path
         tree = ast.parse(path.read_text(encoding="utf-8"))
         violations = []
         for node in ast.walk(tree):

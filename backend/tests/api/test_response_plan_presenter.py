@@ -658,7 +658,7 @@ def test_presenter_module_does_not_import_forbidden_dependencies():
         "planning_orchestrator",
         "current_response_plan_resolver",
     )
-    path = Path("src/api/response_plan_presenter.py")
+    path = (Path(__file__).resolve().parents[2] / "src/api/response_plan_presenter.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

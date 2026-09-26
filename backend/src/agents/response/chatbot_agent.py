@@ -35,6 +35,7 @@ from src.models.active_fire_events import (
     ActiveFireEventSummary,
 )
 from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
+from src.models.fire_spread_prediction import PROPAGATION_THRESHOLD
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.fire_event_read.event_details_service import EventDetailsService
 
@@ -50,12 +51,11 @@ _VALID_CHAT_ROLES = ("user", "assistant")
 # interprets `contents`, only forwards it - see gemini_client.py's docstring.
 _GEMINI_ROLE_BY_CHAT_ROLE = {"user": "user", "assistant": "model"}
 
-# US 4.2 methodology 1.1: a stored spread cell with spread_probability >= this
+# US 4.2 methodology: a stored spread cell with spread_probability >= this
 # threshold is propagation-capable ("spreading"); below it (but > 0) it is a
-# risk-only cell. Mirrors fire_spread_config.PROPAGATION_THRESHOLD - this
-# module may not import src.calculators (architecture guard), so the value is
-# pinned to the real constant by a test instead.
-_SPREAD_PROPAGATION_THRESHOLD = 0.5
+# risk-only cell. The same single constant the calculator uses - imported from
+# src.models (this module may not import src.calculators, architecture guard).
+_SPREAD_PROPAGATION_THRESHOLD = PROPAGATION_THRESHOLD
 
 # User-facing meaning of each stored FireSpreadInsufficientDataReason. Worded
 # to claim no more than the reason itself proves.

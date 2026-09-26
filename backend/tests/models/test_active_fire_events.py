@@ -224,7 +224,7 @@ def test_active_fire_events_does_not_import_calculation_persistence_or_http_modu
         "calculators",
         "services",
     )
-    path = Path("backend/src/models/active_fire_events.py")
+    path = (Path(__file__).resolve().parents[3] / "backend/src/models/active_fire_events.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

@@ -182,7 +182,7 @@ def test_methodology_identity_difference_changes_fingerprint(methodology, method
 def test_methodology_1_1_fingerprint_differs_from_legacy_1_0_so_old_predictions_are_not_reused():
     # Methodology 1.1 emits risk-only cells; a stored 1.0 prediction (which
     # dropped them) for identical inputs must never be matched as a NO_OP.
-    assert METHODOLOGY_VERSION == "1.1"
+    assert METHODOLOGY_VERSION != "1.0"
     current = make_state()
     legacy = FireSpreadEffectiveState.from_input(
         fire_event_id=FIRE_EVENT_ID,
@@ -191,6 +191,28 @@ def test_methodology_1_1_fingerprint_differs_from_legacy_1_0_so_old_predictions_
     )
 
     assert current.fingerprint != legacy.fingerprint
+
+
+@pytest.mark.parametrize(
+    "stored_version, reason",
+    [
+        ("1.1", "old /3.6 wind-unit conversion (fixed in 1.2)"),
+        ("1.2", "PROPAGATION_THRESHOLD 0.50 (calibrated to 0.45 in 1.3)"),
+        ("1.3", "Tree cover -> INSUFFICIENT_DATA (GENERIC_TREE fuel in 1.4)"),
+    ],
+)
+def test_current_fingerprint_never_reuses_predictions_from_superseded_methodology(stored_version, reason):
+    # The fingerprint covers methodology_version but not the threshold/wind constants,
+    # so each calculator-output change bumps the version; stored predictions from an
+    # older version must be recomputed, never matched as NO_OP.
+    assert METHODOLOGY_VERSION == "1.4"
+    previous = FireSpreadEffectiveState.from_input(
+        fire_event_id=FIRE_EVENT_ID,
+        spread_input=make_input(),
+        methodology_version=stored_version,
+    )
+
+    assert make_state().fingerprint != previous.fingerprint, reason
 
 
 @pytest.mark.parametrize(
@@ -237,9 +259,9 @@ def test_architecture_guard_for_task_1_production_modules():
         "resource_allocation",
     )
     production_files = [
-        Path("backend/src/models/fire_spread_effective_state.py"),
-        Path("backend/src/models/operational_refresh_trigger_type.py"),
-        Path("backend/src/services/operational_refresh/operational_refresh_policy.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/fire_spread_effective_state.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/models/operational_refresh_trigger_type.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/services/operational_refresh/operational_refresh_policy.py"),
     ]
 
     violations = []

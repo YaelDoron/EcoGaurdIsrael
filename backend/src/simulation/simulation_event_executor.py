@@ -147,6 +147,7 @@ class SimulationEventExecutor:
             scenario_type=incident.scenario_type,
             timestamp=event_timestamp,
             location=incident.location,
+            seed_key=simulation_event_seed_key(event),
         )
         measurements = tuple(generated.measurements)
         saved_count = 0
@@ -258,6 +259,7 @@ class SimulationEventExecutor:
             scenario_type=incident.scenario_type,
             timestamp=event_timestamp,
             location=incident.location,
+            seed_key=simulation_event_seed_key(event),
         )
         hotspots = tuple(self._translate_hotspots(generated.hotspots))
         saved_count = 0
@@ -300,6 +302,7 @@ class SimulationEventExecutor:
             timestamp=event_timestamp,
             location=incident.location,
             report_index=event.source_event_index,
+            seed_key=simulation_event_seed_key(event),
         )
         reports = tuple(self._translate_reports(generated.reports))
         saved_count = 0
@@ -370,6 +373,16 @@ def _warn_if_still_untranslated(field_description: str, value: str | None) -> No
             field_description,
             value,
         )
+
+
+def simulation_event_seed_key(event: SimulationEvent) -> str:
+    """The event's schedule identity - its RNG seed input for generated content.
+
+    Deterministic for a given preset + seed (the schedule is), and independent of
+    the wall-clock run start, so the same seed reproduces the same weather values,
+    hotspot properties and news text; only absolute timestamps follow the start.
+    """
+    return f"{event.event_type.value}:{event.source_event_index}@{event.offset_seconds}"
 
 
 def simulation_event_timestamp(scenario_started_at: datetime, event: SimulationEvent) -> datetime:

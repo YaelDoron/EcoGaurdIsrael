@@ -48,7 +48,7 @@ from src.calculators.fire_spread.fire_spread_config import (
     WIND_D5,
     WIND_NEGATIVE_RESCALE,
     WIND_POSITIVE_RESCALE,
-    WIND_SPEED_CLIP_MS,
+    WIND_SPEED_CLIP_KMH,
     WIND_TOPOGRAPHY_A,
 )
 from src.models.fire_spread_calculation import FireSpreadCalculation
@@ -57,7 +57,6 @@ from src.models.fire_spread_input import FireSpreadInput
 from src.models.fire_spread_prediction import FireSpreadPredictionCell
 from src.utils.geo import destination_point
 
-_KMH_PER_MS = 3.6
 _RADIUS_TOLERANCE_KM = 1e-9
 
 # Moore neighborhood, deterministic order N, NE, E, SE, S, SW, W, NW. Each
@@ -163,15 +162,17 @@ def wind_topography_factor(
     slope = 0, so it is folded in as a constant rather than exposed as an
     input (see fire_spread_prediction.md §5).
     """
-    wind_speed_ms = min(wind_speed_kmh / _KMH_PER_MS, WIND_SPEED_CLIP_MS)
+    # km/h, unconverted: the official probability factor takes the model's raw
+    # km/h wind (the m/s conversion exists only in its rate-of-spread functions).
+    wind_speed = min(max(wind_speed_kmh, 0.0), WIND_SPEED_CLIP_KMH)
 
     wind_math_angle_rad = _wind_math_angle_rad(wind_direction_deg)
     propagation_math_angle_rad = _propagation_math_angle_rad(propagation_bearing_deg)
 
     w_effect_module = (
         WIND_TOPOGRAPHY_A
-        + WIND_D1 * (WIND_D2 * math.tanh((wind_speed_ms / WIND_D3) - WIND_D4))
-        + wind_speed_ms / WIND_D5
+        + WIND_D1 * (WIND_D2 * math.tanh((wind_speed / WIND_D3) - WIND_D4))
+        + wind_speed / WIND_D5
     )
     a = (w_effect_module - 1.0) / 4.0
     w_effect_on_direction = (

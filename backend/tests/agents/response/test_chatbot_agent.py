@@ -1293,7 +1293,7 @@ def test_agent_does_not_import_domain_agents_calculators_or_repositories():
         "src.external.news",
         "src.external.geocoding",
     )
-    path = Path("backend/src/agents/response/chatbot_agent.py")
+    path = (Path(__file__).resolve().parents[4] / "backend/src/agents/response/chatbot_agent.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):
@@ -1595,9 +1595,19 @@ def _compact_spread_for(*predictions):
 
 
 def test_spread_threshold_mirror_matches_the_methodology_constant():
-    from src.calculators.fire_spread.fire_spread_config import PROPAGATION_THRESHOLD
+    # One numeric source of truth (src.models.fire_spread_prediction): the chatbot and the
+    # calculator config must reference the SAME constant, and the chatbot must not
+    # re-declare its own literal.
+    import inspect
+    import re
 
-    assert _SPREAD_PROPAGATION_THRESHOLD == PROPAGATION_THRESHOLD
+    from src.agents.response import chatbot_agent
+    from src.calculators.fire_spread.fire_spread_config import PROPAGATION_THRESHOLD as CONFIG_THRESHOLD
+    from src.models.fire_spread_prediction import PROPAGATION_THRESHOLD
+
+    assert _SPREAD_PROPAGATION_THRESHOLD is PROPAGATION_THRESHOLD
+    assert CONFIG_THRESHOLD is PROPAGATION_THRESHOLD
+    assert not re.search(r"_SPREAD_PROPAGATION_THRESHOLD\s*=\s*[0-9.]", inspect.getsource(chatbot_agent))
 
 
 def test_valid_risk_only_ring_is_not_reported_as_spreading():

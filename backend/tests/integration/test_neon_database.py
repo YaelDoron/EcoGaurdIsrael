@@ -16,7 +16,7 @@ credentials.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
@@ -31,7 +31,8 @@ pytestmark = pytest.mark.integration
 
 TEST_EXTERNAL_STATION_ID = 999999
 TEST_STATION_NAME = "ECOGUARD_INTEGRATION_TEST_STATION"
-TEST_TIMESTAMP = datetime(2026, 1, 1, 0, 0, 0)
+# UTC-aware: weather_observations.timestamp is TIMESTAMPTZ (scripts/migrate_satellite_and_weather_timestamps.py)
+TEST_TIMESTAMP = datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def _delete_test_rows() -> None:

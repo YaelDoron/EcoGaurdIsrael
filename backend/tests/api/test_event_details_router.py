@@ -691,7 +691,7 @@ def test_router_module_does_not_import_agents_or_external_providers():
         "src.calculators",
         "sqlalchemy",
     )
-    path = Path("backend/src/api/routers/fire_events.py")
+    path = (Path(__file__).resolve().parents[3] / "backend/src/api/routers/fire_events.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

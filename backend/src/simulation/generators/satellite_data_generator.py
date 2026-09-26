@@ -43,8 +43,14 @@ class SatelliteDataGenerator:
         scenario_type: ScenarioType,
         timestamp: datetime,
         location: SimulationLocation = DEFAULT_CARMEL_LOCATION,
+        seed_key: str | None = None,
     ) -> GeneratedSatelliteData:
-        """Generate deterministic simulated satellite data for one simulation timestamp."""
+        """Generate deterministic simulated satellite data for one simulation timestamp.
+
+        `seed_key` (the event's schedule identity, passed by the executor) replaces
+        the absolute timestamp in the RNG seed; `timestamp` still sets detected_at
+        and the physical day/night flag.
+        """
         if not isinstance(scenario_type, ScenarioType):
             raise ValueError(f"scenario_type must be a ScenarioType, got {scenario_type!r}")
         if not isinstance(timestamp, datetime):
@@ -61,6 +67,7 @@ class SatelliteDataGenerator:
                 timestamp=timestamp,
                 location=location,
                 hotspot_index=hotspot_index,
+                seed_key=seed_key,
             )
             for hotspot_index in range(1, SIMULATED_HOTSPOTS_PER_ACTIVE_FIRE_EVENT + 1)
         )
@@ -72,6 +79,7 @@ class SatelliteDataGenerator:
         timestamp: datetime,
         location: SimulationLocation,
         hotspot_index: int,
+        seed_key: str | None = None,
     ) -> SatelliteHotspot:
         rng = random.Random(
             self._derive_hotspot_seed(
@@ -79,6 +87,7 @@ class SatelliteDataGenerator:
                 timestamp=timestamp,
                 location=location,
                 hotspot_index=hotspot_index,
+                seed_key=seed_key,
             )
         )
         latitude, longitude = self._generate_nearby_coordinates(rng, location)
@@ -101,12 +110,13 @@ class SatelliteDataGenerator:
         timestamp: datetime,
         location: SimulationLocation,
         hotspot_index: int,
+        seed_key: str | None = None,
     ) -> int:
         seed_material = "|".join(
             [
                 str(self._seed),
                 scenario_type.value,
-                timestamp.isoformat(),
+                seed_key if seed_key is not None else timestamp.isoformat(),
                 location.name,
                 f"{location.latitude:.6f}",
                 f"{location.longitude:.6f}",

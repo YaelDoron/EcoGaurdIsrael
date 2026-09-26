@@ -8,6 +8,7 @@ import { ErrorState } from "../feedback/ErrorState";
 import { SeverityBadge } from "../status/SeverityBadge";
 import { StatusBadge } from "../status/StatusBadge";
 import { FIRE_DANGER_PRESENTATION } from "../status/fireDangerPresentation";
+import { formatLikelihood, peakAiLikelihood } from "../status/fireDetectionPresentation";
 import { GLOBAL_PLANNING_RUN_STATUS_LABEL } from "./activityFeedPresentation";
 import type {
   FireDangerAssessmentDetail,
@@ -49,7 +50,7 @@ export function OperationsActivityDrawer({ selectedItem, onClose }: OperationsAc
   return (
     <div className="operations-activity-drawer" role="dialog" aria-labelledby="operations-activity-drawer-title">
       <div className="operations-activity-drawer__header">
-        <h2 id="operations-activity-drawer-title" className="operations-activity-drawer__title">
+        <h2 id="operations-activity-drawer-title" className="operations-activity-drawer__title" dir="auto">
           {translateIfUntranslated(selectedItem.title)}
         </h2>
         <button
@@ -95,7 +96,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
   return (
     <div className="operations-activity-drawer__row">
       <dt>{label}</dt>
-      <dd>{children}</dd>
+      <dd dir="auto">{children}</dd>
     </div>
   );
 }
@@ -161,7 +162,12 @@ function FireEventDetailView({ detail }: { detail: FireEventActivityDetails }) {
       <DetailRow label="Status">
         <StatusBadge status={detail.status} />
       </DetailRow>
-      <DetailRow label="Confidence">{Math.round(detail.detection_confidence * 100)}%</DetailRow>
+      {/* AI-created events store their PEAK AI likelihood here - call it that, never "confidence". */}
+      {peakAiLikelihood(detail.methodology, detail.detection_confidence) !== null ? (
+        <DetailRow label="Peak AI likelihood">{formatLikelihood(detail.detection_confidence)}</DetailRow>
+      ) : (
+        <DetailRow label="Confidence">{Math.round(detail.detection_confidence * 100)}%</DetailRow>
+      )}
       <DetailRow label="Latest severity">
         <SeverityBadge level={detail.latest_severity?.level ?? null} />
       </DetailRow>

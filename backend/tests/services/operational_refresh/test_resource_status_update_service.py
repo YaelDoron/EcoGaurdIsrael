@@ -238,8 +238,8 @@ def test_resource_status_update_modules_do_not_import_out_of_scope_systems():
         "ResponsePlan",
     )
     production_files = [
-        Path("backend/src/services/operational_refresh/resource_status_update_service.py"),
-        Path("backend/src/services/operational_refresh/resource_status_update_result.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/resource_status_update_service.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/operational_refresh/resource_status_update_result.py"),
     ]
 
     violations = []

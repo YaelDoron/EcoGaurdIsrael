@@ -37,13 +37,14 @@ _INACTIVE_EVENT_STATUSES = {FireEventStatus.RESOLVED, FireEventStatus.DISMISSED}
 # at ingestion, by WeatherMapper), which is exactly FireSpreadCalculator's
 # `wind_speed_kmh` contract - so it is passed through with no conversion here.
 
-# Verified official PROPAGATOR classes reachable from EcoGuard's exact
-# Copernicus dominant_land_cover labels (backend/src/mappers/vegetation_mapper.py).
-# Only semantically unambiguous labels are mapped; "Tree cover" and "Moss and
-# lichen cover" have no defensible single PROPAGATOR class (see
-# fire_spread_prediction.md §4.3.2 -- Task 4A "Approach A") and are
-# intentionally absent from this table, as is any other/unknown label.
+# Fuel classes reachable from EcoGuard's exact Copernicus dominant_land_cover
+# labels (backend/src/mappers/vegetation_mapper.py). "Tree cover" maps to the
+# EcoGuard-derived GENERIC_TREE (Task 14, §4.3.2) - Copernicus gives no tree
+# species, so no specific PROPAGATOR tree class is claimed. "Moss and lichen
+# cover" still has no defensible class and, like any other/unknown label, is
+# intentionally absent (-> INSUFFICIENT_DATA).
 _DOMINANT_LAND_COVER_TO_FUEL_CLASS: dict[str, FireSpreadFuelClass] = {
+    "Tree cover": FireSpreadFuelClass.GENERIC_TREE,
     "Shrub cover": FireSpreadFuelClass.SHRUBS,
     "Grass cover": FireSpreadFuelClass.GRASSLAND,
     "Crop cover": FireSpreadFuelClass.AGRO_FORESTRY,
@@ -343,9 +344,9 @@ def _equilibrium_moisture_percent(observation: WeatherObservation) -> float:
 def _map_dominant_land_cover(dominant_land_cover: str | None) -> FireSpreadFuelClass | None:
     """Map an EcoGuard vegetation label to a verified PROPAGATOR fuel class.
 
-    Returns None for a missing snapshot, an ambiguous label ("Tree cover",
-    "Moss and lichen cover"), or any unrecognized label -- callers must treat
-    None as INSUFFICIENT_DATA, never as a default/fallback fuel class.
+    Returns None for a missing snapshot, the ambiguous "Moss and lichen cover",
+    or any unrecognized label -- callers must treat None as INSUFFICIENT_DATA,
+    never as a default/fallback fuel class. "Tree cover" -> GENERIC_TREE.
     """
     if dominant_land_cover is None:
         return None

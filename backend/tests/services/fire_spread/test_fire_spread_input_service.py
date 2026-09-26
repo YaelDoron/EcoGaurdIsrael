@@ -418,7 +418,7 @@ def test_missing_vegetation_snapshot_is_insufficient():
     assert result.weather_observation_id == 101
 
 
-@pytest.mark.parametrize("label", ["Tree cover", "Moss and lichen cover"])
+@pytest.mark.parametrize("label", ["Moss and lichen cover"])
 def test_ambiguous_vegetation_label_is_insufficient(label):
     service, *_ = build_service(stored_assessment=make_assessment(dominant_land_cover=label))
 
@@ -484,11 +484,6 @@ from src.models import FireSpreadInsufficientDataReason as Reason  # noqa: E402
             dict(stored_assessment=make_assessment(dominant_land_cover=None)),
             Reason.MISSING_VEGETATION,
             id="missing-vegetation",
-        ),
-        pytest.param(
-            dict(stored_assessment=make_assessment(dominant_land_cover="Tree cover")),
-            Reason.UNSUPPORTED_VEGETATION,
-            id="tree-cover",
         ),
         pytest.param(
             dict(stored_assessment=make_assessment(dominant_land_cover="Moss and lichen cover")),
@@ -737,13 +732,15 @@ def test_prepare_input_rejects_invalid_fire_event_id():
         ("Permanent water cover", FireSpreadFuelClass.BARE_SOIL),
         ("Seasonal water cover", FireSpreadFuelClass.BARE_SOIL),
         ("Snow cover", FireSpreadFuelClass.BARE_SOIL),
+        # EcoGuard-derived generic tree fuel - no species claimed (Task 14, §4.3.2).
+        ("Tree cover", FireSpreadFuelClass.GENERIC_TREE),
     ],
 )
 def test_unambiguous_labels_map_to_expected_fuel_class(label, expected):
     assert _map_dominant_land_cover(label) is expected
 
 
-@pytest.mark.parametrize("label", ["Tree cover", "Moss and lichen cover", "Unknown Label", ""])
+@pytest.mark.parametrize("label", ["Moss and lichen cover", "Unknown Label", ""])
 def test_ambiguous_or_unknown_labels_return_none(label):
     assert _map_dominant_land_cover(label) is None
 

@@ -297,7 +297,7 @@ def test_router_module_does_not_import_forbidden_dependencies():
         "response_optimization",
         "planning_orchestrator",
     )
-    path = Path("src/api/routers/global_response_plan.py")
+    path = (Path(__file__).resolve().parents[2] / "src/api/routers/global_response_plan.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):
@@ -331,6 +331,6 @@ def test_router_file_does_not_touch_shared_integration_files():
     """Guardrail smoke-check: this router's own module must not import from
     or modify `src.api.routers.__init__`/`src.api.dependencies` - it defines
     its own local dependency factory instead (see module docstring)."""
-    path = Path("src/api/routers/global_response_plan.py")
+    path = (Path(__file__).resolve().parents[2] / "src/api/routers/global_response_plan.py")
     source = path.read_text(encoding="utf-8")
     assert "src.api.dependencies" not in source

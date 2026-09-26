@@ -1,4 +1,5 @@
 import { DEMO_SIMULATION_REQUEST } from "../../config/demoSimulation";
+import { rememberDemoRun } from "../../hooks/demoSession";
 import { useStartSimulation } from "../../hooks/useStartSimulation";
 import { ApiError } from "../../api/errors";
 import { describeSimulationControl } from "./simulationStatusPresentation";
@@ -17,7 +18,7 @@ export interface SimulationControlProps {
 /**
  * The Operations Overview's one demo action (Task A9): Start Simulation /
  * Run Again, using the single fixed `DEMO_SIMULATION_REQUEST` (preset
- * operations_demo, seed 42, reset_demo_state=true) - never a preset picker,
+ * operations_demo, backend-chosen seed, reset_demo_state=true) - never a preset picker,
  * seed field, or reset checkbox. Owns only mutation-local state
  * (`useStartSimulation`'s isStarting/error); long-lived run state is always
  * read from the `run` prop (A6 overview polling), never mirrored into a
@@ -34,7 +35,9 @@ export function SimulationControl({ run, enabled, onRequestOverviewRefresh }: Si
 
   const handleClick = () => {
     start(DEMO_SIMULATION_REQUEST)
-      .then(() => {
+      .then((status) => {
+        // This tab started the run: keep showing its results after it completes.
+        rememberDemoRun(status.run_id);
         onRequestOverviewRefresh();
       })
       .catch((caught: unknown) => {

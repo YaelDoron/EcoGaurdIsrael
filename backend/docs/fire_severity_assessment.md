@@ -79,6 +79,8 @@ Future observations are ignored. Boundary values exactly at the freshness limit 
 
 Vegetation uses Copernicus Data Space land-cover statistics through `CopernicusLandCoverClient`, then maps fractional cover categories to a compact `VegetationData` snapshot.
 
+Sampling (corrected in Task 13): the Sentinel Hub Statistical API is queried for the Copernicus Global Land Cover 100 m (2019) fractional-cover bands over a square of half-side `VEGETATION_RADIUS_KM` (1 km → a 2 km × 2 km box in EPSG:4326, longitude span scaled by cos(latitude)), sampled on an explicit `width × height` pixel grid at ~100 m (20 × 20 = 400 pixels). `resx`/`resy` are not used: the API defines them in the bounds CRS's units, so the former `resx = resy = 100` meant 100 **degrees** per pixel and reduced the whole box to one resampled pixel. Each class percentage is the band mean over the valid (non-`dataMask`) pixels; `sample_count`/`no_data_count` are carried on the statistics, and a box with no valid pixels is "no usable vegetation". The in-process statistics cache key includes `COPERNICUS_SAMPLING_VERSION`.
+
 Copernicus configuration is provided through:
 
 - `COPERNICUS_CLIENT_ID`

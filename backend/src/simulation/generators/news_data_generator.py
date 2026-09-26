@@ -69,8 +69,14 @@ class NewsDataGenerator:
         timestamp: datetime,
         location: SimulationLocation = DEFAULT_CARMEL_LOCATION,
         report_index: int = 0,
+        seed_key: str | None = None,
     ) -> GeneratedNewsData:
-        """Generate deterministic simulated news data for one simulation timestamp."""
+        """Generate deterministic simulated news data for one simulation timestamp.
+
+        `seed_key` (the event's schedule identity, passed by the executor) replaces
+        the absolute timestamp in the RNG seed; `timestamp` still sets
+        published_at/fetched_at and the report's unique source URL.
+        """
         if not isinstance(scenario_type, ScenarioType):
             raise ValueError(f"scenario_type must be a ScenarioType, got {scenario_type!r}")
         if not isinstance(timestamp, datetime):
@@ -89,6 +95,7 @@ class NewsDataGenerator:
                 timestamp=timestamp,
                 location=location,
                 report_index=report_index,
+                seed_key=seed_key,
             )
         )
         report_location_name = self._report_location_name(location)
@@ -122,12 +129,13 @@ class NewsDataGenerator:
         timestamp: datetime,
         location: SimulationLocation,
         report_index: int,
+        seed_key: str | None = None,
     ) -> int:
         seed_material = "|".join(
             [
                 str(self._seed),
                 scenario_type.value,
-                timestamp.isoformat(),
+                seed_key if seed_key is not None else timestamp.isoformat(),
                 location.name,
                 f"{location.latitude:.6f}",
                 f"{location.longitude:.6f}",

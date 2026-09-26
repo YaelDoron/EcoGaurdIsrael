@@ -50,6 +50,42 @@ describe("OperationsActivityDrawer", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it.each([
+    ["ECOGUARD_AI_HYBRID_DETECTION", "Peak AI likelihood", "84%"],
+    ["ECOGUARD_MULTI_SOURCE_DETECTION", "Confidence", "84%"],
+  ])("labels a %s fire event's detection value as %s (never AI 'confidence')", async (methodology, label, value) => {
+    getOperationsActivityDetailMock.mockResolvedValue({
+      activity_type: "fire_event",
+      entity_id: 42,
+      occurred_at: "2026-09-20T11:00:00Z",
+      title: "Fire Event #42",
+      location: null,
+      details: {
+        fire_event_id: 42,
+        status: "confirmed",
+        detection_confidence: 0.84,
+        detected_at: "2026-09-20T11:00:00Z",
+        updated_at: "2026-09-20T11:05:00Z",
+        created_at: "2026-09-20T10:59:30Z",
+        latitude: 32.7,
+        longitude: 35.0,
+        methodology,
+        methodology_version: "1.0",
+        location_name: "Carmel Demo Area",
+        evidence: { satellite_hotspot_ids: [], news_report_ids: [] },
+        latest_severity: null,
+      },
+    } satisfies OperationsActivityDetailResponse);
+
+    renderDrawer(selectedItem());
+
+    const term = await screen.findByText(label);
+    expect(term.nextElementSibling).toHaveTextContent(value);
+    if (label === "Peak AI likelihood") {
+      expect(screen.queryByText("Confidence")).not.toBeInTheDocument();
+    }
+  });
+
   it("fetches only the selected item's detail, exactly once", async () => {
     getOperationsActivityDetailMock.mockResolvedValue({
       activity_type: "fire_event",
@@ -203,7 +239,7 @@ describe("OperationsActivityDrawer", () => {
       entity_id: 1,
       occurred_at: "2026-09-20T10:11:42Z",
       title: "Weather Conditions — Galilee Demo Area",
-      location: { latitude: 32.965, longitude: 35.381 },
+      location: { latitude: 32.915, longitude: 35.345 },
       details: {
         fire_danger_assessment_id: 1,
         area_name: "Galilee Demo Area",

@@ -864,8 +864,8 @@ def test_static_architecture_guardrail_no_recomputation_or_current_state_lookups
         "FirefightingResourceRepository",
     )
     production_files = [
-        Path("backend/src/services/baseline_comparison/baseline_comparison_service.py"),
-        Path("backend/src/services/baseline_comparison/baseline_comparison_ports.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/baseline_comparison/baseline_comparison_service.py"),
+        (Path(__file__).resolve().parents[4] / "backend/src/services/baseline_comparison/baseline_comparison_ports.py"),
     ]
 
     violations = []

@@ -3,6 +3,8 @@
 All HTTP calls are mocked - no real network access is performed and no real
 Gemini API key is required to run these tests.
 """
+from __future__ import annotations
+
 from unittest.mock import patch
 
 import pytest

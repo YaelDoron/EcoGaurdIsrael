@@ -198,6 +198,7 @@ def test_weather_event_generates_and_saves_three_observations_with_correct_input
             "scenario_type": ScenarioType.ACTIVE_FIRE,
             "timestamp": TIMESTAMP,
             "location": GOLAN_LOCATION,
+            "seed_key": "weather:0@40",  # schedule identity, not wall clock
         }
     ]
     assert len(repository.station_save_calls) == 3

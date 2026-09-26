@@ -555,8 +555,8 @@ def test_ga_configuration_edge_cases_still_produce_valid_plan(repository, persis
 
 
 def test_us_5_2_architecture_guards():
-    pure_paths = list(Path("backend/src/calculators/response_optimization").glob("*.py")) + [
-        Path("backend/src/models/response_plan_chromosome.py"),
+    pure_paths = list((Path(__file__).resolve().parents[3] / "backend/src/calculators/response_optimization").glob("*.py")) + [
+        (Path(__file__).resolve().parents[3] / "backend/src/models/response_plan_chromosome.py"),
     ]
     pure_forbidden_modules = (
         "sqlalchemy",
@@ -590,7 +590,7 @@ def test_us_5_2_architecture_guards():
             if any(fragment in module for fragment in pure_forbidden_modules):
                 violations.append((str(path), module))
 
-    agent_tree = ast.parse(Path("backend/src/agents/analysis/response_optimization_agent.py").read_text(encoding="utf-8"))
+    agent_tree = ast.parse((Path(__file__).resolve().parents[3] / "backend/src/agents/analysis/response_optimization_agent.py").read_text(encoding="utf-8"))
     for node in ast.walk(agent_tree):
         if isinstance(node, ast.Name) and node.id in agent_forbidden_names:
             violations.append(("response_optimization_agent.py", node.id))
@@ -603,9 +603,9 @@ def test_us_5_2_architecture_guards():
             violations.append(("response_optimization_agent.py", module))
 
     status_mutation_paths = [
-        Path("backend/src/agents/analysis/response_optimization_agent.py"),
-        Path("backend/src/repositories/response_plan_repository.py"),
-        *Path("backend/src/calculators/response_optimization").glob("*.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/agents/analysis/response_optimization_agent.py"),
+        (Path(__file__).resolve().parents[3] / "backend/src/repositories/response_plan_repository.py"),
+        *(Path(__file__).resolve().parents[3] / "backend/src/calculators/response_optimization").glob("*.py"),
     ]
     for path in status_mutation_paths:
         text = path.read_text(encoding="utf-8")

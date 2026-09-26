@@ -146,14 +146,16 @@ def test_map_targets_batches_multiple_targets():
 def test_map_resource_logs_a_warning_when_the_snap_is_egregiously_far(caplog):
     # ~900m from node 1 - well past SNAP_DISTANCE_WARNING_KM (0.5km) but
     # still comfortably inside MAX_SNAP_DISTANCE_KM (5.0km), so the resource
-    # still maps normally. The "Silent Failures" fix: this must still be
-    # logged loudly, since a genuinely local fetch's node should be within a
-    # few hundred meters, not ~900m - see global_planning_input_builder.py's
+    # still maps normally. The "Silent Failures" fix: this must never be
+    # silent, since a genuinely local fetch's node should be within a few
+    # hundred meters, not ~900m - see global_planning_input_builder.py's
     # _STATION_COVERAGE_CHECK_RADIUS_KM for the production case this guards.
+    # Commit 0e3a3f8 deliberately lowered the guard from WARNING to DEBUG, so it
+    # is captured at DEBUG here (the record must still be emitted).
     service = NodeMappingService()
     resource = make_resource(latitude=32.708, longitude=35.000)
 
-    with caplog.at_level("WARNING", logger="src.services.routing.node_mapping_service"):
+    with caplog.at_level("DEBUG", logger="src.services.routing.node_mapping_service"):
         node_id = service.map_resource(resource, [NODE_1, NODE_2, NODE_3], EDGES)
 
     assert node_id == 1
@@ -164,7 +166,8 @@ def test_map_resource_does_not_warn_for_a_genuinely_close_snap(caplog):
     service = NodeMappingService()
     resource = make_resource(latitude=32.700, longitude=35.0005)  # ~46m from node 1
 
-    with caplog.at_level("WARNING", logger="src.services.routing.node_mapping_service"):
+    # DEBUG, matching the guard's level (0e3a3f8) - otherwise this check would pass vacuously.
+    with caplog.at_level("DEBUG", logger="src.services.routing.node_mapping_service"):
         node_id = service.map_resource(resource, [NODE_1, NODE_2, NODE_3], EDGES)
 
     assert node_id == 1

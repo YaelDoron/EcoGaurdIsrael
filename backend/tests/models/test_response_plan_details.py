@@ -328,7 +328,7 @@ def test_response_plan_details_does_not_import_calculation_or_persistence_module
         "calculators",
         "services",
     )
-    path = Path("backend/src/models/response_plan_details.py")
+    path = (Path(__file__).resolve().parents[3] / "backend/src/models/response_plan_details.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     violations = []
     for node in ast.walk(tree):

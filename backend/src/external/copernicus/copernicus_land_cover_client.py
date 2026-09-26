@@ -22,6 +22,18 @@ COPERNICUS_LAND_COVER_TIME_FROM = "2019-01-01T00:00:00Z"
 COPERNICUS_LAND_COVER_TIME_TO = "2020-01-01T00:00:00Z"
 TOKEN_EXPIRY_SAFETY_SECONDS = 60
 
+# Statistics sampling (Task 13). The Sentinel Hub Statistical API defines
+# `resx`/`resy` in the units of `input.bounds.properties.crs` (official
+# OpenAPI, StatisticalRequestAggregation); with EPSG:4326 bounds the former
+# `resx = resy = 100` meant 100 DEGREES per pixel, so the whole box was ONE
+# resampled pixel (live sampleCount = 1). The request now sets an explicit
+# pixel grid (`width`/`height`) at the product's native ~100 m resolution,
+# which is independent of the CRS's units.
+TARGET_SAMPLE_RESOLUTION_M = 100.0
+# Bumped whenever the request's sampling changes, and part of the statistics
+# cache key, so results fetched under an older sampling are never reused.
+COPERNICUS_SAMPLING_VERSION = "grid-100m-v2"
+
 FRACTIONAL_COVER_BANDS: dict[str, str] = {
     "tree": "Tree_Cover_Fraction",
     "shrub": "Shrub_Cover_Fraction",
@@ -130,12 +142,26 @@ class CopernicusCoverFraction:
 
 @dataclass(frozen=True)
 class CopernicusLandCoverStatistics:
-    """Compact raw land-cover statistics for a requested geometry."""
+    """Compact raw land-cover statistics for a requested geometry.
+
+    Each `cover_fractions` value is the band MEAN over the valid pixels of the
+    sampled grid (Sentinel Hub excludes `dataMask = 0` pixels from `mean`), i.e.
+    the average fractional cover of that class across `valid_pixel_count`
+    pixels. Pixel counts are None only for payloads that omit them.
+    """
 
     cover_fractions: tuple[CopernicusCoverFraction, ...]
     source: str
     dataset_year: int
     radius_km: float
+    sample_count: int | None = None
+    no_data_count: int | None = None
+
+    @property
+    def valid_pixel_count(self) -> int | None:
+        if self.sample_count is None or self.no_data_count is None:
+            return None
+        return self.sample_count - self.no_data_count
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "cover_fractions", tuple(self.cover_fractions))
@@ -204,6 +230,7 @@ class CopernicusLandCoverClient:
             self._collection_id,
             COPERNICUS_LAND_COVER_TIME_FROM,
             COPERNICUS_LAND_COVER_TIME_TO,
+            COPERNICUS_SAMPLING_VERSION,
         )
         if cache_key in self._statistics_cache:
             return self._statistics_cache[cache_key]
@@ -304,6 +331,7 @@ class CopernicusLandCoverClient:
         return access_token
 
     def _build_statistics_request(self, latitude: float, longitude: float, radius_km: float) -> dict:
+        grid_pixels = _grid_pixels_per_side(radius_km)
         return {
             "input": {
                 "bounds": {
@@ -328,8 +356,8 @@ class CopernicusLandCoverClient:
                     "to": COPERNICUS_LAND_COVER_TIME_TO,
                 },
                 "aggregationInterval": {"of": "P1Y"},
-                "resx": 100,
-                "resy": 100,
+                "width": grid_pixels,
+                "height": grid_pixels,
                 "evalscript": _EVALSCRIPT,
             },
         }
@@ -350,6 +378,8 @@ def _parse_statistics_payload(payload: dict, radius_km: float) -> CopernicusLand
         raise CopernicusInvalidResponseError("Copernicus statistics response has malformed vegetation bands.")
 
     fractions = []
+    sample_count: int | None = None
+    no_data_count: int | None = None
     for index, category in enumerate(_OUTPUT_BAND_NAMES):
         band_stats = bands.get(f"B{index}")
         if not isinstance(band_stats, dict):
@@ -357,6 +387,9 @@ def _parse_statistics_payload(payload: dict, radius_km: float) -> CopernicusLand
         stats = band_stats.get("stats")
         if not isinstance(stats, dict):
             continue
+        if sample_count is None:
+            sample_count = _optional_count(stats.get("sampleCount"))
+            no_data_count = _optional_count(stats.get("noDataCount"))
         mean = stats.get("mean")
         if isinstance(mean, bool) or not isinstance(mean, (int, float)) or not math.isfinite(mean):
             continue
@@ -364,6 +397,8 @@ def _parse_statistics_payload(payload: dict, radius_km: float) -> CopernicusLand
             continue
         fractions.append(CopernicusCoverFraction(category=category, fraction=max(0.0, float(mean))))
 
+    if sample_count is not None and no_data_count is not None and sample_count - no_data_count <= 0:
+        return None  # every sampled pixel was masked out: no usable land cover
     if not fractions:
         return None
     return CopernicusLandCoverStatistics(
@@ -371,7 +406,20 @@ def _parse_statistics_payload(payload: dict, radius_km: float) -> CopernicusLand
         source="COPERNICUS_GLOBAL_LAND_COVER_100M_API",
         dataset_year=COPERNICUS_LAND_COVER_DATASET_YEAR,
         radius_km=radius_km,
+        sample_count=sample_count,
+        no_data_count=no_data_count,
     )
+
+
+def _optional_count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        return None
+    return int(value)
+
+
+def _grid_pixels_per_side(radius_km: float) -> int:
+    """Pixels per side of the (2 x radius) square box at TARGET_SAMPLE_RESOLUTION_M."""
+    return max(1, round(2.0 * radius_km * 1000.0 / TARGET_SAMPLE_RESOLUTION_M))
 
 
 def _square_geometry(latitude: float, longitude: float, radius_km: float) -> dict:

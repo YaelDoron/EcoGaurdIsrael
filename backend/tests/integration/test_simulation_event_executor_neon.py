@@ -26,6 +26,7 @@ from src.simulation import (
 )
 from src.simulation.generators.news_data_generator import NewsDataGenerator
 from src.simulation.generators.satellite_data_generator import SatelliteDataGenerator
+from src.simulation.simulation_event_executor import simulation_event_seed_key
 from src.simulation.generators.weather_data_generator import WeatherDataGenerator
 
 pytestmark = pytest.mark.integration
@@ -123,15 +124,21 @@ def _delete_expected_weather_rows(connection) -> None:  # noqa: ANN001
 
 
 def _delete_expected_satellite_rows(connection) -> None:  # noqa: ANN001
-    for location, timestamp in (
-        (TEST_LOCATION, TEST_STARTED_AT),
-        (TEST_LOCATION, TEST_STARTED_AT.replace(second=20)),
-        (TEST_SECOND_LOCATION, TEST_STARTED_AT.replace(second=35)),
+    # The executor seeds generated content with the event's schedule key (not the
+    # wall-clock timestamp), so cleanup regenerates with the same keys; the legacy
+    # timestamp-seeded entries are kept so rows from older runs are removed too.
+    for location, timestamp, seed_key in (
+        (TEST_LOCATION, TEST_STARTED_AT, None),
+        (TEST_LOCATION, TEST_STARTED_AT.replace(second=20), None),
+        (TEST_SECOND_LOCATION, TEST_STARTED_AT.replace(second=35), None),
+        (TEST_LOCATION, TEST_STARTED_AT.replace(second=20), "satellite:0@20"),
+        (TEST_SECOND_LOCATION, TEST_STARTED_AT.replace(second=35), "satellite:0@35"),
     ):
         generated = SatelliteDataGenerator(seed=TEST_SEED).generate(
             scenario_type=ScenarioType.ACTIVE_FIRE,
             timestamp=timestamp,
             location=location,
+            seed_key=seed_key,
         )
         for hotspot in generated.hotspots:
             connection.execute(
@@ -247,6 +254,7 @@ def test_satellite_event_executes_generates_and_persists_to_neon() -> None:
         scenario_type=ScenarioType.ACTIVE_FIRE,
         timestamp=timestamp,
         location=TEST_LOCATION,
+        seed_key=simulation_event_seed_key(event),  # mirror the executor's generation
     ).hotspots[0]
     stored = SatelliteHotspotRepository().get_hotspots_between(timestamp, timestamp)
     assert any(
@@ -330,11 +338,13 @@ def test_multi_incident_satellite_events_persist_distinct_hotspots_to_neon() -> 
         scenario_type=ScenarioType.ACTIVE_FIRE,
         timestamp=first_timestamp,
         location=TEST_LOCATION,
+        seed_key=simulation_event_seed_key(carmel_event),
     ).hotspots[0]
     expected_second = SatelliteDataGenerator(seed=TEST_SEED).generate(
         scenario_type=ScenarioType.ACTIVE_FIRE,
         timestamp=second_timestamp,
         location=TEST_SECOND_LOCATION,
+        seed_key=simulation_event_seed_key(second_event),
     ).hotspots[0]
     assert (expected_first.latitude, expected_first.longitude) in stored_coordinates
     assert (expected_second.latitude, expected_second.longitude) in stored_coordinates
