@@ -26,16 +26,18 @@ def test_default_seed_satisfies_every_story_check_day_and_night(story):
     assert ok, notes
 
 
-def test_story_has_suspected_then_confirmed_fires_and_a_monitoring_only_fire(story):
+def test_story_has_three_suspected_then_confirmed_fires(story):
     _, notes = story
     by_incident = {note.split(":")[0]: note for note in notes if note.startswith("incident-")}
 
     judean = by_incident["incident-judean-hills-01"]
     galilee = by_incident["incident-galilee-01"]
-    golan = by_incident["incident-golan-01"]
+    jerusalem_forest = by_incident["incident-jerusalem-forest-01"]
     # Both opening fires: SUSPECTED on the first pass, CONFIRMED on the second (T+35 / T+41).
     assert "T+19 sat" in judean and "T+35 sat p=" in judean and judean.index("SUSPECTED") < judean.index("CONFIRMED")
     assert "T+24 sat" in galilee and "T+41 sat p=" in galilee and galilee.index("SUSPECTED") < galilee.index("CONFIRMED")
     assert judean.split("T+35 sat")[1].split("->")[0].strip().endswith("CONFIRMED")
     assert galilee.split("T+41 sat")[1].split("->")[0].strip().endswith("CONFIRMED")
-    assert "SUSPECTED" in golan and "CONFIRMED" not in golan
+    # Fire C (the spread demonstration): SUSPECTED at T+160, CONFIRMED at T+237.
+    assert jerusalem_forest.split("T+160 sat")[1].split("->")[0].strip().endswith("SUSPECTED")
+    assert jerusalem_forest.split("T+237 sat")[1].split("->")[0].strip().endswith("CONFIRMED")

@@ -36,6 +36,9 @@ class WeatherScenarioProfile:
     wind_speed_kmh: tuple[float, float]
     wind_gust_extra_kmh: tuple[float, float]
     rainfall_mm: tuple[float, float]
+    # Meteorological "from" direction. The default full circle draws exactly the
+    # same value as before this field existed, so every existing profile is unchanged.
+    wind_direction_deg: tuple[float, float] = (0.0, 360.0)
 
 
 WEATHER_SCENARIO_PROFILES: dict[ScenarioType, WeatherScenarioProfile] = {
@@ -119,12 +122,15 @@ class WeatherDataGenerator:
         timestamp: datetime,
         location: SimulationLocation = DEFAULT_CARMEL_LOCATION,
         seed_key: str | None = None,
+        profile: WeatherScenarioProfile | None = None,
     ) -> GeneratedWeatherData:
         """Generate deterministic simulated weather data for one simulation timestamp.
 
         `seed_key` (the event's schedule identity, passed by the executor) replaces
         the absolute timestamp in the RNG seed, so values reproduce for the same
         seed regardless of when the run starts; `timestamp` still stamps the data.
+        `profile` optionally replaces the scenario type's default ranges for one
+        incident (SimulatedIncident.weather_profile); values are still seeded draws.
         """
         if not isinstance(scenario_type, ScenarioType):
             raise ValueError(f"scenario_type must be a ScenarioType, got {scenario_type!r}")
@@ -133,7 +139,10 @@ class WeatherDataGenerator:
         if not isinstance(location, SimulationLocation):
             raise ValueError(f"location must be a SimulationLocation, got {location!r}")
 
-        profile = WEATHER_SCENARIO_PROFILES[scenario_type]
+        if profile is None:
+            profile = WEATHER_SCENARIO_PROFILES[scenario_type]
+        elif not isinstance(profile, WeatherScenarioProfile):
+            raise ValueError(f"profile must be a WeatherScenarioProfile, got {profile!r}")
         measurements = tuple(
             self._generate_station_weather(
                 scenario_type=scenario_type,
@@ -176,7 +185,7 @@ class WeatherDataGenerator:
                 self._uniform(rng, profile.relative_humidity_percent)
             ),
             wind_speed=wind_speed,
-            wind_direction=self._round_measurement(rng.uniform(0.0, 360.0)),
+            wind_direction=self._round_measurement(rng.uniform(*profile.wind_direction_deg)),
             wind_gust=wind_gust,
             rainfall=self._generate_rainfall(rng, profile),
         )

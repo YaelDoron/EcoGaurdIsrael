@@ -17,7 +17,10 @@ start (the V5 features include the day/night flag of the observation time):
   * Galilee: SUSPECTED on its first pass, CONFIRMED on its second pass, and
     risk-only spread (below the threshold with a margin for both the
     GENERIC_TREE and SHRUBS readings of its borderline land cover);
-  * Golan: SUSPECTED on its first pass.
+  * Jerusalem Forest (fire C): SUSPECTED on its first pass, CONFIRMED on its
+    second pass, and every weather observation its Presentation weather
+    profile generates lets its audited Copernicus fuel ('Shrub cover' ->
+    SHRUBS) propagate (downwind p >= PROPAGATION_THRESHOLD).
 
 Approximation (as in the earlier seed audits): each fire's accumulated
 evidence is scored as one candidate (no separate history object); it
@@ -51,7 +54,7 @@ from src.simulation.generators.satellite_data_generator import SatelliteDataGene
 from src.simulation.generators.weather_data_generator import WeatherDataGenerator
 from src.simulation.presentation_scenario import (
     GALILEE,
-    GOLAN,
+    JERUSALEM_FOREST_FIRE,
     JUDEAN_HILLS,
     PRESENTATION_DEFAULT_SEED,
     build_presentation_demo_scenario,
@@ -160,6 +163,7 @@ def spread_probabilities(scenario: SimulationScenario, incident_id: str, fuel: F
             DAY_START + timedelta(seconds=event.offset_seconds),
             incident.location,
             seed_key=simulation_event_seed_key(event),
+            profile=incident.weather_profile,
         )
         for measurement in generated.measurements:
             observation = measurement.observation
@@ -193,19 +197,20 @@ def evaluate(predictor: _Predictor, seed: int) -> tuple[bool, list[str]]:
     notes: list[str] = []
     runs = {label: predictor.statuses(scenario, start) for label, start in (("day", DAY_START), ("night", NIGHT_START))}
     ok = True
-    jh_passes, gal_passes, golan_passes = (
-        satellite_pass_offsets(scenario, incident_id) for incident_id in (JUDEAN_HILLS, GALILEE, GOLAN)
+    jh_passes, gal_passes, jf_passes = (
+        satellite_pass_offsets(scenario, incident_id) for incident_id in (JUDEAN_HILLS, GALILEE, JERUSALEM_FOREST_FIRE)
     )
     for label, statuses in runs.items():
-        jh, gal, golan = statuses.get(JUDEAN_HILLS, []), statuses.get(GALILEE, []), statuses.get(GOLAN, [])
-        # Schedule-derived: each fire's first pass must give SUSPECTED and
-        # (for the two opening fires) the second pass CONFIRMED.
+        jh, gal, jf = (statuses.get(incident_id, []) for incident_id in (JUDEAN_HILLS, GALILEE, JERUSALEM_FOREST_FIRE))
+        # Schedule-derived: each fire's first pass must give SUSPECTED and its
+        # second pass CONFIRMED.
         checks = {
             f"Judean Hills SUSPECTED at T+{jh_passes[0]}": _status_after(jh, jh_passes[0]) == "SUSPECTED",
             f"Judean Hills CONFIRMED at T+{jh_passes[1]}": _status_after(jh, jh_passes[1]) == "CONFIRMED",
             f"Galilee SUSPECTED at T+{gal_passes[0]}": _status_after(gal, gal_passes[0]) == "SUSPECTED",
             f"Galilee CONFIRMED at T+{gal_passes[1]}": _status_after(gal, gal_passes[1]) == "CONFIRMED",
-            f"Golan SUSPECTED at T+{golan_passes[0]}": _status_after(golan, golan_passes[0]) == "SUSPECTED",
+            f"Jerusalem Forest SUSPECTED at T+{jf_passes[0]}": _status_after(jf, jf_passes[0]) == "SUSPECTED",
+            f"Jerusalem Forest CONFIRMED at T+{jf_passes[1]}": _status_after(jf, jf_passes[1]) == "CONFIRMED",
         }
         for name, passed in checks.items():
             ok &= passed
@@ -234,9 +239,16 @@ def evaluate(predictor: _Predictor, seed: int) -> tuple[bool, list[str]]:
             f"Galilee spread p max {max(galilee_tree):.3f} (tree) / {max(galilee_shrubs):.3f} (shrubs) "
             f"too close to/above {PROPAGATION_THRESHOLD}"
         )
+    # Fire C's audited Copernicus fuel is 'Shrub cover' -> SHRUBS: every weather
+    # observation its Presentation profile generates must let it propagate.
+    jf_spread = spread_probabilities(scenario, JERUSALEM_FOREST_FIRE, FireSpreadFuelClass.SHRUBS)
+    if min(jf_spread) < PROPAGATION_THRESHOLD:
+        ok = False
+        notes.append(f"Jerusalem Forest spread p min {min(jf_spread):.3f} below {PROPAGATION_THRESHOLD}")
     notes.append(
         f"spread p: Judean Hills min {min(jh_spread):.3f}, Galilee max {max(galilee_tree):.3f} (GENERIC_TREE) / "
-        f"{max(galilee_shrubs):.3f} (SHRUBS) (threshold {PROPAGATION_THRESHOLD})"
+        f"{max(galilee_shrubs):.3f} (SHRUBS), Jerusalem Forest min {min(jf_spread):.3f} (SHRUBS) "
+        f"(threshold {PROPAGATION_THRESHOLD})"
     )
     for incident_id, steps in runs["day"].items():
         notes.append(f"{incident_id}: " + "  ->  ".join(f"T+{t} {kind[:3]} p={p} {status}" for t, kind, p, status in steps))
