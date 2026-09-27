@@ -13,8 +13,10 @@ This builder keeps every simulation rule and only changes the SCHEDULE:
   start (first environmental update at T+4s), two active-fire incidents
   that are SUSPECTED on their first satellite pass (T+19s / T+24s) and
   CONFIRMED on their second (T+35s / T+41s) - both within the first ~90s
-  including downstream processing - a third fire at ~3 minutes and a
-  fourth (a high-risk area that later ignites) at ~8 minutes, then a
+  including downstream processing - a third fire (Jerusalem Forest,
+  SUSPECTED at T+160s, CONFIRMED at T+237s) whose Presentation-only fire
+  weather lets the real spread model propagate, and a fourth (a high-risk
+  area that later ignites) at ~8 minutes, then a
   steady cadence of one update every 26-36s until the 30-minute end - or
   until the operator presses Stop (SimulationRunManager.stop_run).
 * The seed still drives every generated VALUE (weather, satellite
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from src.simulation.generators.weather_data_generator import WeatherScenarioProfile
 from src.simulation.scenario_type import ScenarioType
 from src.simulation.simulated_incident import SimulatedIncident
 from src.simulation.simulation_event import SimulationEvent, SimulationEventType
@@ -55,21 +58,43 @@ N = SimulationEventType.NEWS
 
 JUDEAN_HILLS = "incident-judean-hills-01"
 GALILEE = "incident-galilee-01"
-GOLAN = "incident-golan-01"
+JERUSALEM_FOREST_FIRE = "incident-jerusalem-forest-01"
 CARMEL_HIGH_RISK = "incident-carmel-high-01"
 CARMEL_FIRE = "incident-carmel-01"
-JERUSALEM_FOREST = "incident-jerusalem-forest-moderate-01"
+GOLAN_MODERATE = "incident-golan-moderate-01"
 
 PRESENTATION_INCIDENTS: tuple[tuple[str, ScenarioType, str], ...] = (
     (JUDEAN_HILLS, ScenarioType.ACTIVE_FIRE, "judean_hills"),
     (GALILEE, ScenarioType.ACTIVE_FIRE, "galilee"),
-    (GOLAN, ScenarioType.ACTIVE_FIRE, "golan"),
+    # Fire C: Copernicus 'Shrub cover' around every hotspot centroid of this
+    # schedule (audited with the production vegetation path). The Golan area is
+    # 'Crop cover' (AGRO_FORESTRY) all around, so it stays a moderate-risk area.
+    (JERUSALEM_FOREST_FIRE, ScenarioType.ACTIVE_FIRE, "jerusalem_forest"),
     # Carmel is a high-risk area first; the separate fire incident at the same
     # location only starts producing evidence ~9 minutes in.
     (CARMEL_HIGH_RISK, ScenarioType.HIGH_RISK_NO_FIRE, "carmel"),
     (CARMEL_FIRE, ScenarioType.ACTIVE_FIRE, "carmel"),
-    (JERUSALEM_FOREST, ScenarioType.MODERATE_RISK_NO_FIRE, "jerusalem_forest"),
+    (GOLAN_MODERATE, ScenarioType.MODERATE_RISK_NO_FIRE, "golan"),
 )
+
+# Presentation-only weather for fire C: a hot, dry south-easterly (Sharav-type)
+# wind, typical of severe Israeli wildfire days. Every generated value is still a
+# seeded draw inside these ranges (3 stations per update). The ranges are the
+# smallest box in which the unchanged PROPAGATOR methodology propagates at EVERY
+# corner for this fire's 'Shrub cover' fuel: equilibrium fuel moisture ~2.3-2.9%
+# and a 30-36 km/h wind blowing toward the NW grid diagonal give a downwind
+# p_ij of 0.458-0.476 >= PROPAGATION_THRESHOLD (0.45). Nothing is forced: the
+# spread still comes from FireSpreadInputService/FireSpreadCalculator, and the
+# fuel from Copernicus via the severity assessment.
+PRESENTATION_FIRE_C_WEATHER = WeatherScenarioProfile(
+    temperature_celsius=(34.0, 37.0),
+    relative_humidity_percent=(10.0, 13.0),
+    wind_speed_kmh=(30.0, 36.0),
+    wind_gust_extra_kmh=(2.0, 18.0),
+    rainfall_mm=(0.0, 0.0),
+    wind_direction_deg=(132.0, 138.0),
+)
+PRESENTATION_WEATHER_PROFILES: dict[str, WeatherScenarioProfile] = {JERUSALEM_FOREST_FIRE: PRESENTATION_FIRE_C_WEATHER}
 
 # (offset seconds, event type, incident) - the scripted first ~8 minutes.
 # Both first fires are confirmed inside the first ~90 s. Every confirmation
@@ -94,24 +119,29 @@ PRESENTATION_OPENING: tuple[tuple[int, SimulationEventType, str], ...] = (
     (41, S, GALILEE),
     # Fire B's news corroboration follows its confirmation.
     (70, N, GALILEE),
-    (75, W, JERUSALEM_FOREST),
-    (100, W, GOLAN),
+    (75, W, GOLAN_MODERATE),
+    (100, W, JERUSALEM_FOREST_FIRE),
     (125, W, JUDEAN_HILLS),
     (150, N, JUDEAN_HILLS),
-    # Fire C (Golan) appears: SUSPECTED, monitored until its second pass.
-    (175, S, GOLAN),
+    # Fire C (Jerusalem Forest) appears: first pass -> SUSPECTED; its second pass
+    # -> CONFIRMED -> severity and the 30/60-minute spread prediction. The two
+    # pass offsets were chosen offline (seed 594, real generators/V5/policy,
+    # day and night) exactly like the seed itself - see
+    # scripts/select_presentation_seed.py.
+    (160, S, JERUSALEM_FOREST_FIRE),
     (200, W, CARMEL_HIGH_RISK),
     (225, W, GALILEE),
-    (250, N, GOLAN),
+    (237, S, JERUSALEM_FOREST_FIRE),
+    (250, N, JERUSALEM_FOREST_FIRE),
     (275, S, JUDEAN_HILLS),
-    (300, W, JERUSALEM_FOREST),
-    (325, W, GOLAN),
+    (300, W, GOLAN_MODERATE),
+    (325, W, JERUSALEM_FOREST_FIRE),
     (350, N, GALILEE),
     (375, S, GALILEE),
     (400, W, CARMEL_HIGH_RISK),
     # The Carmel high-risk area escalates into a fire (fire D).
     (425, W, CARMEL_FIRE),
-    (450, N, GOLAN),
+    (450, N, JERUSALEM_FOREST_FIRE),
     (475, S, CARMEL_FIRE),
 )
 
@@ -123,14 +153,14 @@ PRESENTATION_STEADY_ROTATION: tuple[tuple[SimulationEventType, str], ...] = (
     (W, JUDEAN_HILLS),
     (N, CARMEL_FIRE),
     (W, GALILEE),
-    (W, GOLAN),
+    (W, JERUSALEM_FOREST_FIRE),
     (S, JUDEAN_HILLS),
-    (W, JERUSALEM_FOREST),
+    (W, GOLAN_MODERATE),
     (W, CARMEL_FIRE),
     (N, JUDEAN_HILLS),
-    (S, GOLAN),
+    (S, JERUSALEM_FOREST_FIRE),
     (W, GALILEE),
-    (N, GOLAN),
+    (N, JERUSALEM_FOREST_FIRE),
     (S, CARMEL_FIRE),
     (N, GALILEE),
     (S, GALILEE),
@@ -156,7 +186,12 @@ def build_presentation_timeline() -> tuple[tuple[int, SimulationEventType, str],
 def build_presentation_demo_scenario(seed: int = PRESENTATION_DEFAULT_SEED) -> SimulationScenario:
     """Build the paced presentation scenario (fixed schedule; `seed` drives generated values)."""
     incidents = tuple(
-        SimulatedIncident(incident_id=incident_id, scenario_type=scenario_type, location=SIMULATION_LOCATIONS[key])
+        SimulatedIncident(
+            incident_id=incident_id,
+            scenario_type=scenario_type,
+            location=SIMULATION_LOCATIONS[key],
+            weather_profile=PRESENTATION_WEATHER_PROFILES.get(incident_id),
+        )
         for incident_id, scenario_type, key in PRESENTATION_INCIDENTS
     )
     events: list[SimulationEvent] = []

@@ -143,11 +143,14 @@ class SimulationEventExecutor:
         event_timestamp: datetime,
         incident: Any,
     ) -> SimulationEventExecutionResult:
+        profile_override = getattr(incident, "weather_profile", None)
         generated = self._get_weather_generator(scenario.seed).generate(
             scenario_type=incident.scenario_type,
             timestamp=event_timestamp,
             location=incident.location,
             seed_key=simulation_event_seed_key(event),
+            # Only passed when an incident defines one, so existing generators/fakes are called exactly as before.
+            **({"profile": profile_override} if profile_override is not None else {}),
         )
         measurements = tuple(generated.measurements)
         saved_count = 0
