@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DEMO_SIMULATION_REQUEST } from "../../config/demoSimulation";
+import { beginDemoRunStart, confirmDemoRunStart, endDemoRunStart } from "../../hooks/demoRunStart";
 import { rememberDemoRun } from "../../hooks/demoSession";
 import { useStartSimulation } from "../../hooks/useStartSimulation";
 import { stopSimulation } from "../../api/simulation";
@@ -54,14 +55,21 @@ export function SimulationControl({ run, enabled, onRequestOverviewRefresh }: Si
   const outcomeText = isStopping ? "Stopping simulation..." : outcome;
 
   const handleStart = () => {
+    if (isStarting) {
+      return;
+    }
     setStopState(null);
+    // Hide the previous run's data at once: the backend only resets it while the new run is PREPARING.
+    beginDemoRunStart();
     start(DEMO_SIMULATION_REQUEST)
       .then((status) => {
         // This tab started the run: keep showing its results after it completes.
         rememberDemoRun(status.run_id);
+        confirmDemoRunStart(status.run_id);
         onRequestOverviewRefresh();
       })
       .catch((caught: unknown) => {
+        endDemoRunStart();
         // A synthetic "already in flight" rejection from a double click never
         // reaches here as a distinct case - the hook's own error state
         // already reflects the real in-flight request's outcome, and this

@@ -493,40 +493,6 @@ export function EventDetailsPage() {
             </dl>
           </section>
 
-          {aiFacts ? (
-            <section aria-labelledby="ai-assessment-heading" className="event-details-page__section">
-              <h2 id="ai-assessment-heading" className="event-details-page__section-title">
-                AI Assessment
-              </h2>
-              <dl className="event-details-page__facts">
-                <div className="event-details-page__fact">
-                  <dt>Detection mode</dt>
-                  <dd>{aiFacts.detectionMode}</dd>
-                </div>
-                {aiFacts.policyVerdict ? (
-                  <div className="event-details-page__fact">
-                    <dt>Latest AI verdict</dt>
-                    <dd>{aiFacts.policyVerdict}</dd>
-                  </div>
-                ) : null}
-                {aiFacts.satellitePassCount !== null ? (
-                  <div className="event-details-page__fact">
-                    <dt>Satellite passes</dt>
-                    <dd>{aiFacts.satellitePassCount}</dd>
-                  </div>
-                ) : null}
-                {aiFacts.currentSatellitePixelCount !== null ? (
-                  <div className="event-details-page__fact">
-                    <dt>Current satellite pixels</dt>
-                    <dd>{aiFacts.currentSatellitePixelCount}</dd>
-                  </div>
-                ) : null}
-                {/* Operator view only: history flag, model and policy names are implementation details. The API still returns
-                    them (and the types keep them) for diagnostics; the likelihoods live in the Fire Event card above. */}
-              </dl>
-            </section>
-          ) : null}
-
           <div className="event-details-page__pair">
             <section aria-labelledby="detection-evidence-heading" className="event-details-page__section">
               <h2 id="detection-evidence-heading" className="event-details-page__section-title">
