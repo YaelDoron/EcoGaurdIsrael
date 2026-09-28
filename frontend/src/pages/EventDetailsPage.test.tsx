@@ -1036,18 +1036,7 @@ describe("EventDetailsPage", () => {
     expect(scoped.getByText("Peak AI likelihood").nextSibling).toHaveTextContent("64%");
     expect(scoped.queryByText("Rule Score")).not.toBeInTheDocument(); // the rule result is diagnostics only in this mode
 
-    const aiSection = screen.getByRole("heading", { name: "AI Assessment" }).closest("section") as HTMLElement;
-    const ai = within(aiSection);
-    expect(ai.getByText("AI Hybrid V5")).toBeInTheDocument();
-    expect(ai.getByText("Suspected")).toBeInTheDocument();
-    expect(ai.getByText("Satellite passes").nextSibling).toHaveTextContent("2");
-    expect(ai.getByText("Current satellite pixels").nextSibling).toHaveTextContent("3");
-    expect(ai.getByText("Detection mode").nextSibling).toHaveTextContent("AI Hybrid V5");
-    expect(ai.getByText("Latest AI verdict").nextSibling).toHaveTextContent("Suspected");
     // Implementation details are not part of the operator view (the API still returns them).
-    expect(ai.queryByText(/Event history used/i)).not.toBeInTheDocument();
-    expect(ai.queryByText("Model")).not.toBeInTheDocument();
-    expect(ai.queryByText("Policy")).not.toBeInTheDocument();
     expect(document.body.textContent ?? "").not.toMatch(/HGB V5|AI Hybrid Policy v5\.0|ai_hybrid_v5|Event history used/);
 
     const pageText = document.body.textContent ?? "";
@@ -1105,7 +1094,7 @@ describe("EventDetailsPage", () => {
     expect(screen.queryByText("88%")).not.toBeInTheDocument();
   });
 
-  it("CONFIRMED AI event: likelihoods stay in the Fire Event card (not repeated), the AI Assessment block is trimmed", async () => {
+  it("CONFIRMED AI event: likelihoods are shown once, in the Fire Event card", async () => {
     getEventDetailsMock.mockResolvedValue(
       makeResult({
         fire_event: {
@@ -1131,14 +1120,7 @@ describe("EventDetailsPage", () => {
     expect(within(fireEventSection).getByText("Latest AI likelihood").nextSibling).toHaveTextContent("83%");
     expect(within(fireEventSection).getByText("Peak AI likelihood").nextSibling).toHaveTextContent("87%");
 
-    const aiSection = screen.getByRole("heading", { name: "AI Assessment" }).closest("section") as HTMLElement;
-    const ai = within(aiSection);
-    expect(ai.getByText("Detection mode").nextSibling).toHaveTextContent("AI Hybrid V5");
-    expect(ai.getByText("Latest AI verdict").nextSibling).toHaveTextContent("Confirmed");
-    expect(ai.getByText("Satellite passes").nextSibling).toHaveTextContent("4");
-    expect(ai.getByText("Current satellite pixels").nextSibling).toHaveTextContent("3");
-    expect(ai.queryByText(/AI likelihood/)).not.toBeInTheDocument(); // one source of truth for the numbers
-    expect(aiSection.textContent ?? "").not.toMatch(/HGB|Policy|history used|%|ai_hybrid_v5/i);
+    expect(screen.queryByRole("heading", { name: "AI Assessment" })).not.toBeInTheDocument();
     expect(screen.getByTestId("status-help")).toHaveTextContent(/not certainty/);
   });
 

@@ -19,32 +19,32 @@ SIMULATED_NEWS_MAX_RADIUS_KM = 1.0
 _KM_PER_LATITUDE_DEGREE = 111.32
 
 _LOCATION_REPORT_NAMES = {
-    "carmel": "הכרמל",
-    "jerusalem_forest": "יער ירושלים",
-    "galilee": "הגליל",
-    "golan": "רמת הגולן",
-    "judean_hills": "הרי יהודה",
+    "carmel": "Carmel",
+    "jerusalem_forest": "Jerusalem Forest",
+    "galilee": "Galilee",
+    "golan": "Golan Heights",
+    "judean_hills": "Judean Hills",
 }
 
 _INITIAL_TITLE_TEMPLATES = (
-    "דיווח ראשוני על עשן ולהבות באזור {location}",
-    "דיווחים ראשוניים על מוקדי אש באזור {location}",
-    "עשן כבד נראה באזור {location}",
+    "Initial report of smoke and flames in the {location} area",
+    "Initial reports of fire hotspots in the {location} area",
+    "Heavy smoke seen in the {location} area",
 )
 _INITIAL_SUMMARY_TEMPLATES = (
-    "מספר דיווחים מהאזור מתארים עשן ולהבות שנצפו בסמוך לאזור {location}.",
-    "תושבים ומטיילים באזור מדווחים על עשן הנראה ממספר נקודות סביב {location}.",
-    "התקבלו דיווחים ראשוניים על שריפה מתפתחת באזור {location}.",
+    "Several reports from the area describe smoke and flames observed near the {location} area.",
+    "Residents and hikers in the area report smoke visible from several points around {location}.",
+    "Initial reports have been received of a developing fire in the {location} area.",
 )
 _FOLLOW_UP_TITLE_TEMPLATES = (
-    "דיווחים נוספים על התפשטות האש באזור {location}",
-    "עדכון נוסף: מוקדי אש נראים באזור {location}",
-    "האש ממשיכה להיראות במספר מוקדים באזור {location}",
+    "Further reports of fire spreading in the {location} area",
+    "Update: fire hotspots visible in the {location} area",
+    "Fire continues to be seen at multiple hotspots in the {location} area",
 )
 _FOLLOW_UP_SUMMARY_TEMPLATES = (
-    "דיווחים נוספים מהאזור מצביעים על כך שהאש ממשיכה להתפשט ונצפים מוקדים נוספים.",
-    "מידע נוסף שמגיע מהאזור מתאר עשן סמיך ומוקדי אש נוספים סביב {location}.",
-    "דיווחים מתמשכים מצביעים על התפתחות האירוע באזור {location}.",
+    "Additional reports from the area indicate the fire is continuing to spread and more hotspots are being observed.",
+    "Further information from the area describes dense smoke and additional fire hotspots around {location}.",
+    "Ongoing reports indicate the event is developing in the {location} area.",
 )
 
 

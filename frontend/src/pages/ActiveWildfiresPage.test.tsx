@@ -739,6 +739,32 @@ describe("ActiveWildfiresPage initial demo state (stale runtime rows from a prev
     expect(await screen.findByText("Event #99")).toBeInTheDocument();
   });
 
+  it("hides the previous run's fires the moment Start is clicked, even while the new run is PREPARING", async () => {
+    const { rememberDemoRun } = await import("../hooks/demoSession");
+    rememberDemoRun("run-old"); // this tab already watched the previous run, so its data is on screen
+    const newRun = { ...baseRun, run_id: "run-new", state: "preparing" as const };
+    let resolveStart: (run: typeof newRun) => void = () => {};
+    startSimulationMock.mockReturnValue(new Promise((resolve) => (resolveStart = resolve)));
+    getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: true, run: baseRun } }));
+
+    renderPage();
+    expect(await screen.findByText("Event #99")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Start Simulation" }));
+
+    // Request still in flight: the old fires are already gone.
+    expect(screen.queryByText("Event #99")).not.toBeInTheDocument();
+    expect(screen.getByText("No simulation started")).toBeInTheDocument();
+
+    // Accepted, backend still PREPARING (reset not committed, overview still returns the old fire): still hidden.
+    getOperationsOverviewMock.mockResolvedValue(
+      makeOverview([staleFire], { simulation: { enabled: true, run: newRun } }),
+    );
+    resolveStart(newRun);
+    await waitFor(() => expect(getOperationsOverviewMock.mock.calls.length).toBeGreaterThan(1));
+    expect(screen.queryByText("Event #99")).not.toBeInTheDocument();
+  });
+
   it("never hides data when simulation control is disabled (not a demo deployment)", async () => {
     getOperationsOverviewMock.mockResolvedValue(makeOverview([staleFire], { simulation: { enabled: false, run: null } }));
 

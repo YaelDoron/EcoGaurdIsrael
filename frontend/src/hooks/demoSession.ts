@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { getCurrentSimulationRun } from "../api/simulation";
 import type { SimulationRunStatus } from "../types/simulation";
+import {
+  endDemoRunStart,
+  getPendingDemoRunId,
+  isDemoRunStartPending,
+  useDemoRunStartVersion,
+} from "./demoRunStart";
 
 /**
  * Browser-session presentation gate for demo runtime data (Task: final demo
@@ -54,12 +60,25 @@ function isLiveRun(run: SimulationRunStatus | null): boolean {
   return run !== null && run.run_id !== null && LIVE_STATES.has(run.state);
 }
 
+/**
+ * While a Start Simulation click is pending (hooks/demoRunStart.ts) the
+ * previous run's persisted data is hidden; it is shown again once the NEW run
+ * has left PREPARING (the backend's reset has committed by then).
+ */
+function isNewRunReady(run: SimulationRunStatus | null): boolean {
+  const pendingRunId = getPendingDemoRunId();
+  return run !== null && pendingRunId !== null && run.run_id === pendingRunId && run.state !== "preparing";
+}
+
 /** Whether persisted demo runtime data should be shown in this browser session. */
 export function isDemoDataVisible(simulation: DemoSimulationSummary): boolean {
   if (!simulation.enabled) {
     return true;
   }
   const run = simulation.run;
+  if (isDemoRunStartPending()) {
+    return isNewRunReady(run);
+  }
   if (run === null || run.run_id === null) {
     return false;
   }
@@ -71,12 +90,20 @@ export function isDemoDataVisible(simulation: DemoSimulationSummary): boolean {
  * remembered, so this tab keeps showing its results after it completes.
  */
 export function useDemoDataVisibility(simulation: DemoSimulationSummary | null): boolean {
+  useDemoRunStartVersion();
   const run = simulation?.run ?? null;
   const liveRunId = isLiveRun(run) ? run?.run_id : null;
+  const newRunReady = isDemoRunStartPending() && isNewRunReady(run);
 
   useEffect(() => {
     rememberDemoRun(liveRunId);
   }, [liveRunId]);
+
+  useEffect(() => {
+    if (newRunReady) {
+      endDemoRunStart();
+    }
+  }, [newRunReady]);
 
   return simulation === null ? true : isDemoDataVisible(simulation);
 }
