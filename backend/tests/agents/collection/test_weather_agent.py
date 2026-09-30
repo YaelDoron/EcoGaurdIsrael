@@ -33,7 +33,7 @@ def make_raw_station(station_id: int) -> dict:
 
 
 def make_raw_observation(station_id: int) -> dict:
-    return {"stationId": station_id, "datetime": "2026-09-02T12:30:00", "channels": []}
+    return {"stationId": station_id, "data": [{"datetime": "2026-09-02T12:30:00+03:00", "channels": []}]}
 
 
 def make_domain_station(station_id: int) -> WeatherStation:
@@ -351,3 +351,70 @@ def test_collect_observation_repository_failure_is_isolated_per_station(
     assert result.stations_failed == 0
     assert result.observations_failed == 1
     assert result.observations_saved == 1
+
+
+# ---------------------------------------------------------------------------
+# Inactive stations: real IMS /stations includes `active: false` stations
+# whose "latest" data can be decades old - they must be skipped entirely.
+# ---------------------------------------------------------------------------
+
+
+def test_collect_inactive_station_is_not_queried_for_observations(
+    agent, ims_client, weather_mapper, weather_repository
+):
+    raw_stations = [
+        {**make_raw_station(1), "active": True},
+        {**make_raw_station(2), "active": False},
+        {**make_raw_station(3), "active": True},
+    ]
+    ims_client.get_stations.return_value = raw_stations
+    _wire_happy_path(ims_client, weather_mapper, weather_repository)
+
+    result = agent.collect()
+
+    assert ims_client.get_station_data.call_count == 2
+    ims_client.get_station_data.assert_any_call(1)
+    ims_client.get_station_data.assert_any_call(3)
+    assert 2 not in [call.args[0] for call in ims_client.get_station_data.call_args_list]
+    # Inactive station is neither mapped nor persisted.
+    assert [call.args[0]["stationId"] for call in weather_mapper.map_station.call_args_list] == [1, 3]
+    assert weather_repository.save_station.call_count == 2
+
+    assert result.success is True
+    assert result.stations_received == 3
+    assert result.stations_processed == 2
+    assert result.stations_skipped == 1
+    assert result.stations_failed == 0
+    assert result.observations_saved == 2
+
+
+def test_collect_active_and_unflagged_stations_are_still_collected(
+    agent, ims_client, weather_mapper, weather_repository
+):
+    # `active: true` and a missing `active` key both keep the existing behavior.
+    raw_stations = [{**make_raw_station(1), "active": True}, make_raw_station(2)]
+    ims_client.get_stations.return_value = raw_stations
+    _wire_happy_path(ims_client, weather_mapper, weather_repository)
+
+    result = agent.collect()
+
+    assert ims_client.get_station_data.call_count == 2
+    assert result.stations_processed == 2
+    assert result.stations_skipped == 0
+    assert result.observations_saved == 2
+
+
+def test_collect_all_inactive_stations_performs_no_observation_requests_or_writes(
+    agent, ims_client, weather_mapper, weather_repository
+):
+    ims_client.get_stations.return_value = [{**make_raw_station(1), "active": False}]
+    _wire_happy_path(ims_client, weather_mapper, weather_repository)
+
+    result = agent.collect()
+
+    ims_client.get_station_data.assert_not_called()
+    weather_repository.save_station.assert_not_called()
+    weather_repository.save_observation.assert_not_called()
+    assert result.success is True
+    assert result.stations_received == 1
+    assert result.stations_skipped == 1

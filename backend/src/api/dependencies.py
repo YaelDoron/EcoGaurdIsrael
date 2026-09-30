@@ -19,6 +19,7 @@ from src.services.fire_event_read.event_details_service import EventDetailsServi
 from src.services.operations.operations_activity_query_service import OperationsActivityQueryService
 from src.services.operations.operations_overview_query_service import OperationsOverviewQueryService
 from src.services.simulation_control.simulation_run_manager import SimulationRunManager
+from src.services.weather.weather_conditions_query_service import WeatherConditionsQueryService
 
 
 # Worker threads for one Event Details snapshot's independent section reads.
@@ -88,11 +89,30 @@ def get_chatbot_agent() -> ChatbotAgent:
     settings.GEMINI_API_KEY/GEMINI_MODEL/GEMINI_REQUEST_TIMEOUT (Task 3) -
     no new Gemini configuration is introduced here.
     """
+    # Imported here, not at module level: src.api.routers' package __init__
+    # imports the chatbot router, which imports this module (circular import).
+    from src.api.routers.global_response_plan import get_global_response_plan_read_service
+
     return ChatbotAgent(
         active_fire_events_service=get_active_fire_events_service(),
         event_details_service=get_event_details_service(),
+        weather_conditions_query_service=get_weather_conditions_query_service(),
+        fire_danger_query_service=get_fire_danger_query_service(),
+        # The Global Response Plan API's own factory: same coverage report and
+        # process-wide plan-parts cache as GET /global-response-plan/current.
+        global_response_plan_read_service=get_global_response_plan_read_service(),
         gemini_client=GeminiClient(),
     )
+
+
+def get_weather_conditions_query_service() -> WeatherConditionsQueryService:
+    """FastAPI dependency providing a fully-wired WeatherConditionsQueryService.
+
+    Same fresh-instance-per-request rationale as get_fire_danger_query_service
+    below: no in-memory state of its own, and its repositories default to the
+    process-wide session factory.
+    """
+    return WeatherConditionsQueryService()
 
 
 def get_fire_danger_query_service() -> FireDangerQueryService:

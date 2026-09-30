@@ -5,7 +5,9 @@ information EcoGuard's existing agents/calculators have already computed and
 persisted. It performs no wildfire calculation of its own: for every
 question it reads the current active-FireEvents snapshot via
 `ActiveFireEventsService` and each active event's full detail via
-`EventDetailsService` (both already strictly read-only, no-recalculation
+`EventDetailsService`, plus every area's latest Weather Conditions via
+`WeatherConditionsQueryService` and latest Fire Danger via
+`FireDangerQueryService` (all already strictly read-only, no-recalculation
 services - see their own module docstrings), assembles a deterministic
 structured EcoGuard context from that data, and forwards it - together with
 a fixed EcoGuard system instruction, optional trimmed conversation history,
@@ -27,6 +29,7 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from src.api.schemas.event_details import EventDetailsResult, FireEventMLAssessmentResponse, SeverityAssessmentResponse
+from src.api.schemas.global_response_plan import GlobalEventPlan, GlobalResponsePlanResponse
 from src.external.gemini.gemini_client import GeminiClient
 from src.models.active_fire_events import (
     ActiveFireEventMLSummary,
@@ -34,10 +37,17 @@ from src.models.active_fire_events import (
     ActiveFireEventsResult,
     ActiveFireEventSummary,
 )
+from src.models.fire_danger_areas import FireDangerAreaSnapshot
 from src.models.fire_spread_insufficient_data_reason import FireSpreadInsufficientDataReason
 from src.models.fire_spread_prediction import PROPAGATION_THRESHOLD
+from src.services.fire_danger.fire_danger_query_service import FireDangerQueryService
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.fire_event_read.event_details_service import EventDetailsService
+from src.services.global_planning.global_response_plan_read_service import GlobalResponsePlanReadService
+from src.services.weather.weather_conditions_query_service import (
+    AreaWeatherConditions,
+    WeatherConditionsQueryService,
+)
 
 _EVENT_REF_ALPHABET_SIZE = 26
 
@@ -162,6 +172,17 @@ When answering, clearly distinguish between:
 - spread predictions
 - response targets
 - response plans
+- area weather conditions
+- area Fire Danger assessments
+
+To explain why a fire was detected, use the event's detection_confidence, \
+its detection_evidence, and its ml_assessment fields: detection_mode (how \
+the detection decision was made), rule_status and rule_confidence (the \
+deterministic detection rule's own result), agreement (whether the model \
+agreed with the rule), and model_score.
+
+Severity and Fire Danger scores in the snapshot are already rounded for \
+presentation - quote them exactly as given and never add decimal places.
 
 Critical rule about model_score: `model_score` is a model output / fire-risk \
 score on a 0-1 scale and is NOT a calibrated real-world probability of \
@@ -214,6 +235,130 @@ specific field for that event is null, missing, or has a status such as \
 that event - never say no event exists there.
 Never invent an event, a location, or any detail that is not present in \
 the supplied snapshot.
+The two situations above apply only to questions about wildfire events. \
+They never apply to weather or Fire Danger questions: never answer a weather \
+or Fire Danger question by saying there is no active wildfire in that area.
+
+Weather: answer weather questions from the snapshot's weather_conditions \
+list. Weather questions include questions about temperature, relative \
+humidity, wind speed, wind gust, and general weather conditions - a question \
+about any one of these is a weather question and must use \
+weather_conditions. It reflects EcoGuard's current stored operational/simulation weather \
+state, one entry per area. Each entry's values are aggregates (means) of the \
+weather stations used for that area (station_count), not a single \
+measurement. Always name the EcoGuard area whose data you used, and mention \
+the observation time (observed_at) when relevant. If an area is not present \
+in weather_conditions, say that weather data is currently unavailable for \
+that area. Wind direction and rainfall are unavailable at the area-summary \
+level unless explicitly present in the snapshot - say so if asked, and never \
+estimate them.
+
+Fire Danger: answer Fire Danger questions from the snapshot's fire_danger \
+list. Fire Danger is the environmental wildfire risk assessed for an AREA \
+from its weather; it is NOT the Severity of an already detected wildfire \
+(the severity field of an active event), and the two must never be \
+confused or substituted for each other. A Fire Danger question does not \
+require an active fire in that area. When an entry's status is \
+"insufficient_data", say its Fire Danger level is currently unavailable. \
+When reporting a Fire Danger level or score - especially for a "current" or \
+"now" question - mention its assessment time (assessed_at) when useful. Fire \
+Danger assessments are updated over time as new weather arrives, so a newer \
+answer may legitimately differ from an earlier one in the conversation; \
+always report the snapshot's current values rather than repeating an \
+earlier answer.
+
+Location matching: area and event names are EcoGuard area names such as \
+"Jerusalem Forest Demo Area" or "Judean Hills Demo Area". Match the user's \
+natural wording (e.g. "ירושלים" or "Jerusalem", "הרי יהודה" or "Judean \
+Hills") to the closest matching EcoGuard area name, and always state the \
+EcoGuard area name whose data you used so the mapping is transparent. If no \
+area plausibly matches, say that EcoGuard has no data for that location.
+
+Area follow-ups (Weather and Fire Danger): a question inherits the \
+geographic area discussed in the immediately preceding conversation ONLY \
+when its wording clearly refers back to that area - a continuation such as \
+"ומה ...?" asking about another attribute of the same place, or an explicit \
+back-reference such as "שם", "באזור הזה", "there" or "in that area". For \
+example, after "מה מזג האוויר בהרי יהודה?", these follow-ups refer to \
+Judean Hills Demo Area: "ומה הלחות?", "ומה הטמפרטורה?", "ומה הסכנה שם?", \
+"ומה רמת הסכנה באזור הזה?", "ומה המצב שם כרגע?". A question that neither \
+names a location nor refers back to one is a GENERAL question about the \
+current system and does NOT inherit the previous area, even right after an \
+area-specific question - for example "מה הסכנה כרגע?", "מה מצב הסכנה \
+עכשיו?" and "מה רמת הסכנה כרגע?" are general current Fire Danger \
+questions: answer them from the current fire_danger entries for all \
+relevant monitored areas. Conversation history may resolve WHICH area is \
+meant only when the user's wording clearly refers back to it, and it never \
+supplies or overrides values - always take the values from the current \
+snapshot. This applies to weather_conditions and fire_danger, not only to \
+active fire events. If the wording refers back to an area but the previous \
+context does not identify exactly one area unambiguously, do not guess an \
+area: answer for the relevant available areas, or ask the user which area \
+they mean.
+
+Global response plan: answer questions about overall resource sufficiency, \
+shortages and which fires are covered from global_response_plan (state, \
+status, coverage_score, average_eta_seconds, total_required_resources, \
+total_desired_resources, total_assigned_resources, unmet_required_resources, \
+unmet_desired_resources, and the covered_fires / pending_fires / \
+unplannable_fires / monitoring_only_fires lists). Each active event's \
+resource_requirements gives that fire's own minimum required, desired and \
+assigned resources, coverage, average ETA and uncovered target count. When \
+global_response_plan is null or its state is "none", "generating" or \
+"updating", say that a current global plan is not yet available or is being \
+updated.
+
+Stations and resources: station_availability summarizes fire-station \
+resources by their STORED OPERATIONAL STATUS (available / assigned / \
+unavailable), plus committed_to_current_plan - the number of that station's \
+resources the current response plan commits. Status and plan commitment are \
+separate facts: a resource can have status available while already being \
+committed to a response plan. Never subtract committed_to_current_plan from \
+available, never compute a number of "free" resources, and never claim that \
+"available" means free for a new fire. listed_stations contains only \
+stations with no available resources, with assigned or unavailable \
+resources, or with plan commitments; every other station has all of its \
+resources available and none committed. You may answer which stations have \
+zero available resources from the stored available counts. If asked how many \
+resources are truly free for a new assignment, explain that EcoGuard does not \
+store that derived value directly, and report the available and committed \
+counts separately instead.
+
+Selected versus closest station: the snapshot contains the station and \
+resource actually selected for each allocation, with its stored ETA and route \
+distance - you may report those. EcoGuard stores routes only for the selected \
+resources, not a comparison against all stations, so never claim that a \
+selected station is the closest station overall or has the shortest ETA among \
+all stations. If asked which station is closest, explain that the stored data \
+contains the selected station and its ETA/distance, but not the full \
+comparison against all stations.
+
+Why a plan or station was selected: the optimizer's alternative ranking and \
+rationale are not stored. You may describe the selected result and the \
+stored metrics of the selected plan (coverage, ETA, shortages), but never \
+invent why one station or one plan was chosen instead of another - say that \
+the detailed alternative-selection rationale is not stored. The documented \
+optimization METHOD (general, not specific to any selection) is: required \
+resource slots are prioritized first, then desired slots, then optional \
+predicted-risk coverage; under scarcity, higher-severity needs are favored; \
+within the applicable tier, shorter ETA / route distance and target \
+priority affect the score; and keeping existing valid assignments receives \
+a stability preference. This describes how plans are scored in general - it \
+is NOT a stored per-selection rationale. Never claim that a particular \
+station was chosen specifically because of one of these factors, since no \
+such causal reason is stored. Never say the optimizer guarantees full or \
+100% coverage, and never describe minimizing average ETA as the sole \
+optimization objective. Stored coverage, ETA and shortage values are result \
+metrics of the selected plan, not proof of why a particular station won \
+over another. When asked why a station or plan was selected, answer in four \
+distinct parts: which station/resource was selected; the stored metrics of \
+that result; the general optimization method above; and that the exact \
+alternative-by-alternative rationale is not persisted.
+
+Baseline comparison: no baseline comparison is present in the snapshot. If \
+asked how much better the optimized plan is than a baseline, say that the \
+baseline comparison is currently unavailable, and never infer or estimate an \
+improvement percentage.
 
 Each active event in the snapshot carries an internal `event_ref` label \
 (e.g. "A", "B") used only to distinguish events inside this system. Never \
@@ -257,10 +402,20 @@ class ChatbotAgent:
         *,
         active_fire_events_service: ActiveFireEventsService | None = None,
         event_details_service: EventDetailsService | None = None,
+        weather_conditions_query_service: WeatherConditionsQueryService | None = None,
+        fire_danger_query_service: FireDangerQueryService | None = None,
+        global_response_plan_read_service: GlobalResponsePlanReadService | None = None,
         gemini_client: GeminiClient | None = None,
     ) -> None:
         self._active_fire_events_service = active_fire_events_service or ActiveFireEventsService()
         self._event_details_service = event_details_service or EventDetailsService()
+        self._weather_conditions_query_service = weather_conditions_query_service or WeatherConditionsQueryService()
+        self._fire_danger_query_service = fire_danger_query_service or FireDangerQueryService()
+        # Production wiring (src/api/dependencies.py) passes the API's own
+        # instance, which also reports plan coverage; this default does not.
+        self._global_response_plan_read_service = (
+            global_response_plan_read_service or GlobalResponsePlanReadService()
+        )
         self._gemini_client = gemini_client or GeminiClient()
 
     def ask(self, question: str, *, history: Sequence[ChatMessage] = ()) -> str:
@@ -279,7 +434,12 @@ class ChatbotAgent:
             summary.fire_event_id: self._event_details_service.get_event_details(summary.fire_event_id)
             for summary in active_result.items
         }
-        snapshot_text = _build_snapshot_text(active_result, event_details_by_id)
+        weather_conditions = self._weather_conditions_query_service.get_latest_for_all_areas()
+        fire_danger_areas = self._fire_danger_query_service.get_latest_for_all_areas(as_of=active_result.as_of).areas
+        global_plan = self._global_response_plan_read_service.get_current(as_of=active_result.as_of)
+        snapshot_text = _build_snapshot_text(
+            active_result, event_details_by_id, weather_conditions, fire_danger_areas, global_plan
+        )
         focus_location_name = _resolve_conversation_focus(question, trimmed_history, active_result)
         contents = _build_contents(trimmed_history, snapshot_text, question, focus_location_name)
 
@@ -322,15 +482,36 @@ def _event_ref_for_index(index: int) -> str:
 def _build_snapshot_text(
     active_result: ActiveFireEventsResult,
     event_details_by_id: dict[int, EventDetailsResult | None],
+    weather_conditions: Sequence[AreaWeatherConditions] = (),
+    fire_danger_areas: Sequence[FireDangerAreaSnapshot] = (),
+    global_plan: GlobalResponsePlanResponse | None = None,
 ) -> str:
+    event_plans_by_id: dict[int, GlobalEventPlan] = (
+        {event_plan.fire_event_id: event_plan for event_plan in global_plan.plan.events}
+        if global_plan is not None and global_plan.plan is not None
+        else {}
+    )
     snapshot = {
         "as_of": active_result.as_of.isoformat(),
         "active_fire_event_count": len(active_result.items),
         "active_fire_events": [
-            _build_event_context(
-                _event_ref_for_index(index), summary, event_details_by_id.get(summary.fire_event_id)
-            )
+            {
+                **_build_event_context(
+                    _event_ref_for_index(index), summary, event_details_by_id.get(summary.fire_event_id)
+                ),
+                "resource_requirements": _compact_event_resource_requirements(
+                    event_plans_by_id.get(summary.fire_event_id)
+                ),
+            }
             for index, summary in enumerate(active_result.items)
+        ],
+        "global_response_plan": _compact_global_response_plan(global_plan, active_result),
+        "station_availability": _compact_station_availability(event_details_by_id, event_plans_by_id),
+        # Area-level sections: every assessed area, independent of whether
+        # it currently has an active fire.
+        "weather_conditions": [_compact_weather_conditions(conditions) for conditions in weather_conditions],
+        "fire_danger": [
+            _compact_fire_danger(area) for area in fire_danger_areas if area.assessment is not None
         ],
     }
     # Compact (no indent/extra whitespace) - Gemini needs no pretty-printing,
@@ -389,8 +570,19 @@ def _compact_severity(
     return {
         "status": severity.status.value,
         "level": severity.level.value if severity.level is not None else None,
-        "score": severity.score,
+        "score": _present_score(severity.score),
     }
+
+
+# User-facing 0-100 operational scores (Fire Severity, Fire Danger) are sent
+# to the LLM at this precision, so answers never quote raw floats like
+# 82.5065916694979. Presentation only: the persisted/service values are never
+# modified. 0-1 values (model_score, confidences) are deliberately left as is.
+_PRESENTED_SCORE_DECIMALS = 1
+
+
+def _present_score(score: float | None) -> float | None:
+    return round(score, _PRESENTED_SCORE_DECIMALS) if score is not None else None
 
 
 def _compact_ml_assessment(
@@ -408,6 +600,153 @@ def _compact_ml_assessment(
         # lightweight dashboard summary) was available - never invented.
         "model_name": getattr(ml_source, "model_name", None),
         "model_version": getattr(ml_source, "model_version", None),
+        # How the detection decision was made: the decision mode, the
+        # deterministic rule's own status/confidence, and whether the model
+        # agreed with the rule - copied as persisted.
+        "detection_mode": _enum_value(getattr(ml_source, "mode", None)),
+        "rule_status": _enum_value(getattr(ml_source, "rule_status", None)),
+        "rule_confidence": getattr(ml_source, "rule_confidence", None),
+        "agreement": _enum_value(getattr(ml_source, "agreement", None)),
+    }
+
+
+def _enum_value(value: Any) -> Any:
+    return getattr(value, "value", value)
+
+
+def _compact_weather_conditions(conditions: AreaWeatherConditions) -> dict[str, Any]:
+    # No observation/assessment/station ids and no SIM-* station names.
+    return {
+        "area_name": conditions.area_name,
+        "observed_at": conditions.observed_at.isoformat(),
+        "assessed_at": conditions.assessed_at.isoformat(),
+        "station_count": conditions.station_count,
+        "temperature_c": conditions.temperature_c,
+        "relative_humidity_pct": conditions.relative_humidity_pct,
+        "wind_speed_kmh": conditions.wind_speed_kmh,
+        "wind_gust_kmh": conditions.wind_gust_kmh,
+    }
+
+
+_UNKNOWN_FIRE_LABEL = "an event that is not currently active"
+
+
+def _fire_labels_by_id(active_result: ActiveFireEventsResult) -> dict[int, str]:
+    """fire_event_id -> the label the LLM already knows the event by (its
+    location_name, else its internal event_ref) - so global-plan groups never
+    carry a fire_event_id."""
+    return {
+        summary.fire_event_id: summary.location_name or _event_ref_for_index(index)
+        for index, summary in enumerate(active_result.items)
+    }
+
+
+def _compact_global_response_plan(
+    global_plan: GlobalResponsePlanResponse | None, active_result: ActiveFireEventsResult
+) -> dict[str, Any] | None:
+    """The current global response plan's state, shortage and coverage groups -
+    copied as persisted (no recalculation), with no run/plan/fire ids."""
+    if global_plan is None:
+        return None
+    plan = global_plan.plan
+    coverage = global_plan.coverage
+    labels = _fire_labels_by_id(active_result)
+
+    def fire_names(fire_event_ids: Sequence[int]) -> list[str]:
+        return [labels.get(fire_event_id, _UNKNOWN_FIRE_LABEL) for fire_event_id in fire_event_ids]
+
+    return {
+        "state": coverage.state if coverage is not None else ("none" if plan is None else None),
+        "status": plan.status.value if plan is not None else None,
+        "coverage_score": plan.metrics.coverage_score if plan is not None else None,
+        "average_eta_seconds": plan.metrics.average_eta_seconds if plan is not None else None,
+        "total_required_resources": plan.shortage.total_required if plan is not None else None,
+        "total_desired_resources": plan.shortage.total_desired if plan is not None else None,
+        "total_assigned_resources": plan.shortage.total_assigned if plan is not None else None,
+        "unmet_required_resources": plan.shortage.unmet_required if plan is not None else None,
+        "unmet_desired_resources": plan.shortage.unmet_desired if plan is not None else None,
+        "covered_fires": fire_names(coverage.covered_fire_event_ids) if coverage is not None else None,
+        "pending_fires": fire_names(coverage.pending_fire_event_ids) if coverage is not None else None,
+        "unplannable_fires": fire_names(coverage.unplannable_fire_event_ids) if coverage is not None else None,
+        "monitoring_only_fires": fire_names(coverage.monitoring_fire_event_ids) if coverage is not None else None,
+    }
+
+
+def _compact_event_resource_requirements(event_plan: GlobalEventPlan | None) -> dict[str, Any] | None:
+    """This fire's persisted global-plan membership values; None when the
+    current global plan does not include it."""
+    if event_plan is None:
+        return None
+    return {
+        "minimum_required_resources": event_plan.minimum_resources,
+        "desired_resources": event_plan.desired_resources,
+        "assigned_resources": event_plan.assigned_resources,
+        "coverage_score": event_plan.coverage_score,
+        "average_eta_seconds": event_plan.average_eta_seconds,
+        "uncovered_target_count": len(event_plan.uncovered_targets),
+    }
+
+
+def _compact_station_availability(
+    event_details_by_id: dict[int, EventDetailsResult | None],
+    event_plans_by_id: dict[int, GlobalEventPlan],
+) -> dict[str, Any] | None:
+    """Station counts as already computed in EventDetailsResult.station_summaries
+    (stored operational status), plus how many of each station's resources the
+    current global plan's actions commit. Only stations with no available
+    resources, any assigned/unavailable resources, or any commitment are
+    listed - never the full national catalog. `available` is never reduced by
+    `committed_to_current_plan`: they are separate facts. None when no active
+    event's details (the only source of station summaries) are available.
+    """
+    details = next(
+        (item for item in event_details_by_id.values() if item is not None and item.station_summaries), None
+    )
+    if details is None:
+        return None
+    station_names = {station.station_id: station.name for station in details.stations}
+    committed_by_station_id: dict[str, int] = {}
+    for event_plan in event_plans_by_id.values():
+        for action in event_plan.actions:
+            station_id = action.resource.station_id
+            committed_by_station_id[station_id] = committed_by_station_id.get(station_id, 0) + 1
+
+    summaries = details.station_summaries
+    relevant = [
+        {
+            "station_name": station_names.get(summary.station_id, "unnamed station"),
+            "total_resources": summary.total_resources,
+            "available": summary.available,
+            "assigned": summary.assigned_status,
+            "unavailable": summary.unavailable,
+            "committed_to_current_plan": committed_by_station_id.get(summary.station_id, 0),
+        }
+        for summary in summaries
+        if summary.available == 0
+        or summary.assigned_status > 0
+        or summary.unavailable > 0
+        or committed_by_station_id.get(summary.station_id, 0) > 0
+    ]
+    return {
+        "total_station_count": len(summaries),
+        "total_available_resources": sum(summary.available for summary in summaries),
+        "total_assigned_resources": sum(summary.assigned_status for summary in summaries),
+        "total_unavailable_resources": sum(summary.unavailable for summary in summaries),
+        "stations_with_no_available_resources_count": sum(1 for summary in summaries if summary.available == 0),
+        "listed_stations": sorted(relevant, key=lambda station: station["station_name"]),
+    }
+
+
+def _compact_fire_danger(area: FireDangerAreaSnapshot) -> dict[str, Any]:
+    # No assessment/area ids - area_name is what a conversational answer needs.
+    assessment = area.assessment
+    return {
+        "area_name": area.area_name,
+        "status": assessment.status.value,
+        "level": assessment.level.value if assessment.level is not None else None,
+        "score": _present_score(assessment.score),
+        "assessed_at": assessment.assessed_at.isoformat(),
+        "methodology": assessment.methodology,
     }
 
 

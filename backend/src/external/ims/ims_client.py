@@ -69,21 +69,16 @@ class IMSClient:
         return self._send_get_request(f"stations/{station_id}")
 
     def get_station_data(self, station_id: int) -> dict:
-        """Retrieve raw weather observation data for a single IMS station.
+        """Retrieve the latest raw observation for a single IMS station
+        (GET /stations/{id}/data/latest).
 
-        TODO: Verify against the real IMS API once API access is available.
-        We do not yet have the real IMS API token, so the exact observation
-        endpoint shape (e.g. time-range or channel-filtering query
-        parameters) has not been confirmed against a live response. This
-        currently targets the documented `/stations/{station_id}/data`
-        endpoint, which returns the station's latest reported channel data.
+        Verified against the real IMS API: the response is wrapped as
+        `{"stationId": ..., "data": [{"datetime": ..., "channels": [...]}]}`.
+        (The bare `/stations/{id}/data` path returns 404.)
         """
         self._validate_station_id(station_id)
         logger.info("Requesting IMS station data for station %s", station_id)
-        # TODO: Verify against the real IMS API once API access is available -
-        # confirm whether additional query params (time range, channel ids)
-        # are required/supported by this endpoint.
-        return self._send_get_request(f"stations/{station_id}/data")
+        return self._send_get_request(f"stations/{station_id}/data/latest")
 
     def _build_headers(self) -> dict[str, str]:
         """Build the authorization headers required by the IMS API.

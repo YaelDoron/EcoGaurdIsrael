@@ -163,15 +163,41 @@ def test_get_station_returns_parsed_json():
 # ---------------------------------------------------------------------------
 
 
-def test_get_station_data_returns_raw_channels_with_original_names():
+@pytest.mark.parametrize("station_id", [2, 17])
+def test_get_station_data_requests_latest_data_url(station_id):
+    client = make_client()
+
+    with patch("src.external.ims.ims_client.requests.get") as mock_get:
+        mock_get.return_value = FakeResponse(200, FIXTURES["observation"])
+        client.get_station_data(station_id)
+
+    called_url = mock_get.call_args.args[0]
+    assert called_url == f"{BASE_URL}/stations/{station_id}/data/latest"
+
+
+@pytest.mark.parametrize("station_id", [None, 0, -1, "abc"])
+def test_get_station_data_invalid_id_raises_without_http_request(station_id):
+    client = make_client()
+
+    with patch("src.external.ims.ims_client.requests.get") as mock_get:
+        with pytest.raises(IMSClientError):
+            client.get_station_data(station_id)
+
+    mock_get.assert_not_called()
+
+
+def test_get_station_data_returns_raw_wrapped_response_unchanged():
     client = make_client()
 
     with patch("src.external.ims.ims_client.requests.get") as mock_get:
         mock_get.return_value = FakeResponse(200, FIXTURES["observation"])
         result = client.get_station_data(17)
 
-    channel_names = {channel["name"] for channel in result["channels"]}
-    assert channel_names == {"TD", "RH", "WS", "WD", "WSmax", "Rain"}
+    # Real IMS shape is returned as-is; unwrapping `data[0]` is WeatherMapper's job.
+    assert result == FIXTURES["observation"]
+    assert result["stationId"] == 17
+    channel_names = {channel["name"] for channel in result["data"][0]["channels"]}
+    assert {"TD", "RH", "WS", "WD", "WSmax", "Rain"} <= channel_names
 
 
 def test_get_station_data_handles_missing_or_invalid_measurement():
@@ -181,7 +207,7 @@ def test_get_station_data_handles_missing_or_invalid_measurement():
         mock_get.return_value = FakeResponse(200, FIXTURES["observation_missing_measurement"])
         result = client.get_station_data(17)
 
-    rh_channel = next(c for c in result["channels"] if c["name"] == "RH")
+    rh_channel = next(c for c in result["data"][0]["channels"] if c["name"] == "RH")
     assert rh_channel["valid"] is False
     assert rh_channel["value"] is None
 

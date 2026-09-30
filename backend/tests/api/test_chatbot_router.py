@@ -363,3 +363,58 @@ def test_fake_chatbot_agent_only_exposes_ask():
     agent = FakeChatbotAgent()
     for forbidden in ("get_active_events", "get_event_details", "generate_content", "detect", "optimize"):
         assert not hasattr(agent, forbidden)
+
+
+def test_get_chatbot_agent_wires_weather_conditions_and_fire_danger_services(monkeypatch):
+    """Every collaborator comes from its own existing dependency factory
+    (replaced with sentinels here - no real repository, DB or Gemini client
+    is constructed)."""
+    import src.api.dependencies as dependencies
+    import src.api.routers.global_response_plan as global_plan_router
+
+    sentinels = {name: object() for name in ("active", "details", "weather", "danger", "global_plan", "gemini")}
+    monkeypatch.setattr(dependencies, "get_active_fire_events_service", lambda: sentinels["active"])
+    monkeypatch.setattr(dependencies, "get_event_details_service", lambda: sentinels["details"])
+    monkeypatch.setattr(dependencies, "get_weather_conditions_query_service", lambda: sentinels["weather"])
+    monkeypatch.setattr(dependencies, "get_fire_danger_query_service", lambda: sentinels["danger"])
+    monkeypatch.setattr(
+        global_plan_router, "get_global_response_plan_read_service", lambda: sentinels["global_plan"]
+    )
+    monkeypatch.setattr(dependencies, "GeminiClient", lambda: sentinels["gemini"])
+
+    agent = dependencies.get_chatbot_agent()
+
+    assert agent._active_fire_events_service is sentinels["active"]
+    assert agent._event_details_service is sentinels["details"]
+    assert agent._weather_conditions_query_service is sentinels["weather"]
+    assert agent._fire_danger_query_service is sentinels["danger"]
+    assert agent._global_response_plan_read_service is sentinels["global_plan"]
+    assert agent._gemini_client is sentinels["gemini"]
+
+
+def test_chatbot_reuses_the_global_response_plan_apis_own_read_service_factory(monkeypatch):
+    """The chatbot gets the same coverage-reporting, cache-sharing service the
+    Global Response Plan endpoint uses - built with a FireEventRepository so
+    the coverage report is enabled. Repositories are stubbed: no DB access."""
+    import src.api.routers.global_response_plan as global_plan_router
+
+    fake_fire_event_repository = object()
+    monkeypatch.setattr(global_plan_router, "FireEventRepository", lambda: fake_fire_event_repository)
+
+    service = global_plan_router.get_global_response_plan_read_service()
+
+    assert service._fire_event_repository is fake_fire_event_repository
+    assert service._plan_parts_cache is global_plan_router._PLAN_PARTS_CACHE
+
+
+def test_weather_conditions_dependency_returns_the_shared_read_service(monkeypatch):
+    import src.api.dependencies as dependencies
+    import src.services.weather.weather_conditions_query_service as weather_module
+
+    # Repositories are replaced so no session factory / DB engine is touched.
+    monkeypatch.setattr(weather_module, "FireDangerAssessmentRepository", lambda: object())
+    monkeypatch.setattr(weather_module, "WeatherRepository", lambda: object())
+
+    service = dependencies.get_weather_conditions_query_service()
+
+    assert isinstance(service, weather_module.WeatherConditionsQueryService)

@@ -19,9 +19,11 @@ class WeatherCollectionResult:
     - stations_received: number of raw station items IMS returned.
     - stations_processed: number of stations successfully mapped AND
       persisted. Each raw station contributes to exactly one of
-      stations_processed / stations_failed, never both.
+      stations_processed / stations_failed / stations_skipped.
     - stations_failed: number of stations that failed mapping or
       persistence (observation collection was never attempted for these).
+    - stations_skipped: number of stations IMS reports as `active: false`;
+      they are neither persisted nor queried for observations.
     - observations_saved: number of newly-inserted observations.
     - duplicates_skipped: number of observations that already existed for
       their (station, timestamp) - a normal condition, not a failure.
@@ -33,6 +35,7 @@ class WeatherCollectionResult:
     stations_received: int = 0
     stations_processed: int = 0
     stations_failed: int = 0
+    stations_skipped: int = 0
     observations_saved: int = 0
     duplicates_skipped: int = 0
     observations_failed: int = 0

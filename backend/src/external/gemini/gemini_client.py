@@ -14,8 +14,10 @@ client always raised - see `generate_content`'s own docstring for the exact
 policy. The final bounded attempt calls a configured fallback model instead
 of the primary one, but only when every attempt before it already failed
 transiently - an availability improvement only, never a general model
-switch. The public interface (constructor, `generate_content`, exception
-types) is otherwise unchanged.
+switch. A quota-exhausted 429 from the primary model switches to that
+fallback model immediately instead (never retrying the exhausted primary).
+The public interface (constructor, `generate_content`, exception types) is
+otherwise unchanged.
 """
 from __future__ import annotations
 
@@ -132,6 +134,17 @@ class GeminiClient:
         final attempt's failure still becomes the same
         `GeminiServiceUnavailableError` this client always raised for these
         cases.
+
+        Quota exhaustion on the primary model: a clearly quota-exhausted 429
+        from the PRIMARY model is never retried on the primary, but - when a
+        fallback model distinct from the primary is configured - every
+        remaining attempt of the same bounded budget immediately goes to the
+        fallback model instead (no backoff; a different model has its own
+        quota). Those fallback attempts follow the normal transient-retry
+        rules above, and the primary is never called again. A quota/auth/
+        configuration failure from the fallback raises the same typed
+        exception as always. Without a distinct fallback, a quota-exhausted
+        429 still fails immediately.
         """
         if not self.api_key:
             raise GeminiConfigurationError("Gemini API key is not configured.")
@@ -142,9 +155,14 @@ class GeminiClient:
         if system_instruction is not None:
             payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
 
+        # Set once the PRIMARY model reports exhausted quota: every remaining
+        # attempt (still within the same _MAX_ATTEMPTS budget) goes to the
+        # fallback model, and the primary is never called again.
+        primary_quota_exhausted = False
+
         for attempt in range(1, _MAX_ATTEMPTS + 1):
-            model = self._model_for_attempt(attempt)
-            if model != self.model:
+            model = self.fallback_model if primary_quota_exhausted else self._model_for_attempt(attempt)
+            if model != self.model and not primary_quota_exhausted:
                 logger.error(
                     "Gemini primary model unavailable after transient failures; "
                     "using fallback model (primary=%s, fallback=%s)",
@@ -182,6 +200,24 @@ class GeminiClient:
                 logger.error("Gemini request failed (model=%s)", model)
                 raise GeminiClientError("Gemini request failed.") from exc
 
+            if (
+                attempt < _MAX_ATTEMPTS
+                and model == self.model
+                and self._has_distinct_fallback()
+                and response.status_code == _RATE_LIMIT_STATUS_CODE
+                and self._is_quota_exhausted(response)
+            ):
+                # Retrying the exhausted primary cannot help; a different
+                # model has its own quota, so switch to it immediately.
+                logger.error(
+                    "Gemini primary model quota exhausted (HTTP 429); "
+                    "switching to fallback model immediately (primary=%s, fallback=%s)",
+                    self.model,
+                    self.fallback_model,
+                )
+                primary_quota_exhausted = True
+                continue
+
             if attempt < _MAX_ATTEMPTS and self._is_retryable(response):
                 delay = self._retry_delay_seconds(response, attempt - 1)
                 logger.error(
@@ -217,9 +253,13 @@ class GeminiClient:
         reaching the final attempt at all already means every attempt
         before it failed transiently, since a non-transient failure always
         raises immediately from within the loop and never reaches here."""
-        if attempt == _MAX_ATTEMPTS and self.fallback_model and self.fallback_model != self.model:
+        if attempt == _MAX_ATTEMPTS and self._has_distinct_fallback():
             return self.fallback_model
         return self.model
+
+    def _has_distinct_fallback(self) -> bool:
+        """A fallback only exists when it is configured AND differs from the primary model."""
+        return bool(self.fallback_model) and self.fallback_model != self.model
 
     @staticmethod
     def _payload_for_model(payload: dict[str, Any], model: str) -> dict[str, Any]:
