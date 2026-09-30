@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from types import SimpleNamespace
 
@@ -147,17 +148,67 @@ def test_read_router_endpoint_runs_inside_the_read_only_scope():
 
 
 def test_only_the_pure_read_routers_get_the_read_only_scope():
+    """Every /api/v1 operation (enumerated from the public OpenAPI schema) is
+    sent a real request, with `read_only_request` replaced - via FastAPI's
+    public dependency_overrides - by a recorder that notes it ran and then
+    short-circuits the request (HTTP 418) so no scoped endpoint body or
+    database read ever executes. This observes the scope actually being
+    applied at request time, instead of reading route internals that newer
+    FastAPI versions wrap in `_IncludedRouter` objects (no `.dependant`/
+    `.path`). The unscoped routers' collaborators are faked so nothing real
+    (simulation run, Gemini call) can happen."""
+    from unittest.mock import MagicMock
+
+    from fastapi import HTTPException
+
+    from src.api.app import create_app
+    from src.api.dependencies import get_chatbot_agent, get_simulation_run_manager
     from src.api.read_only_request import read_only_request
-    from src.api.routers import v1_router
+
+    scope_ran_for: list[bool] = []
+
+    # No parameters on purpose: this module uses `from __future__ import
+    # annotations`, so a locally-imported annotation could not be resolved by
+    # FastAPI. Each request is sent one at a time, so a count suffices.
+    async def recording_read_only_request():
+        scope_ran_for.append(True)
+        raise HTTPException(status_code=418, detail="read-only scope reached")
+
+    class FakeChatbotAgent:
+        def ask(self, question, *, history=()):
+            return "fake answer"
+
+    app = create_app()
+    app.dependency_overrides[read_only_request] = recording_read_only_request
+    app.dependency_overrides[get_chatbot_agent] = lambda: FakeChatbotAgent()
+    app.dependency_overrides[get_simulation_run_manager] = lambda: MagicMock()
+    client = TestClient(app, raise_server_exceptions=False)
+
+    operations = [
+        (path, method.upper())
+        for path, item in app.openapi()["paths"].items()
+        if path.startswith("/api/v1/")
+        for method in item
+    ]
+    assert operations, "no /api/v1 operations found"
 
     scoped_prefixes = set()
     unscoped_prefixes = set()
-    for route in v1_router.routes:
-        dependencies = {dependency.call for dependency in route.dependant.dependencies}
-        target = scoped_prefixes if read_only_request in dependencies else unscoped_prefixes
-        target.add(route.path.split("/")[3])
+    scoped_methods = set()
+    for path, method in operations:
+        concrete_path = re.sub(r"\{[^}]+\}", "1", path)
+        before = len(scope_ran_for)
+        response = client.request(method, concrete_path, json={"question": "q"} if method == "POST" else None)
+        scoped = len(scope_ran_for) > before
+        # Status and recorder agree: the short-circuit happened iff the scope ran.
+        assert (response.status_code == 418) is scoped, (method, path, response.status_code)
+        (scoped_prefixes if scoped else unscoped_prefixes).add(path.split("/")[3])
+        if scoped:
+            scoped_methods.add(method)
+
     assert "simulation" in unscoped_prefixes and "chatbot" in unscoped_prefixes
     assert {"fire-events", "global-response-plan", "response-plans", "operations"} <= scoped_prefixes
-    assert all(
-        "GET" in route.methods for route in v1_router.routes if read_only_request in {d.call for d in route.dependant.dependencies}
-    )
+    assert {"simulation", "chatbot"}.isdisjoint(scoped_prefixes)
+    # Only pure GET reads ever run inside the read-only scope.
+    assert scoped_methods == {"GET"}
+    assert connection.is_read_only_database_access() is False

@@ -554,16 +554,35 @@ def test_repeated_get_calls_read_method_only_and_returns_same_content():
 
 
 def test_existing_fire_danger_and_fire_events_routes_are_still_registered():
+    """Proves each pre-existing GET route still routes, via Starlette's public
+    `route.matches(scope)` - which every entry of `app.routes` implements,
+    including the `_IncludedRouter` wrappers newer FastAPI versions put there
+    instead of flat routes exposing `.path`. Each path template is exercised
+    with concrete sample parameters."""
+    from starlette.routing import Match
+
     app = create_app()
 
-    paths = {route.path for route in app.routes}
+    def is_routed(path: str) -> bool:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "root_path": "",
+            "app": app,
+            "headers": [],
+            "query_string": b"",
+        }
+        return any(route.matches(scope)[0] is Match.FULL for route in app.routes)
 
-    assert "/api/v1/fire-danger/areas/latest" in paths
-    assert "/api/v1/fire-danger/areas/{area_id}/latest" in paths
-    assert "/api/v1/fire-danger/assessments/{assessment_id}" in paths
-    assert "/api/v1/fire-events/active" in paths
-    assert "/api/v1/fire-events/{fire_event_id}/details" in paths
-    assert "/api/v1/operations/activity/{activity_type}/{entity_id}" in paths
+    assert is_routed("/api/v1/fire-danger/areas/latest")  # /api/v1/fire-danger/areas/latest
+    assert is_routed("/api/v1/fire-danger/areas/area-carmel/latest")  # .../areas/{area_id}/latest
+    assert is_routed("/api/v1/fire-danger/assessments/1")  # .../assessments/{assessment_id}
+    assert is_routed("/api/v1/fire-events/active")  # /api/v1/fire-events/active
+    assert is_routed("/api/v1/fire-events/1/details")  # .../fire-events/{fire_event_id}/details
+    assert is_routed("/api/v1/operations/activity/fire_danger/1")  # .../activity/{activity_type}/{entity_id}
+    # Control: the check really distinguishes registered from unregistered paths.
+    assert not is_routed("/api/v1/fire-danger/not-a-registered-route")
 
 
 # ---------------------------------------------------------------------------

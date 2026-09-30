@@ -50,13 +50,18 @@ class WeatherMapper:
 
         `stationId`, `name`, `location.latitude` and `location.longitude`
         are mandatory. `regionId` and `active` are optional and default to
-        `None` when absent - values are never invented.
+        `None` when absent - values are never invented. The real IMS API
+        returns `regionId: 0` for some stations, meaning "no region"; it is
+        mapped to `None`.
         """
         station_id = raw_station.get("stationId")
         name = raw_station.get("name")
         location = raw_station.get("location") or {}
         latitude = WeatherMapper._to_float(location.get("latitude"))
         longitude = WeatherMapper._to_float(location.get("longitude"))
+        region_id = raw_station.get("regionId")
+        if type(region_id) is int and region_id == 0:
+            region_id = None
 
         if station_id is None:
             raise MissingRequiredWeatherFieldError("Raw IMS station is missing required field 'stationId'.")
@@ -77,7 +82,7 @@ class WeatherMapper:
                 name=name,
                 latitude=latitude,
                 longitude=longitude,
-                region_id=raw_station.get("regionId"),
+                region_id=region_id,
                 active=raw_station.get("active"),
             )
         except ValueError as exc:
@@ -92,21 +97,35 @@ class WeatherMapper:
     def map_observation(raw_observation: dict[str, Any]) -> WeatherObservation:
         """Convert a raw IMS observation dict into a WeatherObservation.
 
-        `stationId` and `datetime` are mandatory. Each of the six
-        wildfire-relevant channels (TD, RH, WS, WD, WSmax, Rain) is optional:
-        a missing or invalid channel results in `None` for that field rather
-        than rejecting the whole observation. Unknown channels are ignored.
+        Expects the real IMS `/stations/{id}/data/latest` shape:
+        `{"stationId": ..., "data": [{"datetime": ..., "channels": [...]}]}`.
+        `stationId` (top level), a non-empty `data` list, and `data[0].datetime`
+        are mandatory. Each of the six wildfire-relevant channels (TD, RH, WS,
+        WD, WSmax, Rain) is optional: a missing or invalid channel results in
+        `None` for that field rather than rejecting the whole observation.
+        Unknown channels are ignored.
         """
         station_id = raw_observation.get("stationId")
-        raw_timestamp = raw_observation.get("datetime")
-
         if station_id is None:
             raise MissingRequiredWeatherFieldError("Raw IMS observation is missing required field 'stationId'.")
+
+        data = raw_observation.get("data")
+        if data is None:
+            raise MissingRequiredWeatherFieldError("Raw IMS observation is missing required field 'data'.")
+        if not isinstance(data, list):
+            raise WeatherMappingError(f"Raw IMS observation 'data' must be a list, got {type(data).__name__}.")
+        if not data:
+            raise MissingRequiredWeatherFieldError("Raw IMS observation 'data' is empty.")
+        record = data[0]
+        if not isinstance(record, dict):
+            raise WeatherMappingError(f"Raw IMS observation 'data[0]' must be an object, got {type(record).__name__}.")
+
+        raw_timestamp = record.get("datetime")
         if not raw_timestamp:
-            raise MissingRequiredWeatherFieldError("Raw IMS observation is missing required field 'datetime'.")
+            raise MissingRequiredWeatherFieldError("Raw IMS observation is missing required field 'data[0].datetime'.")
 
         timestamp = WeatherMapper._parse_timestamp(raw_timestamp)
-        measurements = WeatherMapper._extract_channel_values(raw_observation.get("channels") or [])
+        measurements = WeatherMapper._extract_channel_values(record.get("channels") or [])
 
         try:
             return WeatherObservation(
@@ -121,11 +140,10 @@ class WeatherMapper:
     def _parse_timestamp(raw_timestamp: Any) -> datetime:
         """Parse the raw IMS datetime string into a Python datetime.
 
-        TODO: IMS timezone behavior has not been verified against a live
-        response yet (see Task 1). This preserves the timestamp exactly as
-        represented - naive or with whatever offset IMS provides - without
-        inventing a timezone correction. Revisit once real IMS responses are
-        available.
+        Verified against the real IMS API: timestamps are ISO 8601 in Israel
+        local time with an explicit offset (e.g. "2026-09-29T14:10:00+03:00",
+        "+02:00" in winter), so `fromisoformat` yields a timezone-aware
+        datetime and no conversion is needed.
         """
         if not isinstance(raw_timestamp, str):
             raise InvalidWeatherTimestampError(

@@ -65,11 +65,12 @@ class WeatherAgent:
             self._process_station(raw_station, result)
 
         logger.info(
-            "Weather collection completed: %d/%d stations processed, %d failed, "
+            "Weather collection completed: %d/%d stations processed, %d failed, %d inactive skipped, "
             "%d observations saved, %d duplicates skipped, %d observation failures",
             result.stations_processed,
             result.stations_received,
             result.stations_failed,
+            result.stations_skipped,
             result.observations_saved,
             result.duplicates_skipped,
             result.observations_failed,
@@ -80,8 +81,14 @@ class WeatherAgent:
         """Map, persist, and collect weather data for a single raw IMS station.
 
         Every failure path is caught here so one station's problem never
-        stops the rest of the run.
+        stops the rest of the run. Stations IMS reports as `active: false`
+        are skipped entirely - their "latest" data can be decades old.
         """
+        if raw_station.get("active") is False:
+            logger.info("Skipping inactive IMS station %s", raw_station.get("stationId"))
+            result.stations_skipped += 1
+            return
+
         try:
             station = self._weather_mapper.map_station(raw_station)
         except WeatherMappingError as exc:

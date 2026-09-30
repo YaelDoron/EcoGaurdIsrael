@@ -110,6 +110,7 @@ from src.repositories.weather_repository import WeatherRepository
 from src.services.fire_danger.fire_danger_query_service import FireDangerQueryService
 from src.services.fire_event_read.active_fire_events_service import ActiveFireEventsService
 from src.services.simulation_control.simulation_run_manager import SimulationRunManager
+from src.services.weather.weather_conditions_query_service import WeatherConditionsQueryService
 from src.utils.geo import resolve_nearest_containing_area_name
 
 MIN_ACTIVITY_LIMIT = 1
@@ -162,6 +163,7 @@ class OperationsOverviewQueryService:
         fire_severity_assessment_repository: FireSeverityAssessmentRepository | None = None,
         global_planning_run_repository: GlobalPlanningRunRepository | None = None,
         simulation_run_manager: SimulationRunManager | None = None,
+        weather_conditions_query_service: WeatherConditionsQueryService | None = None,
     ) -> None:
         """Wire every collaborator this snapshot composes.
 
@@ -189,6 +191,12 @@ class OperationsOverviewQueryService:
         )
         self._global_planning_run_repository = global_planning_run_repository or GlobalPlanningRunRepository()
         self._simulation_run_manager = simulation_run_manager or SimulationRunManager()
+        # Built from this service's own repositories by default, so the
+        # Weather Conditions rows read exactly the same data as before.
+        self._weather_conditions_query_service = weather_conditions_query_service or WeatherConditionsQueryService(
+            fire_danger_assessment_repository=self._fire_danger_assessment_repository,
+            weather_repository=self._weather_repository,
+        )
 
     def get_overview(
         self,
@@ -480,6 +488,10 @@ class OperationsOverviewQueryService:
         id the paired FIRE_DANGER item uses - the two are always derived
         from exactly one assessment, so they can never reference different
         assessments.
+
+        The averaging itself is WeatherConditionsQueryService's (shared with
+        ChatbotAgent); this method only selects the assessments and maps the
+        result to feed items.
         """
         stored_assessments = self._fire_danger_assessment_repository.get_recent_with_level_in(
             ALL_FIRE_DANGER_LEVELS, limit
@@ -487,43 +499,17 @@ class OperationsOverviewQueryService:
         if not stored_assessments:
             return []
 
-        all_observation_ids = tuple(
-            {observation_id for stored in stored_assessments for observation_id in stored.observation_ids}
-        )
-        observations_by_id = {
-            stored_observation.observation_id: stored_observation
-            for stored_observation in self._weather_repository.get_observations_by_ids(all_observation_ids)
-        }
-
         items = []
-        for stored in stored_assessments:
+        for result in self._weather_conditions_query_service.summarize_assessments(stored_assessments):
+            stored = result.stored_assessment
             assessment = stored.assessment
-            contributing = [
-                observations_by_id[observation_id]
-                for observation_id in stored.observation_ids
-                if observation_id in observations_by_id
-            ]
-            if not contributing:
-                # Defensive: a VALID HIGH+ assessment always has traced
-                # observations, but never fabricate a signal without them.
-                continue
-
-            temperatures = [c.observation.temperature for c in contributing if c.observation.temperature is not None]
-            humidities = [
-                c.observation.relative_humidity for c in contributing if c.observation.relative_humidity is not None
-            ]
-            wind_speeds = [c.observation.wind_speed for c in contributing if c.observation.wind_speed is not None]
-            gusts = [c.observation.wind_gust for c in contributing if c.observation.wind_gust is not None]
-            if not temperatures or not humidities or not wind_speeds:
-                continue
-
-            occurred_at = max(c.observation.timestamp for c in contributing)
+            conditions = result.conditions
             items.append(
                 OperationsActivityFeedItem(
                     activity_id=f"{OperationsActivityType.WEATHER_CONDITIONS.value}:{stored.assessment_id}",
                     activity_type=OperationsActivityType.WEATHER_CONDITIONS,
                     entity_id=stored.assessment_id,
-                    occurred_at=occurred_at,
+                    occurred_at=conditions.observed_at,
                     available_at=stored.created_at,
                     title=f"Weather Conditions - {assessment.area_name}",
                     location=OperationsActivityLocation(
@@ -533,10 +519,10 @@ class OperationsOverviewQueryService:
                         area_name=assessment.area_name,
                         fire_danger_level=assessment.level,
                         fire_danger_assessment_id=stored.assessment_id,
-                        temperature_c=sum(temperatures) / len(temperatures),
-                        relative_humidity_pct=sum(humidities) / len(humidities),
-                        wind_speed_kmh=sum(wind_speeds) / len(wind_speeds),
-                        wind_gust_kmh=(sum(gusts) / len(gusts)) if gusts else None,
+                        temperature_c=conditions.temperature_c,
+                        relative_humidity_pct=conditions.relative_humidity_pct,
+                        wind_speed_kmh=conditions.wind_speed_kmh,
+                        wind_gust_kmh=conditions.wind_gust_kmh,
                     ),
                 )
             )

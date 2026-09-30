@@ -33,53 +33,111 @@
   ],
   "observation": {
     "stationId": 17,
-    "datetime": "2026-09-02T12:30:00",
-    "channels": [
+    "data": [
       {
-        "name": "TD",
-        "value": 31.4,
-        "valid": true
-      },
-      {
-        "name": "RH",
-        "value": 42,
-        "valid": true
-      },
-      {
-        "name": "WS",
-        "value": 5.8,
-        "valid": true
-      },
-      {
-        "name": "WD",
-        "value": 240,
-        "valid": true
-      },
-      {
-        "name": "WSmax",
-        "value": 8.2,
-        "valid": true
-      },
-      {
-        "name": "Rain",
-        "value": 0,
-        "valid": true
+        "datetime": "2026-09-02T12:30:00+03:00",
+        "channels": [
+          {
+            "id": 1,
+            "name": "Rain",
+            "alias": null,
+            "value": 0.0,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 2,
+            "name": "WSmax",
+            "alias": null,
+            "value": 8.2,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 3,
+            "name": "WDmax",
+            "alias": null,
+            "value": 250.0,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 4,
+            "name": "WS",
+            "alias": null,
+            "value": 5.8,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 5,
+            "name": "WD",
+            "alias": null,
+            "value": 240.0,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 7,
+            "name": "TD",
+            "alias": null,
+            "value": 31.4,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 8,
+            "name": "RH",
+            "alias": null,
+            "value": 42.0,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 25,
+            "name": "TW",
+            "alias": null,
+            "value": -999.0,
+            "status": 2,
+            "valid": false,
+            "description": null
+          }
+        ]
       }
     ]
   },
   "observation_missing_measurement": {
     "stationId": 17,
-    "datetime": "2026-09-02T12:30:00",
-    "channels": [
+    "data": [
       {
-        "name": "TD",
-        "value": 31.4,
-        "valid": true
-      },
-      {
-        "name": "RH",
-        "value": null,
-        "valid": false
+        "datetime": "2026-09-02T12:30:00+03:00",
+        "channels": [
+          {
+            "id": 7,
+            "name": "TD",
+            "alias": null,
+            "value": 31.4,
+            "status": 1,
+            "valid": true,
+            "description": null
+          },
+          {
+            "id": 8,
+            "name": "RH",
+            "alias": null,
+            "value": null,
+            "status": 2,
+            "valid": false,
+            "description": null
+          }
+        ]
       }
     ]
   }

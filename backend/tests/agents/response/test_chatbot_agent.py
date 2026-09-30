@@ -35,13 +35,35 @@ from src.api.schemas.event_details import (
     SpreadPredictionCellResponse,
     SpreadPredictionResponse,
 )
+from src.api.schemas.global_response_plan import (
+    GlobalEventPlan,
+    GlobalPlanCoverage,
+    GlobalPlanMetrics,
+    GlobalPlanResponse,
+    GlobalPlanShortage,
+    GlobalResponsePlanResponse,
+)
+from src.api.schemas.response_plans import (
+    ResponsePlanActionResponse,
+    ResponsePlanResourceResponse,
+    ResponsePlanRouteResponse,
+    ResponsePlanTargetResponse,
+)
 from src.external.gemini.exceptions import GeminiServiceUnavailableError
+from src.models.global_planning_run_status import GlobalPlanningRunStatus
 from src.models.active_fire_events import (
     ActiveFireEventMLSummary,
     ActiveFireEventSeveritySummary,
     ActiveFireEventsResult,
     ActiveFireEventSummary,
 )
+from src.models.fire_danger_areas import (
+    FireDangerAreaAssessmentSummary,
+    FireDangerAreasResult,
+    FireDangerAreaSnapshot,
+)
+from src.models.fire_danger_assessment_status import FireDangerAssessmentStatus
+from src.models.fire_danger_level import FireDangerLevel
 from src.models.fire_detection_decision_mode import FireDetectionDecisionMode
 from src.models.fire_detection_ml_rule_agreement import FireDetectionMLRuleAgreement
 from src.models.fire_detection_status import FireDetectionStatus
@@ -51,6 +73,7 @@ from src.models.fire_severity_level import FireSeverityLevel
 from src.models.fire_spread_prediction_status import FireSpreadPredictionStatus
 from src.models.resource_status import ResourceStatus
 from src.models.response_target_type import ResponseTargetType
+from src.services.weather.weather_conditions_query_service import AreaWeatherConditions
 
 DETECTED_AT = datetime(2026, 9, 20, 10, 0, 0, tzinfo=timezone.utc)
 UPDATED_AT = DETECTED_AT + timedelta(minutes=5)
@@ -67,6 +90,16 @@ FORBIDDEN_INTERNAL_ID_KEYS = (
     "station_id",
     "assessment_id",
     "plan_id",
+    "fire_danger_assessment_id",
+    "observation_id",
+    "observation_ids",
+    "station_external_id",
+    "area_id",
+    "response_plan_id",
+    "run_id",
+    "resource_id",
+    "fire_event_ids",
+    "covered_fire_event_ids",
 )
 
 
@@ -93,6 +126,36 @@ class FakeEventDetailsService:
     def get_event_details(self, fire_event_id, *, as_of=None):
         self.requested_ids.append(fire_event_id)
         return self._details_by_id.get(fire_event_id)
+
+
+class FakeWeatherConditionsQueryService:
+    def __init__(self, conditions: tuple[AreaWeatherConditions, ...] = ()):
+        self._conditions = tuple(conditions)
+        self.calls = 0
+
+    def get_latest_for_all_areas(self):
+        self.calls += 1
+        return self._conditions
+
+
+class FakeFireDangerQueryService:
+    def __init__(self, areas: tuple[FireDangerAreaSnapshot, ...] = ()):
+        self._areas = tuple(areas)
+        self.requested_as_of: list = []
+
+    def get_latest_for_all_areas(self, *, as_of=None):
+        self.requested_as_of.append(as_of)
+        return FireDangerAreasResult(as_of=as_of, areas=self._areas)
+
+
+class FakeGlobalResponsePlanReadService:
+    def __init__(self, response: GlobalResponsePlanResponse | None = None):
+        self._response = response
+        self.requested_as_of: list = []
+
+    def get_current(self, *, as_of=None):
+        self.requested_as_of.append(as_of)
+        return self._response if self._response is not None else GlobalResponsePlanResponse(as_of=as_of, plan=None)
 
 
 class FakeGeminiClient:
@@ -343,6 +406,9 @@ def make_agent(
     active_result: ActiveFireEventsResult,
     details_by_id: dict[int, EventDetailsResult | None],
     gemini_client: FakeGeminiClient | None = None,
+    weather_conditions: tuple[AreaWeatherConditions, ...] = (),
+    fire_danger_areas: tuple[FireDangerAreaSnapshot, ...] = (),
+    global_plan: GlobalResponsePlanResponse | None = None,
 ) -> tuple[ChatbotAgent, FakeActiveFireEventsService, FakeEventDetailsService, FakeGeminiClient]:
     active_service = FakeActiveFireEventsService(active_result)
     details_service = FakeEventDetailsService(details_by_id)
@@ -350,6 +416,9 @@ def make_agent(
     agent = ChatbotAgent(
         active_fire_events_service=active_service,
         event_details_service=details_service,
+        weather_conditions_query_service=FakeWeatherConditionsQueryService(weather_conditions),
+        fire_danger_query_service=FakeFireDangerQueryService(fire_danger_areas),
+        global_response_plan_read_service=FakeGlobalResponsePlanReadService(global_plan),
         gemini_client=gemini,
     )
     return agent, active_service, details_service, gemini
@@ -1313,15 +1382,20 @@ def test_fakes_expose_no_recalculation_methods():
     for fake in (
         FakeActiveFireEventsService(make_active_result()),
         FakeEventDetailsService({}),
+        FakeWeatherConditionsQueryService(),
+        FakeFireDangerQueryService(),
         FakeGeminiClient(),
     ):
         for forbidden in (
             "detect",
+            "assess",
             "assess_severity",
             "predict_spread",
             "generate_targets",
             "optimize",
             "plan_route",
+            "collect",
+            "get_station_data",
         ):
             assert not hasattr(fake, forbidden)
 
@@ -1382,7 +1456,12 @@ def _make_fully_populated_details() -> EventDetailsResult:
 def _ask_with_fully_populated_event(**event_overrides):
     event = make_active_event(fire_event_id=1, location_name="Haifa", **event_overrides)
     details = _make_fully_populated_details()
-    agent, _, _, gemini = make_agent(active_result=make_active_result(event), details_by_id={1: details})
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(event),
+        details_by_id={1: details},
+        weather_conditions=(make_weather_conditions(),),
+        fire_danger_areas=(make_fire_danger_area(),),
+    )
     agent.ask("What is the status of the fire in Haifa, including its response plan?")
     return sent_snapshot(gemini), raw_snapshot_text(gemini)
 
@@ -1769,3 +1848,960 @@ def test_system_instruction_explains_reasons_without_inventing_causes():
     assert "does not mean an external service failed" in lowered
     assert "not supported by the current spread model, not that vegetation data is missing" in lowered
     assert "when insufficient_data_reason is null" in lowered
+
+
+# ---------------------------------------------------------------------------
+# Area-level context: Weather Conditions + Fire Danger, and the ML/hybrid
+# detection explanation fields
+# ---------------------------------------------------------------------------
+
+WEATHER_OBSERVED_AT = AS_OF - timedelta(minutes=4)
+DANGER_ASSESSED_AT = AS_OF - timedelta(minutes=3)
+
+
+def make_weather_conditions(**overrides) -> AreaWeatherConditions:
+    values = dict(
+        area_name="Judean Hills Demo Area",
+        observed_at=WEATHER_OBSERVED_AT,
+        assessed_at=DANGER_ASSESSED_AT,
+        station_count=3,
+        temperature_c=37.5,
+        relative_humidity_pct=16.5,
+        wind_speed_kmh=19.8,
+        wind_gust_kmh=30.3,
+    )
+    values.update(overrides)
+    return AreaWeatherConditions(**values)
+
+
+def make_fire_danger_area(
+    *,
+    area_name="Judean Hills Demo Area",
+    status=FireDangerAssessmentStatus.VALID,
+    level=FireDangerLevel.HIGH,
+    score=32.5,
+) -> FireDangerAreaSnapshot:
+    return FireDangerAreaSnapshot(
+        area_id="judean_hills",
+        area_name=area_name,
+        area_latitude=31.665,
+        area_longitude=35.045,
+        area_radius_km=5.0,
+        assessment=FireDangerAreaAssessmentSummary(
+            assessment_id=1488,
+            status=status,
+            score=score,
+            level=level,
+            assessed_at=DANGER_ASSESSED_AT,
+            methodology="ffwi",
+            methodology_version="1.0",
+        ),
+    )
+
+
+def _ask_with_area_context(*, weather_conditions=(), fire_danger_areas=(), events=()):
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(*events),
+        details_by_id={},
+        weather_conditions=tuple(weather_conditions),
+        fire_danger_areas=tuple(fire_danger_areas),
+    )
+    agent.ask("מה תנאי מזג האוויר בהרי יהודה?")
+    return sent_snapshot(gemini), raw_snapshot_text(gemini)
+
+
+def test_snapshot_includes_weather_conditions_with_the_stored_values():
+    snapshot, _ = _ask_with_area_context(weather_conditions=(make_weather_conditions(),))
+
+    assert snapshot["weather_conditions"] == [
+        {
+            "area_name": "Judean Hills Demo Area",
+            "observed_at": WEATHER_OBSERVED_AT.isoformat(),
+            "assessed_at": DANGER_ASSESSED_AT.isoformat(),
+            "station_count": 3,
+            "temperature_c": 37.5,
+            "relative_humidity_pct": 16.5,
+            "wind_speed_kmh": 19.8,
+            "wind_gust_kmh": 30.3,
+        }
+    ]
+
+
+def test_weather_conditions_without_gust_keeps_gust_null_not_fabricated():
+    snapshot, _ = _ask_with_area_context(weather_conditions=(make_weather_conditions(wind_gust_kmh=None),))
+
+    assert snapshot["weather_conditions"][0]["wind_gust_kmh"] is None
+
+
+def test_weather_and_danger_include_areas_without_an_active_fire():
+    # Only Galilee has an active fire; Jerusalem Forest and Judean Hills do not.
+    snapshot, _ = _ask_with_area_context(
+        events=(make_active_event(fire_event_id=1, location_name="Galilee Demo Area"),),
+        weather_conditions=(
+            make_weather_conditions(area_name="Jerusalem Forest Demo Area", temperature_c=35.0),
+            make_weather_conditions(area_name="Judean Hills Demo Area"),
+        ),
+        fire_danger_areas=(
+            make_fire_danger_area(area_name="Jerusalem Forest Demo Area", level=FireDangerLevel.VERY_HIGH, score=55.6),
+            make_fire_danger_area(area_name="Judean Hills Demo Area"),
+        ),
+    )
+
+    assert [event["location_name"] for event in snapshot["active_fire_events"]] == ["Galilee Demo Area"]
+    assert [item["area_name"] for item in snapshot["weather_conditions"]] == [
+        "Jerusalem Forest Demo Area",
+        "Judean Hills Demo Area",
+    ]
+    assert snapshot["weather_conditions"][0]["temperature_c"] == 35.0
+    assert [item["area_name"] for item in snapshot["fire_danger"]] == [
+        "Jerusalem Forest Demo Area",
+        "Judean Hills Demo Area",
+    ]
+
+
+def test_weather_is_top_level_and_never_attached_to_an_event():
+    snapshot, _ = _ask_with_area_context(
+        events=(make_active_event(fire_event_id=1, location_name="Judean Hills Demo Area"),),
+        weather_conditions=(make_weather_conditions(),),
+        fire_danger_areas=(make_fire_danger_area(),),
+    )
+
+    event_context = snapshot["active_fire_events"][0]
+    assert "weather_conditions" not in event_context
+    assert "fire_danger" not in event_context
+
+
+def test_snapshot_includes_fire_danger_entries():
+    snapshot, _ = _ask_with_area_context(fire_danger_areas=(make_fire_danger_area(),))
+
+    assert snapshot["fire_danger"] == [
+        {
+            "area_name": "Judean Hills Demo Area",
+            "status": "valid",
+            "level": "high",
+            "score": 32.5,
+            "assessed_at": DANGER_ASSESSED_AT.isoformat(),
+            "methodology": "ffwi",
+        }
+    ]
+
+
+def test_insufficient_data_fire_danger_is_kept_with_null_level_and_score():
+    snapshot, _ = _ask_with_area_context(
+        fire_danger_areas=(
+            make_fire_danger_area(status=FireDangerAssessmentStatus.INSUFFICIENT_DATA, level=None, score=None),
+        )
+    )
+
+    entry = snapshot["fire_danger"][0]
+    assert entry["status"] == "insufficient_data"
+    assert entry["level"] is None
+    assert entry["score"] is None
+
+
+def test_fire_danger_area_without_any_assessment_is_omitted():
+    area = FireDangerAreaSnapshot(
+        area_id="golan",
+        area_name="Golan Heights Demo Area",
+        area_latitude=33.0,
+        area_longitude=35.7,
+        area_radius_km=5.0,
+        assessment=None,
+    )
+    snapshot, _ = _ask_with_area_context(fire_danger_areas=(area,))
+
+    assert snapshot["fire_danger"] == []
+
+
+def test_empty_weather_and_danger_sections_are_explicit_empty_lists():
+    snapshot, _ = _ask_with_area_context()
+
+    assert snapshot["weather_conditions"] == []
+    assert snapshot["fire_danger"] == []
+
+
+def test_area_sections_contain_no_internal_ids():
+    snapshot, raw_text = _ask_with_area_context(
+        weather_conditions=(make_weather_conditions(),), fire_danger_areas=(make_fire_danger_area(),)
+    )
+
+    area_keys = set(_walk_keys(snapshot["weather_conditions"])) | set(_walk_keys(snapshot["fire_danger"]))
+    for forbidden_key in FORBIDDEN_INTERNAL_ID_KEYS:
+        assert forbidden_key not in area_keys
+    # The fake assessment id (1488) and the area_id slug never reach the LLM.
+    assert "1488" not in raw_text
+    assert "judean_hills" not in raw_text
+
+
+def test_area_services_are_read_once_per_question_as_of_the_snapshot_instant():
+    agent, _, _, gemini = make_agent(active_result=make_active_result(), details_by_id={})
+
+    agent.ask("איזה אזור נמצא בסכנת השריפה הגבוהה ביותר?")
+
+    assert agent._fire_danger_query_service.requested_as_of == [AS_OF]
+    assert agent._weather_conditions_query_service.calls == 1
+
+
+def test_ml_assessment_includes_the_detection_explanation_fields():
+    snapshot, _ = _ask_with_fully_populated_event()
+
+    ml_assessment = snapshot["active_fire_events"][0]["ml_assessment"]
+    assert ml_assessment["detection_mode"] == "shadow"
+    assert ml_assessment["rule_status"] == "confirmed"
+    assert ml_assessment["rule_confidence"] == 0.9
+    assert ml_assessment["agreement"] == "agree_fire"
+    assert ml_assessment["model_score"] == 0.87
+    assert ml_assessment["model_name"] == "fire_detection_logistic_v3"
+    assert ml_assessment["model_version"] == "3.0"
+
+
+def test_ml_summary_fallback_never_fabricates_rule_fields():
+    event = make_active_event(fire_event_id=1, ml_summary=make_ml_summary(available=True, model_score=0.6))
+    agent, _, _, gemini = make_agent(active_result=make_active_result(event), details_by_id={})
+
+    agent.ask("Why was this fire detected?")
+
+    ml_assessment = sent_snapshot(gemini)["active_fire_events"][0]["ml_assessment"]
+    assert ml_assessment["model_score"] == 0.6
+    assert ml_assessment["rule_status"] is None
+    assert ml_assessment["rule_confidence"] is None
+    assert ml_assessment["agreement"] is None
+
+
+def test_existing_event_context_is_unchanged_alongside_area_sections():
+    snapshot, _ = _ask_with_fully_populated_event()
+
+    assert set(snapshot["active_fire_events"][0]) == {
+        "event_ref",
+        "location_name",
+        "latitude",
+        "longitude",
+        "status",
+        "detected_at",
+        "updated_at",
+        "detection_confidence",
+        "event_details_available",
+        "severity",
+        "ml_assessment",
+        "detection_evidence",
+        "spread_predictions",
+        "targets",
+        "current_response_plan",
+        "resource_requirements",
+    }
+    assert set(snapshot) == {
+        "as_of",
+        "active_fire_event_count",
+        "active_fire_events",
+        "weather_conditions",
+        "fire_danger",
+        "global_response_plan",
+        "station_availability",
+    }
+
+
+def test_history_is_still_trimmed_to_eight_messages_with_area_sections_present():
+    history = [ChatMessage(role="user", content=f"message {i}") for i in range(10)]
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(),
+        details_by_id={},
+        weather_conditions=(make_weather_conditions(),),
+        fire_danger_areas=(make_fire_danger_area(),),
+    )
+
+    agent.ask("השווה את מזג האוויר בירושלים ובהרי יהודה", history=history)
+
+    history_turns = gemini.calls[-1]["contents"][:-1]
+    assert len(history_turns) == MAX_CHAT_HISTORY_MESSAGES == 8
+    assert history_turns[0]["parts"][0]["text"] == "message 2"
+    assert history_turns[-1]["parts"][0]["text"] == "message 9"
+
+
+def test_system_instruction_contains_weather_rules():
+    for fragment in (
+        "weather_conditions",
+        "aggregates (means) of the",
+        "name the EcoGuard area whose data you used",
+        "observed_at",
+        "weather data is currently unavailable for",
+        "Wind direction and rainfall are unavailable",
+    ):
+        assert fragment in _SYSTEM_INSTRUCTION, fragment
+
+
+def test_system_instruction_distinguishes_fire_danger_from_severity():
+    for fragment in (
+        "fire_danger",
+        "environmental wildfire risk assessed for an AREA",
+        "it is NOT the Severity of an already detected wildfire",
+        "A Fire Danger question does not",
+    ):
+        assert fragment in _SYSTEM_INSTRUCTION, fragment
+
+
+def test_system_instruction_never_answers_weather_with_no_active_wildfire():
+    assert "never answer a weather" in _SYSTEM_INSTRUCTION
+    assert "or Fire Danger question by saying there is no active wildfire" in _SYSTEM_INSTRUCTION
+
+
+def test_system_instruction_requires_transparent_location_mapping():
+    assert "Jerusalem Forest Demo Area" in _SYSTEM_INSTRUCTION
+    assert "Judean Hills Demo Area" in _SYSTEM_INSTRUCTION
+    assert "always state the" in _SYSTEM_INSTRUCTION
+
+
+def test_system_instruction_explains_detection_fields_and_keeps_model_score_rule():
+    for fragment in ("detection_mode", "rule_status", "rule_confidence", "agreement"):
+        assert fragment in _SYSTEM_INSTRUCTION
+    assert "NOT a calibrated real-world" in _SYSTEM_INSTRUCTION
+
+
+# ---------------------------------------------------------------------------
+# Presentation precision of operational scores (presentation only)
+# ---------------------------------------------------------------------------
+
+RAW_SEVERITY_SCORE = 82.5065916694979
+RAW_FIRE_DANGER_SCORE = 31.785239339370694
+RAW_MODEL_SCORE = 0.9872608038579626
+
+
+def _ask_with_raw_precision_scores():
+    severity = make_severity_response(score=RAW_SEVERITY_SCORE)
+    details = make_event_details(severity=severity, ml_assessment=make_ml_assessment_response(model_score=RAW_MODEL_SCORE))
+    danger_area = make_fire_danger_area(score=RAW_FIRE_DANGER_SCORE)
+    event = make_active_event(fire_event_id=1, location_name="Jerusalem Forest Demo Area")
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(event),
+        details_by_id={1: details},
+        fire_danger_areas=(danger_area,),
+    )
+    agent.ask("מה רמת סכנת השריפה וחומרת השריפה בירושלים?")
+    return sent_snapshot(gemini), raw_snapshot_text(gemini), severity, danger_area
+
+
+def test_severity_score_is_presented_to_one_decimal():
+    snapshot, _, _, _ = _ask_with_raw_precision_scores()
+
+    assert snapshot["active_fire_events"][0]["severity"]["score"] == 82.5
+
+
+def test_fire_danger_score_is_presented_to_one_decimal():
+    snapshot, _, _, _ = _ask_with_raw_precision_scores()
+
+    assert snapshot["fire_danger"][0]["score"] == 31.8
+
+
+def test_raw_score_precision_never_reaches_the_llm():
+    _, raw_text, _, _ = _ask_with_raw_precision_scores()
+
+    assert repr(RAW_SEVERITY_SCORE) not in raw_text
+    assert repr(RAW_FIRE_DANGER_SCORE) not in raw_text
+    assert "82.50659" not in raw_text
+    assert "31.78523" not in raw_text
+
+
+def test_underlying_service_values_are_not_modified():
+    _, _, severity, danger_area = _ask_with_raw_precision_scores()
+
+    assert severity.score == RAW_SEVERITY_SCORE
+    assert danger_area.assessment.score == RAW_FIRE_DANGER_SCORE
+
+
+def test_severity_summary_fallback_score_is_also_presented_to_one_decimal():
+    event = make_active_event(fire_event_id=1, severity=make_severity(score=RAW_SEVERITY_SCORE))
+    agent, _, _, gemini = make_agent(active_result=make_active_result(event), details_by_id={})
+
+    agent.ask("What is the severity?")
+
+    assert sent_snapshot(gemini)["active_fire_events"][0]["severity"]["score"] == 82.5
+
+
+def test_model_score_keeps_its_own_precision_and_is_not_rounded_like_a_score():
+    snapshot, _, _, _ = _ask_with_raw_precision_scores()
+
+    # 0-1 model output: rounding to one decimal would turn 0.987 into 1.0.
+    assert snapshot["active_fire_events"][0]["ml_assessment"]["model_score"] == RAW_MODEL_SCORE
+
+
+def test_missing_scores_stay_null_rather_than_being_rounded():
+    snapshot, _ = _ask_with_area_context(
+        fire_danger_areas=(
+            make_fire_danger_area(status=FireDangerAssessmentStatus.INSUFFICIENT_DATA, level=None, score=None),
+        )
+    )
+
+    assert snapshot["fire_danger"][0]["score"] is None
+
+
+def test_weather_values_are_passed_through_unchanged():
+    snapshot, _ = _ask_with_area_context(weather_conditions=(make_weather_conditions(wind_speed_kmh=34.300000000000004),))
+
+    assert snapshot["weather_conditions"][0]["wind_speed_kmh"] == 34.300000000000004
+
+
+def test_system_instruction_treats_single_field_weather_questions_as_weather_questions():
+    weather_rule = _SYSTEM_INSTRUCTION[_SYSTEM_INSTRUCTION.index("Weather:") : _SYSTEM_INSTRUCTION.index("Fire Danger:")]
+    for field in ("temperature", "relative humidity", "wind speed", "wind gust", "general weather conditions"):
+        assert field in weather_rule, field
+    assert "a question about any one of these is a weather question" in weather_rule
+    assert "must use weather_conditions" in weather_rule.replace("\n", " ")
+
+
+# ---------------------------------------------------------------------------
+# Global Response Plan, per-fire resource requirements, station availability
+# ---------------------------------------------------------------------------
+
+from src.api.schemas.event_details import StationSummaryResponse  # noqa: E402
+
+JERUSALEM_ID, JUDEAN_ID, GALILEE_ID, INACTIVE_ID = 101, 102, 103, 999
+
+
+def make_plan_action(resource_id: str, station_id: str, station_name: str, *, eta=300.0, distance=4200.0):
+    return ResponsePlanActionResponse(
+        resource=ResponsePlanResourceResponse(
+            resource_id=resource_id, station_id=station_id, station_name=station_name, origin=None
+        ),
+        target=ResponsePlanTargetResponse(
+            response_target_id=7001, target_type="active_fire", priority_score=0.9, latitude=31.77, longitude=35.14
+        ),
+        route=ResponsePlanRouteResponse(
+            status=None, eta_seconds=eta, distance_meters=distance, node_path=[1, 2, 3], path_coordinates=None
+        ),
+    )
+
+
+def make_global_event_plan(fire_event_id: int, **overrides) -> GlobalEventPlan:
+    values = dict(
+        fire_event_id=fire_event_id,
+        response_plan_id=5000 + fire_event_id,
+        severity_level=FireSeverityLevel.CRITICAL,
+        severity_score=86.2,
+        minimum_resources=3,
+        desired_resources=4,
+        assigned_resources=4,
+        coverage_score=100.0,
+        average_eta_seconds=412.5,
+        actions=[],
+        uncovered_targets=[],
+    )
+    values.update(overrides)
+    return GlobalEventPlan(**values)
+
+
+def make_global_plan_response(*, state="current", events=None, coverage=True) -> GlobalResponsePlanResponse:
+    events = events if events is not None else [
+        make_global_event_plan(
+            JERUSALEM_ID,
+            minimum_resources=3,
+            desired_resources=4,
+            assigned_resources=2,
+            coverage_score=75.0,
+            average_eta_seconds=496.75941168474793,
+            actions=[
+                make_plan_action("TRUCK-11-1", "11", "Jerusalem Central"),
+                make_plan_action("TRUCK-11-2", "11", "Jerusalem Central"),
+            ],
+            uncovered_targets=[
+                ResponsePlanTargetResponse(
+                    response_target_id=7002, target_type="predicted_risk", priority_score=0.4, latitude=31.7, longitude=35.1
+                )
+            ],
+        ),
+        make_global_event_plan(JUDEAN_ID, minimum_resources=2, desired_resources=3, assigned_resources=3),
+    ]
+    return GlobalResponsePlanResponse(
+        as_of=AS_OF,
+        plan=GlobalPlanResponse(
+            run_id=4242,
+            started_at=AS_OF - timedelta(minutes=2),
+            completed_at=AS_OF - timedelta(minutes=1),
+            status=GlobalPlanningRunStatus.COMPLETED,
+            metrics=GlobalPlanMetrics(fitness_score=9032038.29813267, coverage_score=88.5, average_eta_seconds=455.1),
+            shortage=GlobalPlanShortage(
+                total_required=5, total_desired=7, total_assigned=5, unmet_required=0, unmet_desired=2
+            ),
+            optimization_config=None,
+            events=events,
+        ),
+        coverage=GlobalPlanCoverage(
+            state=state,
+            eligible_fire_event_ids=[JERUSALEM_ID, JUDEAN_ID, GALILEE_ID],
+            covered_fire_event_ids=[JERUSALEM_ID, JUDEAN_ID],
+            pending_fire_event_ids=[GALILEE_ID],
+            unplannable_fire_event_ids=[],
+            monitoring_fire_event_ids=[INACTIVE_ID],
+            eligible_count=3,
+            covered_count=2,
+        )
+        if coverage
+        else None,
+    )
+
+
+def make_station_summary(station_id: str, *, total: int, available: int, assigned: int = 0, unavailable: int = 0):
+    return StationSummaryResponse(
+        station_id=station_id,
+        total_resources=total,
+        available=available,
+        assigned_status=assigned,
+        unavailable=unavailable,
+        current_global_plan_allocations=[],
+    )
+
+
+STATIONS = [
+    make_station(station_id="10", name="Beit Shemesh"),
+    make_station(station_id="11", name="Jerusalem Central"),
+    make_station(station_id="12", name="Mevaseret"),
+    make_station(station_id="13", name="Haifa Port"),
+    make_station(station_id="14", name="Quiet Station"),
+]
+STATION_SUMMARIES = [
+    make_station_summary("10", total=3, available=0, unavailable=3),
+    make_station_summary("11", total=5, available=5),  # 2 committed by the plan, status still available
+    make_station_summary("12", total=4, available=3, assigned=1),
+    make_station_summary("13", total=4, available=3, unavailable=1),
+    make_station_summary("14", total=4, available=4),  # nothing notable -> omitted
+]
+
+
+def _ask_with_operations_context(*, global_plan=None, question="מה תוכנית התגובה הנוכחית?"):
+    events = (
+        make_active_event(fire_event_id=JERUSALEM_ID, location_name="Jerusalem Forest Demo Area"),
+        make_active_event(fire_event_id=JUDEAN_ID, location_name="Judean Hills Demo Area"),
+        make_active_event(fire_event_id=GALILEE_ID, location_name="Galilee Demo Area"),
+    )
+    details = make_event_details(stations=STATIONS, station_summaries=STATION_SUMMARIES)
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(*events),
+        details_by_id={JERUSALEM_ID: details, JUDEAN_ID: details, GALILEE_ID: details},
+        global_plan=global_plan if global_plan is not None else make_global_plan_response(),
+    )
+    agent.ask(question)
+    return sent_snapshot(gemini), raw_snapshot_text(gemini), agent
+
+
+def test_global_response_plan_section_carries_the_persisted_values_unchanged():
+    snapshot, _, _ = _ask_with_operations_context()
+
+    assert snapshot["global_response_plan"] == {
+        "state": "current",
+        "status": "completed",
+        "coverage_score": 88.5,
+        "average_eta_seconds": 455.1,
+        "total_required_resources": 5,
+        "total_desired_resources": 7,
+        "total_assigned_resources": 5,
+        "unmet_required_resources": 0,
+        "unmet_desired_resources": 2,
+        "covered_fires": ["Jerusalem Forest Demo Area", "Judean Hills Demo Area"],
+        "pending_fires": ["Galilee Demo Area"],
+        "unplannable_fires": [],
+        "monitoring_only_fires": [_UNKNOWN_FIRE_LABEL_FOR_TESTS],
+    }
+
+
+_UNKNOWN_FIRE_LABEL_FOR_TESTS = "an event that is not currently active"
+
+
+def test_global_plan_is_read_as_of_the_same_snapshot_instant():
+    _, _, agent = _ask_with_operations_context()
+
+    assert agent._global_response_plan_read_service.requested_as_of == [AS_OF]
+
+
+def test_per_fire_resource_requirements_are_passed_unchanged():
+    snapshot, _, _ = _ask_with_operations_context()
+    by_location = {event["location_name"]: event for event in snapshot["active_fire_events"]}
+
+    assert by_location["Jerusalem Forest Demo Area"]["resource_requirements"] == {
+        "minimum_required_resources": 3,
+        "desired_resources": 4,
+        "assigned_resources": 2,
+        "coverage_score": 75.0,
+        "average_eta_seconds": 496.75941168474793,
+        "uncovered_target_count": 1,
+    }
+    assert by_location["Judean Hills Demo Area"]["resource_requirements"]["assigned_resources"] == 3
+    # A fire the plan does not (yet) include has no requirements - never fabricated.
+    assert by_location["Galilee Demo Area"]["resource_requirements"] is None
+
+
+def test_station_availability_totals_and_relevant_stations_only():
+    snapshot, _, _ = _ask_with_operations_context()
+    availability = snapshot["station_availability"]
+
+    assert availability["total_station_count"] == 5
+    assert availability["total_available_resources"] == 15
+    assert availability["total_assigned_resources"] == 1
+    assert availability["total_unavailable_resources"] == 4
+    assert availability["stations_with_no_available_resources_count"] == 1
+    listed = {station["station_name"]: station for station in availability["listed_stations"]}
+    assert set(listed) == {"Beit Shemesh", "Jerusalem Central", "Mevaseret", "Haifa Port"}
+    assert "Quiet Station" not in listed
+
+
+def test_station_with_zero_available_is_listed():
+    snapshot, _, _ = _ask_with_operations_context()
+    beit_shemesh = next(s for s in snapshot["station_availability"]["listed_stations"] if s["station_name"] == "Beit Shemesh")
+
+    assert beit_shemesh == {
+        "station_name": "Beit Shemesh",
+        "total_resources": 3,
+        "available": 0,
+        "assigned": 0,
+        "unavailable": 3,
+        "committed_to_current_plan": 0,
+    }
+
+
+def test_stations_with_assigned_or_unavailable_resources_are_listed():
+    snapshot, _, _ = _ask_with_operations_context()
+    listed = {s["station_name"]: s for s in snapshot["station_availability"]["listed_stations"]}
+
+    assert listed["Mevaseret"]["assigned"] == 1
+    assert listed["Haifa Port"]["unavailable"] == 1
+
+
+def test_station_with_plan_commitments_is_listed_and_available_is_never_reduced():
+    snapshot, _, _ = _ask_with_operations_context()
+    jerusalem = next(
+        s for s in snapshot["station_availability"]["listed_stations"] if s["station_name"] == "Jerusalem Central"
+    )
+
+    assert jerusalem["committed_to_current_plan"] == 2
+    # Stored operational status, exactly as EventDetails computed it - never 5 - 2.
+    assert jerusalem["available"] == 5
+    assert jerusalem["total_resources"] == 5
+
+
+def test_no_free_resource_count_is_derived():
+    snapshot, raw_text, _ = _ask_with_operations_context()
+    keys = set(_walk_keys(snapshot))
+
+    assert not any("free" in key for key in keys)
+    assert "available_minus" not in raw_text
+
+
+def test_operations_context_leaks_no_internal_ids():
+    snapshot, raw_text, _ = _ask_with_operations_context()
+    present_keys = set(_walk_keys(snapshot))
+
+    for forbidden_key in FORBIDDEN_INTERNAL_ID_KEYS:
+        assert forbidden_key not in present_keys, forbidden_key
+    for internal_value in ("4242", "5101", "5102", "7001", "7002", "\"101\"", "\"999\"", "TRUCK-11-1"):
+        assert internal_value not in raw_text, internal_value
+    assert not any(isinstance(value, int) and value in (JERUSALEM_ID, JUDEAN_ID, GALILEE_ID, INACTIVE_ID)
+                   for value in snapshot["global_response_plan"]["covered_fires"])
+
+
+def test_ordinary_catalog_is_never_dumped():
+    _, raw_text, _ = _ask_with_operations_context()
+
+    assert "Quiet Station" not in raw_text
+
+
+def test_selected_station_eta_and_distance_remain_answerable():
+    event = make_active_event(fire_event_id=1, location_name="Jerusalem Forest Demo Area")
+    details = make_event_details(
+        stations=[make_station(station_id="11", name="Jerusalem Central")],
+        current_response_plan=make_response_plan(
+            actions=[make_response_action(station_id="11", eta_seconds=312.0, route_distance_meters=5100.0)]
+        ),
+    )
+    agent, _, _, gemini = make_agent(active_result=make_active_result(event), details_by_id={1: details})
+
+    agent.ask("איזו תחנה נבחרה בפועל לשריפה בירושלים?")
+
+    allocation = sent_snapshot(gemini)["active_fire_events"][0]["current_response_plan"]["allocations"][0]
+    assert allocation["station_name"] == "Jerusalem Central"
+    assert allocation["eta_seconds"] == 312.0
+    assert allocation["route_distance_meters"] == 5100.0
+
+
+@pytest.mark.parametrize("state", ["generating", "updating"])
+def test_generating_or_updating_plan_state_is_passed_through(state):
+    snapshot, _, _ = _ask_with_operations_context(global_plan=make_global_plan_response(state=state))
+
+    assert snapshot["global_response_plan"]["state"] == state
+
+
+def test_no_plan_is_represented_safely():
+    no_plan = GlobalResponsePlanResponse(
+        as_of=AS_OF,
+        plan=None,
+        coverage=GlobalPlanCoverage(
+            state="none",
+            eligible_fire_event_ids=[],
+            covered_fire_event_ids=[],
+            pending_fire_event_ids=[],
+            unplannable_fire_event_ids=[],
+            eligible_count=0,
+            covered_count=0,
+        ),
+    )
+    snapshot, _, _ = _ask_with_operations_context(global_plan=no_plan)
+
+    plan = snapshot["global_response_plan"]
+    assert plan["state"] == "none"
+    assert plan["status"] is None
+    assert plan["unmet_required_resources"] is None
+    assert plan["covered_fires"] == []
+    assert all(event["resource_requirements"] is None for event in snapshot["active_fire_events"])
+    # Station availability does not depend on a plan existing; nothing is committed.
+    listed = snapshot["station_availability"]["listed_stations"]
+    assert all(station["committed_to_current_plan"] == 0 for station in listed)
+    assert "Jerusalem Central" not in {station["station_name"] for station in listed}
+
+
+def test_plan_without_coverage_report_keeps_coverage_groups_unknown():
+    snapshot, _, _ = _ask_with_operations_context(global_plan=make_global_plan_response(coverage=False))
+
+    plan = snapshot["global_response_plan"]
+    assert plan["state"] is None
+    assert plan["covered_fires"] is None
+    assert plan["total_required_resources"] == 5
+
+
+def test_no_active_event_details_means_no_station_summary():
+    agent, _, _, gemini = make_agent(active_result=make_active_result(), details_by_id={})
+
+    agent.ask("יש תחנות כיבוי אש בלי כבאיות זמינות כרגע?")
+
+    assert sent_snapshot(gemini)["station_availability"] is None
+
+
+def test_baseline_is_not_added_to_the_snapshot():
+    snapshot, raw_text, _ = _ask_with_operations_context()
+
+    assert "baseline" not in raw_text
+    assert "improvement_percentage" not in set(_walk_keys(snapshot))
+
+
+def test_system_instruction_availability_semantics():
+    for fragment in (
+        "STORED OPERATIONAL STATUS",
+        "a resource can have status available while already being",
+        "Never subtract committed_to_current_plan from",
+        "never compute a number of \"free\" resources",
+        "EcoGuard does not",
+        "store that derived value directly",
+    ):
+        assert fragment in _SYSTEM_INSTRUCTION, fragment
+
+
+def test_system_instruction_constrains_closest_station_claims():
+    for fragment in (
+        "never claim that a",
+        "selected station is the closest station overall",
+        "shortest ETA among",
+        "but not the full",
+        "comparison against all stations",
+    ):
+        assert fragment in _SYSTEM_INSTRUCTION, fragment
+
+
+def test_system_instruction_forbids_inventing_a_plan_rationale():
+    for fragment in (
+        "rationale are not stored",
+        "never",
+        "invent why one station or one plan was chosen instead of another",
+    ):
+        assert fragment in _SYSTEM_INSTRUCTION, fragment
+
+
+def test_system_instruction_keeps_baseline_unavailable():
+    assert "baseline comparison is currently unavailable" in _SYSTEM_INSTRUCTION
+    assert "never infer or estimate an" in _SYSTEM_INSTRUCTION
+
+
+def test_system_instruction_covers_global_plan_states():
+    assert "global_response_plan is null or its state is \"none\", \"generating\" or" in _SYSTEM_INSTRUCTION
+
+
+# ---------------------------------------------------------------------------
+# Area follow-ups, Fire Danger freshness, optimization-method wording
+# ---------------------------------------------------------------------------
+
+
+def _instruction_section(start_marker: str, end_marker: str) -> str:
+    start = _SYSTEM_INSTRUCTION.index(start_marker)
+    return _SYSTEM_INSTRUCTION[start : _SYSTEM_INSTRUCTION.index(end_marker, start)].replace("\n", " ")
+
+
+def _area_follow_up_parts() -> tuple[str, str, str]:
+    """(whole rule, the 'inherits the area' examples, the 'general question' part)."""
+    rule = _instruction_section("Area follow-ups", "Global response plan:")
+    inherit_start = rule.index("these follow-ups refer to")
+    general_start = rule.index("is a GENERAL question")
+    return rule, rule[inherit_start:general_start], rule[general_start:]
+
+
+def test_system_instruction_has_area_follow_up_rule_for_weather_and_fire_danger():
+    rule, _, _ = _area_follow_up_parts()
+
+    assert "ONLY when its wording clearly refers back to that area" in rule
+    assert "weather_conditions and fire_danger, not only to active fire events" in rule
+    # History resolves only WHICH area; values always come from the current snapshot.
+    assert "never supplies or overrides values" in rule
+    assert "always take the values from the current snapshot" in rule
+
+
+def test_humidity_continuation_after_judean_hills_weather_inherits_judean_hills():
+    rule, inherits, general = _area_follow_up_parts()
+
+    assert 'after "מה מזג האוויר בהרי יהודה?", these follow-ups refer to Judean Hills Demo Area' in rule
+    assert '"ומה הלחות?"' in inherits and '"ומה הלחות?"' not in general
+
+
+def test_danger_there_after_judean_hills_weather_inherits_judean_hills():
+    _, inherits, general = _area_follow_up_parts()
+
+    assert '"ומה הסכנה שם?"' in inherits and '"ומה הסכנה שם?"' not in general
+
+
+@pytest.mark.parametrize(
+    "follow_up", ['"ומה הטמפרטורה?"', '"ומה רמת הסכנה באזור הזה?"', '"ומה המצב שם כרגע?"']
+)
+def test_explicit_back_references_inherit_the_previous_area(follow_up):
+    _, inherits, general = _area_follow_up_parts()
+
+    assert follow_up in inherits and follow_up not in general
+
+
+@pytest.mark.parametrize("general_question", ['"מה הסכנה כרגע?"', '"מה מצב הסכנה עכשיו?"', '"מה רמת הסכנה כרגע?"'])
+def test_general_current_danger_questions_do_not_inherit_the_previous_area(general_question):
+    rule, inherits, general = _area_follow_up_parts()
+
+    assert general_question in general and general_question not in inherits
+    assert "does NOT inherit the previous area, even right after an area-specific question" in rule
+
+
+def test_general_fire_danger_questions_answer_from_all_monitored_area_entries():
+    _, _, general = _area_follow_up_parts()
+
+    assert "general current Fire Danger questions" in general
+    assert "answer them from the current fire_danger entries for all relevant monitored areas" in general
+
+
+def test_general_and_back_referring_follow_ups_both_reach_gemini_with_all_areas_and_history():
+    history = [
+        ChatMessage(role="user", content="מה מזג האוויר בהרי יהודה?"),
+        ChatMessage(role="assistant", content="ב-Judean Hills Demo Area: 37.5°C."),
+    ]
+    areas = (
+        make_fire_danger_area(area_name="Jerusalem Forest Demo Area", level=FireDangerLevel.VERY_HIGH, score=55.6),
+        make_fire_danger_area(area_name="Judean Hills Demo Area"),
+    )
+    for question in ("מה הסכנה כרגע?", "ומה הסכנה שם?"):
+        agent, _, _, gemini = make_agent(
+            active_result=make_active_result(), details_by_id={}, fire_danger_areas=areas
+        )
+
+        agent.ask(question, history=history)
+
+        contents = gemini.calls[-1]["contents"]
+        assert [turn["parts"][0]["text"] for turn in contents[:-1]] == [message.content for message in history]
+        # Every monitored area's current entry is available, so a general question can cover them all.
+        assert [entry["area_name"] for entry in sent_snapshot(gemini)["fire_danger"]] == [
+            "Jerusalem Forest Demo Area",
+            "Judean Hills Demo Area",
+        ]
+        assert question in contents[-1]["parts"][0]["text"]
+
+
+def test_ambiguous_area_follow_up_must_not_be_guessed():
+    rule = _instruction_section("Area follow-ups", "Global response plan:")
+
+    assert "does not identify exactly one area unambiguously" in rule
+    assert "do not guess an area" in rule
+    assert "answer for the relevant available areas, or ask the user" in rule
+
+
+def test_area_follow_up_history_and_snapshot_are_both_sent_to_gemini():
+    history = [
+        ChatMessage(role="user", content="מה מזג האוויר בהרי יהודה?"),
+        ChatMessage(role="assistant", content="ב-Judean Hills Demo Area: 37.5°C."),
+    ]
+    agent, _, _, gemini = make_agent(
+        active_result=make_active_result(),
+        details_by_id={},
+        weather_conditions=(make_weather_conditions(),),
+        fire_danger_areas=(make_fire_danger_area(),),
+    )
+
+    agent.ask("מה הסכנה כרגע?", history=history)
+
+    contents = gemini.calls[-1]["contents"]
+    assert [turn["parts"][0]["text"] for turn in contents[:-1]] == [message.content for message in history]
+    snapshot = sent_snapshot(gemini)
+    assert snapshot["fire_danger"][0]["area_name"] == "Judean Hills Demo Area"
+    assert snapshot["weather_conditions"][0]["area_name"] == "Judean Hills Demo Area"
+
+
+def test_fire_danger_assessed_at_remains_available_and_assessments_may_update():
+    snapshot, _ = _ask_with_area_context(fire_danger_areas=(make_fire_danger_area(),))
+    assert snapshot["fire_danger"][0]["assessed_at"] == DANGER_ASSESSED_AT.isoformat()
+
+    rule = _instruction_section("Fire Danger: answer", "Location matching:")
+    assert "mention its assessment time (assessed_at) when useful" in rule
+    assert "updated over time" in rule
+    assert "a newer answer may legitimately differ from an earlier one" in rule
+
+
+def test_documented_optimization_method_is_represented_accurately():
+    rule = _instruction_section("Why a plan or station was selected", "Baseline comparison:")
+
+    for fragment in (
+        "required resource slots are prioritized first",
+        "then desired slots",
+        "then optional predicted-risk coverage",
+        "under scarcity, higher-severity needs are favored",
+        "shorter ETA / route distance and target priority affect the score",
+        "keeping existing valid assignments receives a stability preference",
+        "it is NOT a stored per-selection rationale",
+    ):
+        assert fragment in rule, fragment
+
+
+def test_instruction_never_asserts_guaranteed_coverage_or_eta_minimization_as_the_objective():
+    lowered = _SYSTEM_INSTRUCTION.lower().replace("\n", " ")
+    prohibitions = (
+        "never say the optimizer guarantees full or 100% coverage",
+        "never describe minimizing average eta as the sole optimization objective",
+    )
+    for prohibition in prohibitions:
+        assert prohibition in lowered, prohibition
+
+    # Outside those two prohibitions, no affirmative claim of either idea exists.
+    without_prohibitions = lowered
+    for prohibition in prohibitions:
+        without_prohibitions = without_prohibitions.replace(prohibition, "")
+    for affirmative in (
+        "guarantees",
+        "guarantee 100% coverage",
+        "100% coverage",
+        "the optimizer minimizes",
+        "aims to minimize",
+        "minimizing average eta",
+    ):
+        assert affirmative not in without_prohibitions, affirmative
+
+
+def test_no_per_station_causal_rationale_may_be_invented():
+    rule = _instruction_section("Why a plan or station was selected", "Baseline comparison:")
+
+    assert "Never claim that a particular station was chosen specifically because of one of these factors" in rule
+    assert "result metrics of the selected plan, not proof of why a particular station won over another" in rule
+    for part in (
+        "which station/resource was selected",
+        "the stored metrics of that result",
+        "the general optimization method above",
+        "the exact alternative-by-alternative rationale is not persisted",
+    ):
+        assert part in rule, part
+
+
+def test_system_instruction_says_scores_are_already_rounded():
+    assert "already rounded for" in _SYSTEM_INSTRUCTION
+    assert "never add decimal places" in _SYSTEM_INSTRUCTION

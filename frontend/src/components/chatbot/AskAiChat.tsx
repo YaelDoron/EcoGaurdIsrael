@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
+import { getPendingDemoRunId, useDemoRunStartVersion } from "../../hooks/demoRunStart";
 import type { ChatbotHistoryMessage, ChatbotRole } from "../../types/chatbot";
 import { AskAiButton, type AskAiButtonPosition } from "./AskAiButton";
 import { ChatWindow } from "./ChatWindow";
 
 const STORAGE_KEY = "ecoguard-ai-chat-history";
+
+// The run whose start already cleared the conversation - module-level so a
+// remount of AskAiChat never clears it a second time for the same run.
+let clearedForRunId: string | null = null;
 
 function isChatbotRole(value: unknown): value is ChatbotRole {
   return value === "user" || value === "assistant";
@@ -35,9 +40,16 @@ function loadStoredMessages(): ChatbotHistoryMessage[] {
   }
 }
 
-/** Persists only `{role, content}` - never an ApiError, Gemini metadata, or an event id. */
+/**
+ * Persists only `{role, content}` - never an ApiError, Gemini metadata, or an
+ * event id. An empty conversation removes the key rather than storing `[]`.
+ */
 function persistMessages(messages: ChatbotHistoryMessage[]): void {
   try {
+    if (messages.length === 0) {
+      window.sessionStorage.removeItem(STORAGE_KEY);
+      return;
+    }
     window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
   } catch {
     // sessionStorage may be unavailable (private browsing, quota) - the
@@ -68,6 +80,13 @@ function persistMessages(messages: ChatbotHistoryMessage[]): void {
  * naturally survives route navigation since `AskAiChat` stays mounted.
  * Deliberately NOT persisted to `sessionStorage` (only the conversation
  * is) and NOT coupled to `ChatWindow`'s own, independent drag position.
+ *
+ * A NEW simulation run makes the old conversation stale (it described the
+ * previous run's operational state), so the conversation is cleared once
+ * per run whose Start request was accepted - signalled by
+ * `confirmDemoRunStart(runId)` in hooks/demoRunStart.ts. That store is
+ * in-memory only, so a page refresh, route change or restart never clears
+ * the conversation, and a rejected start never confirms a run id.
  */
 export function AskAiChat() {
   const [isOpen, setIsOpen] = useState(false);
@@ -81,6 +100,20 @@ export function AskAiChat() {
   const appendMessage = useCallback((message: ChatbotHistoryMessage) => {
     setMessages((previous) => [...previous, message]);
   }, []);
+
+  /** The single conversation reset: in-memory messages, and (via persistMessages) sessionStorage. */
+  const clearConversation = useCallback(() => {
+    setMessages([]);
+  }, []);
+
+  useDemoRunStartVersion();
+  const startedRunId = getPendingDemoRunId();
+  useEffect(() => {
+    if (startedRunId !== null && clearedForRunId !== startedRunId) {
+      clearedForRunId = startedRunId;
+      clearConversation();
+    }
+  }, [startedRunId, clearConversation]);
 
   if (!isOpen) {
     return (

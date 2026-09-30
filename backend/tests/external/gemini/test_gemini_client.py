@@ -398,7 +398,8 @@ def test_transient_429_without_quota_wording_is_retried(no_real_sleep):
 
 
 def test_quota_exhausted_429_is_not_retried(no_real_sleep):
-    client = make_client()
+    # No distinct fallback configured: a quota-exhausted 429 still fails immediately.
+    client = make_client(fallback_model=MODEL)
 
     with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
         mock_post.return_value = FakeResponse(429, quota_exhausted_body())
@@ -406,6 +407,20 @@ def test_quota_exhausted_429_is_not_retried(no_real_sleep):
             client.generate_content(SAMPLE_CONTENTS)
 
     assert mock_post.call_count == 1
+    no_real_sleep.assert_not_called()
+
+
+def test_quota_exhausted_429_is_never_retried_on_the_same_primary_model(no_real_sleep):
+    # Distinct fallback configured: the primary is called exactly once.
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.return_value = FakeResponse(429, quota_exhausted_body())
+        with pytest.raises(GeminiServiceUnavailableError):
+            client.generate_content(SAMPLE_CONTENTS)
+
+    primary_calls = [url for url in _urls_called(mock_post) if f"/models/{MODEL}:" in url]
+    assert len(primary_calls) == 1
     no_real_sleep.assert_not_called()
 
 
@@ -571,7 +586,7 @@ def test_timeout_then_transient_503_then_success_still_retries_correctly(no_real
 
 
 def test_quota_exhausted_429_is_still_not_retried_after_timeout_change(no_real_sleep):
-    client = make_client()
+    client = make_client(fallback_model=MODEL)
 
     with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
         mock_post.return_value = FakeResponse(429, quota_exhausted_body())
@@ -756,8 +771,97 @@ def test_fallback_attempt_also_fails_transiently_raises_existing_service_error(n
     assert f"/models/{FALLBACK_MODEL}:generateContent" in urls[2]
 
 
-def test_quota_exhausted_429_never_uses_fallback(no_real_sleep):
+# ---------------------------------------------------------------------------
+# Primary quota exhausted -> immediate switch to a distinct fallback model
+# ---------------------------------------------------------------------------
+
+
+def test_primary_quota_exhausted_then_working_fallback_returns_the_fallback_answer(no_real_sleep):
     client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.side_effect = [
+            FakeResponse(429, quota_exhausted_body()),
+            FakeResponse(200, success_body("Jerusalem Forest humidity is 11.2%.")),
+        ]
+        result = client.generate_content(SAMPLE_CONTENTS)
+
+    assert result == "Jerusalem Forest humidity is 11.2%."
+    urls = _urls_called(mock_post)
+    assert len(urls) == 2
+    assert f"/models/{MODEL}:" in urls[0]
+    assert f"/models/{FALLBACK_MODEL}:" in urls[1]
+    # Immediate switch: no backoff before the fallback attempt.
+    no_real_sleep.assert_not_called()
+
+
+def test_primary_quota_exhausted_never_calls_the_primary_again(no_real_sleep):
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.side_effect = [
+            FakeResponse(429, quota_exhausted_body()),
+            FakeResponse(503),
+            FakeResponse(200, success_body("Recovered on the fallback.")),
+        ]
+        result = client.generate_content(SAMPLE_CONTENTS)
+
+    assert result == "Recovered on the fallback."
+    urls = _urls_called(mock_post)
+    assert len(urls) == 3  # bounded: never a 4th attempt
+    assert f"/models/{MODEL}:" in urls[0]
+    assert all(f"/models/{FALLBACK_MODEL}:" in url for url in urls[1:])
+    # The fallback's own transient 503 (attempt 2) keeps the normal ~2s backoff.
+    no_real_sleep.assert_called_once_with(2.0)
+
+
+def test_primary_and_fallback_both_quota_exhausted_fail_cleanly(no_real_sleep):
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.return_value = FakeResponse(429, quota_exhausted_body())
+        with pytest.raises(GeminiServiceUnavailableError, match="Gemini service returned HTTP 429."):
+            client.generate_content(SAMPLE_CONTENTS)
+
+    urls = _urls_called(mock_post)
+    assert len(urls) == 2
+    assert f"/models/{MODEL}:" in urls[0]
+    assert f"/models/{FALLBACK_MODEL}:" in urls[1]
+    no_real_sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_primary_quota_exhausted_then_fallback_auth_failure_raises_authentication_error(status_code, no_real_sleep):
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.side_effect = [FakeResponse(429, quota_exhausted_body()), FakeResponse(status_code)]
+        with pytest.raises(GeminiAuthenticationError):
+            client.generate_content(SAMPLE_CONTENTS)
+
+    assert mock_post.call_count == 2
+    no_real_sleep.assert_not_called()
+
+
+def test_primary_quota_exhausted_after_a_transient_failure_still_switches_to_fallback(no_real_sleep):
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.side_effect = [
+            FakeResponse(503),
+            FakeResponse(429, quota_exhausted_body()),
+            FakeResponse(200, success_body("Fallback answer.")),
+        ]
+        result = client.generate_content(SAMPLE_CONTENTS)
+
+    assert result == "Fallback answer."
+    urls = _urls_called(mock_post)
+    assert [f"/models/{MODEL}:" in url for url in urls] == [True, True, False]
+    assert f"/models/{FALLBACK_MODEL}:" in urls[2]
+
+
+def test_quota_exhausted_429_without_a_distinct_fallback_fails_immediately(no_real_sleep):
+    client = make_client(fallback_model=MODEL)
 
     with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
         mock_post.return_value = FakeResponse(429, quota_exhausted_body())
@@ -765,9 +869,49 @@ def test_quota_exhausted_429_never_uses_fallback(no_real_sleep):
             client.generate_content(SAMPLE_CONTENTS)
 
     assert mock_post.call_count == 1
-    urls = _urls_called(mock_post)
-    assert all(FALLBACK_MODEL not in url for url in urls)
     no_real_sleep.assert_not_called()
+
+
+def test_quota_exhausted_429_without_any_fallback_configured_fails_immediately(no_real_sleep):
+    client = make_client(fallback_model="")
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.return_value = FakeResponse(429, quota_exhausted_body())
+        with pytest.raises(GeminiServiceUnavailableError):
+            client.generate_content(SAMPLE_CONTENTS)
+
+    assert mock_post.call_count == 1
+
+
+def test_transient_429_on_primary_keeps_the_normal_retry_not_the_quota_switch(no_real_sleep):
+    client = make_client()
+
+    with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+        mock_post.side_effect = [
+            FakeResponse(429, transient_rate_limit_body()),
+            FakeResponse(200, success_body("Primary answer.")),
+        ]
+        result = client.generate_content(SAMPLE_CONTENTS)
+
+    assert result == "Primary answer."
+    assert all(f"/models/{MODEL}:" in url for url in _urls_called(mock_post))
+    no_real_sleep.assert_called_once_with(1.0)
+
+
+def test_quota_switch_log_names_models_and_never_the_api_key(caplog, no_real_sleep):
+    client = make_client()
+
+    with caplog.at_level("ERROR"):
+        with patch("src.external.gemini.gemini_client.requests.post") as mock_post:
+            mock_post.side_effect = [
+                FakeResponse(429, quota_exhausted_body()),
+                FakeResponse(200, success_body()),
+            ]
+            client.generate_content(SAMPLE_CONTENTS)
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("quota exhausted" in message and FALLBACK_MODEL in message for message in messages)
+    assert all(FAKE_API_KEY not in message for message in messages)
 
 
 @pytest.mark.parametrize("status_code", [401, 403])

@@ -3,7 +3,9 @@
 All inputs are deterministic dictionaries - no IMS/network/database access,
 no API token, and no reliance on system time.
 """
-from datetime import datetime
+import json
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -24,22 +26,31 @@ RAW_STATION = {
     "monitors": [],
 }
 
-RAW_OBSERVATION = {
-    "stationId": 17,
-    "datetime": "2026-09-02T12:30:00",
-    "channels": [
-        {"name": "TD", "value": 31.4, "valid": True},
-        {"name": "RH", "value": 42, "valid": True},
-        {"name": "WS", "value": 5.8, "valid": True},
-        {"name": "WD", "value": 240, "valid": True},
-        {"name": "WSmax", "value": 8.2, "valid": True},
-        {"name": "Rain", "value": 0, "valid": True},
-    ],
-}
+RAW_DATETIME = "2026-09-02T12:30:00+03:00"
+
+
+def _wrapped(record: dict, station_id: int = 17) -> dict:
+    """Build the real IMS `/data/latest` shape: `{"stationId", "data": [record]}`."""
+    return {"stationId": station_id, "data": [record]}
+
+
+RAW_OBSERVATION = _wrapped(
+    {
+        "datetime": RAW_DATETIME,
+        "channels": [
+            {"name": "TD", "value": 31.4, "valid": True},
+            {"name": "RH", "value": 42, "valid": True},
+            {"name": "WS", "value": 5.8, "valid": True},
+            {"name": "WD", "value": 240, "valid": True},
+            {"name": "WSmax", "value": 8.2, "valid": True},
+            {"name": "Rain", "value": 0, "valid": True},
+        ],
+    }
+)
 
 
 def _channels(*entries):
-    return {"stationId": 17, "datetime": "2026-09-02T12:30:00", "channels": list(entries)}
+    return _wrapped({"datetime": RAW_DATETIME, "channels": list(entries)})
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +78,25 @@ def test_map_station_missing_region_id_becomes_none():
     station = WeatherMapper.map_station(raw)
 
     assert station.region_id is None
+
+
+def test_map_station_region_id_zero_becomes_none():
+    # The real IMS API returns regionId 0 for some active stations (e.g. NAZARET_1m).
+    station = WeatherMapper.map_station({**RAW_STATION, "regionId": 0})
+
+    assert station.region_id is None
+
+
+@pytest.mark.parametrize("region_id", [1, 3, 8])
+def test_map_station_positive_region_id_is_unchanged(region_id):
+    station = WeatherMapper.map_station({**RAW_STATION, "regionId": region_id})
+
+    assert station.region_id == region_id
+
+
+def test_map_station_negative_region_id_still_raises_mapping_error():
+    with pytest.raises(WeatherMappingError):
+        WeatherMapper.map_station({**RAW_STATION, "regionId": -1})
 
 
 def test_map_station_missing_active_becomes_none():
@@ -139,6 +169,22 @@ def test_map_observation_valid_raw_observation_maps_all_six_channels():
     assert observation.wind_direction == 240
     assert observation.wind_gust == pytest.approx(8.2 * 3.6)  # 29.52 km/h
     assert observation.rainfall == 0
+
+
+def test_map_observation_real_shape_fixture_maps_channels_and_converts_wind():
+    fixtures_path = Path(__file__).resolve().parents[1] / "fixtures" / "ims_sample_response.json"
+    raw = json.loads(fixtures_path.read_text(encoding="utf-8"))["observation"]
+
+    observation = WeatherMapper.map_observation(raw)
+
+    assert observation.station_external_id == 17
+    assert observation.timestamp == datetime(2026, 9, 2, 12, 30, tzinfo=timezone(timedelta(hours=3)))
+    assert observation.temperature == 31.4
+    assert observation.relative_humidity == 42.0
+    assert observation.wind_speed == pytest.approx(5.8 * 3.6)
+    assert observation.wind_direction == 240.0
+    assert observation.wind_gust == pytest.approx(8.2 * 3.6)
+    assert observation.rainfall == 0.0
 
 
 @pytest.mark.parametrize(
@@ -218,18 +264,81 @@ def test_map_observation_missing_station_id_raises_mapping_error():
 
 
 def test_map_observation_missing_datetime_raises_mapping_error():
-    raw = dict(RAW_OBSERVATION)
-    del raw["datetime"]
+    raw = _wrapped({"channels": RAW_OBSERVATION["data"][0]["channels"]})
 
     with pytest.raises(MissingRequiredWeatherFieldError):
         WeatherMapper.map_observation(raw)
 
 
 def test_map_observation_invalid_datetime_raises_mapping_error():
-    raw = {**RAW_OBSERVATION, "datetime": "not-a-timestamp"}
+    raw = _wrapped({**RAW_OBSERVATION["data"][0], "datetime": "not-a-timestamp"})
 
     with pytest.raises(WeatherMappingError):
         WeatherMapper.map_observation(raw)
+
+
+def test_map_observation_reads_station_id_top_level_and_record_from_data_0():
+    raw = {
+        "stationId": 2,
+        "data": [
+            {
+                "datetime": "2026-09-29T14:10:00+03:00",
+                "channels": [
+                    {"id": 7, "name": "TD", "alias": None, "value": 26.2, "status": 1, "valid": True, "description": None},
+                    {"id": 8, "name": "RH", "alias": None, "value": 54.0, "status": 1, "valid": True, "description": None},
+                ],
+            }
+        ],
+    }
+
+    observation = WeatherMapper.map_observation(raw)
+
+    assert observation.station_external_id == 2
+    assert observation.timestamp == datetime(2026, 9, 29, 14, 10, tzinfo=timezone(timedelta(hours=3)))
+    assert observation.temperature == 26.2
+    assert observation.relative_humidity == 54.0
+
+
+def test_map_observation_missing_data_raises_mapping_error():
+    with pytest.raises(MissingRequiredWeatherFieldError):
+        WeatherMapper.map_observation({"stationId": 17})
+
+
+def test_map_observation_empty_data_raises_mapping_error():
+    with pytest.raises(MissingRequiredWeatherFieldError):
+        WeatherMapper.map_observation({"stationId": 17, "data": []})
+
+
+@pytest.mark.parametrize("data", [{"datetime": RAW_DATETIME, "channels": []}, "oops", 5])
+def test_map_observation_non_list_data_raises_mapping_error(data):
+    with pytest.raises(WeatherMappingError):
+        WeatherMapper.map_observation({"stationId": 17, "data": data})
+
+
+def test_map_observation_non_object_data_record_raises_mapping_error():
+    with pytest.raises(WeatherMappingError):
+        WeatherMapper.map_observation({"stationId": 17, "data": ["oops"]})
+
+
+def test_map_observation_legacy_flat_shape_is_rejected():
+    flat = {"stationId": 17, "datetime": RAW_DATETIME, "channels": [{"name": "TD", "value": 31.4, "valid": True}]}
+
+    with pytest.raises(MissingRequiredWeatherFieldError):
+        WeatherMapper.map_observation(flat)
+
+
+def test_map_observation_real_invalid_sentinel_channels_are_ignored():
+    # Real IMS marks bad readings `valid: false` with sentinel values like -999.
+    raw = _channels(
+        {"id": 7, "name": "TD", "value": -999.0, "status": 2, "valid": False},
+        {"id": 8, "name": "RH", "value": 54.0, "status": 1, "valid": True},
+        {"id": 25, "name": "TW", "value": -999.0, "status": 2, "valid": False},
+    )
+
+    observation = WeatherMapper.map_observation(raw)
+
+    assert observation.temperature is None
+    assert observation.relative_humidity == 54.0
 
 
 def test_map_observation_numeric_string_values_are_converted():
@@ -253,7 +362,7 @@ def test_map_observation_invalid_numeric_value_becomes_none():
 
 
 def test_map_observation_missing_channels_key_does_not_fail():
-    raw = {"stationId": 17, "datetime": "2026-09-02T12:30:00"}
+    raw = _wrapped({"datetime": RAW_DATETIME})
 
     observation = WeatherMapper.map_observation(raw)
 
@@ -269,7 +378,22 @@ def test_map_observation_timestamp_type_is_datetime():
     observation = WeatherMapper.map_observation(RAW_OBSERVATION)
 
     assert isinstance(observation.timestamp, datetime)
-    assert observation.timestamp == datetime(2026, 9, 2, 12, 30, 0)
+    assert observation.timestamp == datetime(2026, 9, 2, 12, 30, 0, tzinfo=timezone(timedelta(hours=3)))
+
+
+@pytest.mark.parametrize(
+    ("raw_datetime", "offset_hours"),
+    [("2026-09-29T14:10:00+03:00", 3), ("2026-02-10T14:10:00+02:00", 2)],
+)
+def test_map_observation_israel_offset_timestamp_stays_timezone_aware(raw_datetime, offset_hours):
+    raw = _wrapped({"datetime": raw_datetime, "channels": []})
+
+    observation = WeatherMapper.map_observation(raw)
+
+    assert observation.timestamp.tzinfo is not None
+    assert observation.timestamp.utcoffset() == timedelta(hours=offset_hours)
+    # Same instant as IMS reported - no conversion applied.
+    assert observation.timestamp == datetime.fromisoformat(raw_datetime)
 
 
 def test_map_observation_duplicate_channel_uses_last_valid_occurrence():
@@ -473,13 +597,17 @@ def _ims_observation(wind_speed_ms: float, wind_gust_ms: float) -> WeatherObserv
     return WeatherMapper.map_observation(
         {
             "stationId": 17,
-            "datetime": "2026-09-02T12:25:00+00:00",
-            "channels": [
-                {"name": "TD", "value": 31.4, "valid": True},
-                {"name": "RH", "value": 30, "valid": True},
-                {"name": "WS", "value": wind_speed_ms, "valid": True},
-                {"name": "WD", "value": 240, "valid": True},
-                {"name": "WSmax", "value": wind_gust_ms, "valid": True},
+            "data": [
+                {
+                    "datetime": "2026-09-02T12:25:00+00:00",
+                    "channels": [
+                        {"name": "TD", "value": 31.4, "valid": True},
+                        {"name": "RH", "value": 30, "valid": True},
+                        {"name": "WS", "value": wind_speed_ms, "valid": True},
+                        {"name": "WD", "value": 240, "valid": True},
+                        {"name": "WSmax", "value": wind_gust_ms, "valid": True},
+                    ],
+                }
             ],
         }
     )
