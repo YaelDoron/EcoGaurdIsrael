@@ -19,6 +19,45 @@ EcoGuard Israel is a wildfire detection and response-planning system for Israel.
 - **Dijkstra & Road Topography:** Real-time travel computation using OSMnx/NetworkX over OpenStreetMap data, ensuring ETAs reflect actual road constraints, not straight lines.
 - **Grounded AI Chatbot:** An LLM-powered operations assistant that strictly explains the current system snapshot and multi-language support.
 - **Production-Ready Architecture:** Clean domain-driven design, asynchronous event loops, PostgreSQL with exclusive locking to prevent race conditions, and comprehensive test coverage.
+
+---
+
+## Frontend Overview
+
+The dashboard includes:
+
+- **Active Wildfires** (`/events`): list and map of currently active (suspected/confirmed) fires
+- **Event Details** (`/events/:fireEventId`): detection, severity and spread for a single fire
+- **Response Plan** (`/events/:fireEventId/plan`, `/plans/:planId`): the response plan for one fire
+- **Global Response Plan** (`/response-plan`): a combined plan across all confirmed fires
+- **Simulation controls**: start and stop the demo simulation
+
+<br>
+<table align="center">
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/global_response_plan.png" width="800"><br>
+      <b>Global Response Plan</b>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <img src="docs/wildfire_spread_prediction.png" width="800"><br>
+      <b>Event Details</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="bottom">
+      <img src="docs/chatbot.png" height="330"><br>
+      <b>EcoGuard AI Chatbot</b>
+    </td>
+    <td align="center" valign="bottom">
+      <img src="docs/event_response_plan.png" height="330"><br>
+      <b>Event Response Plan</b>
+    </td>
+  </tr>
+</table>
+
 ---
 
 ## Getting Started
@@ -111,44 +150,6 @@ npm run build   # type-check and production build
 npm test        # run tests once (Vitest)
 npm run lint    # lint (oxlint)
 ```
----
-
-## Frontend Overview
-
-The dashboard includes:
-
-- **Active Wildfires** (`/events`): list and map of currently active (suspected/confirmed) fires
-- **Event Details** (`/events/:fireEventId`): detection, severity and spread for a single fire
-- **Response Plan** (`/events/:fireEventId/plan`, `/plans/:planId`): the response plan for one fire
-- **Global Response Plan** (`/response-plan`): a combined plan across all confirmed fires
-- **Simulation controls**: start and stop the demo simulation
-
-<br>
-<table align="center">
-  <tr>
-    <td colspan="2" align="center">
-      <img src="docs/global_response_plan.png" width="800"><br>
-      <b>Global Response Plan</b>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="2" align="center">
-      <img src="docs/wildfire_spread_prediction.png" width="800"><br>
-      <b>Event Details</b>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" valign="bottom">
-      <img src="docs/chatbot.png" height="330"><br>
-      <b>EcoGuard AI Chatbot</b>
-    </td>
-    <td align="center" valign="bottom">
-      <img src="docs/event_response_plan.png" height="330"><br>
-      <b>Event Response Plan</b>
-    </td>
-  </tr>
-</table>
-
 ---
 
 ## Demo Simulation and Presentation Mode
