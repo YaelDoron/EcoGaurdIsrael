@@ -7,9 +7,18 @@ EcoGuard Israel is a wildfire detection and response-planning system for Israel.
 </div>
 
 
+
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy, PostgreSQL (Neon) — `backend/`
 - **Frontend:** React + TypeScript + Vite — `frontend/`
 
+## Key Features & Engineering
+
+- **End-to-End Autonomous Pipeline:** From raw data (APIs/RSS) to a fully optimized routing and allocation plan, orchestrated by agents.
+- **Robust Fire Detection (ML):** Histogram Gradient Boosting (HGB) model evaluates 25 spatial/temporal features to separate true fires from noise, governed by a rigid confirmation policy.
+- **Global Resource Optimization (GA):** A Genetic Algorithm, evaluating all combinations to globally minimize ETA across all concurrent incidents.
+- **Dijkstra & Road Topography:** Real-time travel computation using OSMnx/NetworkX over OpenStreetMap data, ensuring ETAs reflect actual road constraints, not straight lines.
+- **Grounded AI Chatbot:** An LLM-powered operations assistant that strictly explains the current system snapshot and multi-language support.
+- **Production-Ready Architecture:** Clean domain-driven design, asynchronous event loops, PostgreSQL with exclusive locking to prevent race conditions, and comprehensive test coverage.
 ---
 
 ## Getting Started
