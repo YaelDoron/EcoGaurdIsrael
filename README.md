@@ -2,6 +2,10 @@
 
 EcoGuard Israel is a wildfire detection and response-planning system for Israel. It combines satellite hotspots (NASA FIRMS), weather data (IMS), news reports and land-cover data (Copernicus) to detect fires, assess severity, predict spread, and generate response plans. Results are shown in a React dashboard.
 
+<div align="center">
+  <img src="docs/dashboard.png" alt="Active Wildfires Dashboard" width="850">
+</div>
+
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy, PostgreSQL (Neon) — `backend/`
 - **Frontend:** React + TypeScript + Vite — `frontend/`
 
@@ -108,6 +112,30 @@ The dashboard includes:
 - **Response Plan** (`/events/:fireEventId/plan`, `/plans/:planId`): the response plan for one fire
 - **Global Response Plan** (`/response-plan`): a combined plan across all confirmed fires
 - **Simulation controls**: start and stop the demo simulation (see below)
+
+<br>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="docs/wildfire_event.png" width="400"><br>
+      <b>Event Details & Spread Prediction</b>
+    </td>
+    <td align="center">
+      <img src="docs/global_response_plan.png" width="400"><br>
+      <b>Global Response Plan</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="docs/chatbot.png" width="400"><br>
+      <b>EcoGuard AI Chatbot</b>
+    </td>
+    <td align="center">
+      <img src="docs/waze_navigation.png" width="400"><br>
+      <b>Waze Routing Integration</b>
+    </td>
+  </tr>
+</table>
 
 ---
 
