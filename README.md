@@ -112,7 +112,7 @@ The dashboard includes:
 - **Event Details** (`/events/:fireEventId`): detection, severity and spread for a single fire
 - **Response Plan** (`/events/:fireEventId/plan`, `/plans/:planId`): the response plan for one fire
 - **Global Response Plan** (`/response-plan`): a combined plan across all confirmed fires
-- **Simulation controls**: start and stop the demo simulation (see below)
+- **Simulation controls**: start and stop the demo simulation
 
 <br>
 <table align="center">
