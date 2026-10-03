@@ -142,13 +142,6 @@ The dashboard includes:
 
 ---
 
-## Backend API
-
-The FastAPI app lives in `backend/src/api/`. Versioned endpoints are under `/api/v1`. The routers cover fire events, fire danger, response plans, the global response plan, operations overview and activity, the chatbot, and simulation control. See `http://localhost:8000/docs` for the full, current list.
-
-
----
-
 ## Demo Simulation and Presentation Mode
 
 > Requires `ENABLE_DEMO_DATA_RESET=true` and `ENABLE_SIMULATION_CONTROL_API=true` in `.env`.
