@@ -6,6 +6,7 @@ EcoGuard Israel is a wildfire detection and response-planning system for Israel.
   <img src="docs/dashboard.png" alt="Active Wildfires Dashboard" width="850">
 </div>
 
+
 - **Backend:** Python 3.12, FastAPI, SQLAlchemy, PostgreSQL (Neon) — `backend/`
 - **Frontend:** React + TypeScript + Vite — `frontend/`
 
@@ -116,23 +117,25 @@ The dashboard includes:
 <br>
 <table align="center">
   <tr>
-    <td align="center">
-      <img src="docs/wildfire_event.png" width="400"><br>
-      <b>Event Details & Spread Prediction</b>
-    </td>
-    <td align="center">
-      <img src="docs/global_response_plan.png" width="400"><br>
+    <td colspan="2" align="center">
+      <img src="docs/global_response_plan.png" width="800"><br>
       <b>Global Response Plan</b>
     </td>
   </tr>
   <tr>
-    <td align="center">
-      <img src="docs/chatbot.png" width="400"><br>
+    <td colspan="2" align="center">
+      <img src="docs/wildfire_event.png" width="800"><br>
+      <b>Event Details</b>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" valign="bottom">
+      <img src="docs/chatbot.png" height="330"><br>
       <b>EcoGuard AI Chatbot</b>
     </td>
-    <td align="center">
-      <img src="docs/waze_navigation.png" width="400"><br>
-      <b>Waze Routing Integration</b>
+    <td align="center" valign="bottom">
+      <img src="docs/event_response_plan.png" height="330"><br>
+      <b>Event Response Plan</b>
     </td>
   </tr>
 </table>
