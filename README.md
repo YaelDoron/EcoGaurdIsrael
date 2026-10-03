@@ -124,7 +124,7 @@ The dashboard includes:
   </tr>
   <tr>
     <td colspan="2" align="center">
-      <img src="docs/wildfire_event.png" width="800"><br>
+      <img src="docs/wildfire_spread_prediction.png" width="800"><br>
       <b>Event Details</b>
     </td>
   </tr>
